@@ -1,0 +1,28 @@
+{
+  "name": "@reins/protocol",
+  "version": "0.1.0",
+  "description": "Wire format shared by the Reins app, Bridle, and Relay: Noise IK, tunnel frames, pairing payloads, relay muxing.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

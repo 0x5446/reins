@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# TypeScript build output. Every workspace compiles src/ into its own lib/.
+# tests/ is hand-written JavaScript, not output, and is committed.
+*/lib/
+*.tsbuildinfo
+
+# Generated Xcode project. project.yml is the source of truth; running
+# xcodegen produces this, and committing it means every file added shows up as
+# a conflict in a 3000-line pbxproj.
+ios/*.xcodeproj/
+ios/build/
+ios/DerivedData/
+
+# Local machine state. bridle.json holds this machine's static private key and
+# must never be committed; it lives in ~/.reins, but a stray REINS_HOME here
+# would put it in the tree.
+.reins/
+bridle.json
+
+# macOS
+.DS_Store

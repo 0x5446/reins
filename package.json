@@ -1,0 +1,26 @@
+{
+  "name": "reins-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "protocol",
+    "bridle",
+    "relay",
+    "e2e"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b protocol bridle relay e2e",
+    "typecheck": "tsc -b protocol bridle relay e2e --pretty false",
+    "clean": "tsc -b protocol bridle relay e2e --clean",
+    "test": "npm run build && node --test bridle/tests/*.test.js protocol/tests/*.test.js relay/tests/*.test.js",
+    "test:e2e": "npm run build && node --test --test-concurrency=1 e2e/tests/*.test.js",
+    "test:ios": "cd ios && ./run-tests.sh",
+    "vectors": "npm run build && node protocol/scripts/emit-vectors.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
