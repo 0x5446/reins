@@ -1,0 +1,195 @@
+/// Where messages get written.
+///
+/// One rule shapes the whole thing: sending must never be blocked. If a turn is
+/// running, the message steers it; if the machine is offline, the field still
+/// accepts text and says why it hasn't gone yet. A composer that greys itself out
+/// is a composer that loses what someone typed.
+
+import PhotosUI
+import SwiftUI
+
+struct Composer: View {
+    let running: Bool
+    let planning: Bool
+    let enabled: Bool
+    let onSend: (String, [PromptImage]) -> Void
+    let onStop: () -> Void
+
+    @State private var text = ""
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var images: [PromptImage] = []
+    @State private var loadingImages = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: Metrics.tight) {
+            if !images.isEmpty || loadingImages {
+                attachments
+            }
+            HStack(alignment: .bottom, spacing: Metrics.tight) {
+                PhotosPicker(selection: $picked, maxSelectionCount: 4, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 34)
+                }
+                .accessibilityLabel("Attach a photo")
+
+                TextField(prompt, text: $text, axis: .vertical)
+                    .font(.system(size: 16))
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .padding(.horizontal, Metrics.gap)
+                    .padding(.vertical, 8)
+                    .background(Palette.well, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+
+                action
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, Metrics.tight)
+        .padding(.bottom, Metrics.tight)
+        .background(.bar)
+        .task(id: picked.count) { await loadPicked() }
+    }
+
+    private var prompt: String {
+        if !enabled { return "Message — sends when reconnected" }
+        if planning { return "Reply — it’s planning first" }
+        if running { return "Steer it…" }
+        return "Message"
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        if running && text.isEmpty && images.isEmpty {
+            Button(action: onStop) {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Palette.bad, in: Circle())
+            }
+            .accessibilityLabel("Stop")
+        } else {
+            Button {
+                send()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(sendable ? Palette.accent : Color.secondary.opacity(0.4), in: Circle())
+            }
+            .disabled(!sendable)
+            .accessibilityLabel("Send")
+        }
+    }
+
+    private var sendable: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty
+    }
+
+    private var attachments: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Metrics.tight) {
+                ForEach(Array(images.enumerated()), id: \.offset) { index, image in
+                    ZStack(alignment: .topTrailing) {
+                        AttachmentThumb(image: ImageAttachment(id: "\(index)", mediaType: image.mediaType, base64: image.base64))
+                        Button {
+                            images.remove(at: index)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.white, .black.opacity(0.5))
+                        }
+                        .padding(2)
+                    }
+                }
+                if loadingImages {
+                    ProgressView()
+                        .frame(width: 56, height: 56)
+                        .background(Palette.well, in: RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(height: 60)
+    }
+
+    private func send() {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty || !images.isEmpty else { return }
+        onSend(body, images)
+        text = ""
+        images = []
+        picked = []
+    }
+
+    /// Downscale before encoding. A 12-megapixel photo is several megabytes of
+    /// base64 through a phone uplink for an image the model reads at a fraction of
+    /// that size, and the wait is the person's.
+    private func loadPicked() async {
+        guard !picked.isEmpty else { return }
+        loadingImages = true
+        defer { loadingImages = false }
+        var loaded: [PromptImage] = []
+        for item in picked {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            guard let shrunk = Composer.shrink(data) else { continue }
+            loaded.append(PromptImage(mediaType: "image/jpeg", base64: shrunk.base64EncodedString(), name: nil))
+        }
+        images.append(contentsOf: loaded)
+        picked = []
+    }
+
+    static func shrink(_ data: Data, longestSide: CGFloat = 1568) -> Data? {
+        #if canImport(UIKit)
+        guard let image = UIImage(data: data) else { return nil }
+        let side = max(image.size.width, image.size.height)
+        guard side > longestSide else { return image.jpegData(compressionQuality: 0.8) }
+        let scale = longestSide / side
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        return resized.jpegData(compressionQuality: 0.8)
+        #else
+        return data
+        #endif
+    }
+}
+
+/// Messages sent but not yet claimed by the agent. Shown above the composer so
+/// someone can see what is still coming and take one back.
+struct QueueStrip: View {
+    let queue: [QueuedMessage]
+    let onRemove: (QueuedMessage) -> Void
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(queue) { item in
+                HStack(spacing: Metrics.tight) {
+                    Image(systemName: item.placement == "steering" ? "arrow.turn.up.right" : "clock")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(item.text)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button {
+                        onRemove(item)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, Metrics.gap)
+                .padding(.vertical, 7)
+                .background(Palette.well, in: RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous))
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+    }
+}
