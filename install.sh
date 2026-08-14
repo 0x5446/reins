@@ -1,0 +1,121 @@
+#!/usr/bin/env sh
+#
+# Install the Reins Bridle on this machine.
+#
+# This is what `curl -fsSL https://reins.app/install | sh` fetches. It runs under
+# plain `sh` with no arguments and no assumptions, because the person running it
+# has just been told to paste a line into Terminal and is not going to debug it.
+#
+# What it does, in order: check Node, fetch the source, build it, put `bridle` on
+# the PATH, and hand over to `bridle pair`. What it does not do: install Node,
+# touch the harness, ask for a password, or write anywhere outside
+# ~/.reins and one symlink.
+#
+# Environment:
+#   REINS_REPO    git URL to install from (default: the public repo)
+#   REINS_REF     branch or tag (default: main)
+#   REINS_SRC     where to keep the checkout (default: ~/.reins/src)
+#                 (not REINS_HOME — the Bridle uses that for its own state)
+#   REINS_BIN     where to link the `bridle` command (default: first writable
+#                 of ~/.local/bin, /usr/local/bin)
+
+set -eu
+
+REPO="${REINS_REPO:-https://github.com/0x5446/reins.git}"
+REF="${REINS_REF:-main}"
+SRC_DIR="${REINS_SRC:-$HOME/.reins/src}"
+
+# Colour only when a human is watching. Piped output stays plain.
+if [ -t 1 ]; then
+  bold=$(printf '\033[1m'); dim=$(printf '\033[2m'); red=$(printf '\033[31m'); off=$(printf '\033[0m')
+else
+  bold=''; dim=''; red=''; off=''
+fi
+
+say() { printf '%s\n' "$*"; }
+step() { printf '%s==>%s %s\n' "$bold" "$off" "$*"; }
+fail() { printf '%s%s%s\n' "$red" "$*" "$off" >&2; exit 1; }
+
+# --- Node -------------------------------------------------------------------
+#
+# The Bridle needs Node 22 for the WebSocket and crypto APIs it uses. Installing
+# a language runtime behind someone's back is the kind of thing that makes an
+# installer untrustworthy, so this stops and says what to run instead.
+
+if ! command -v node >/dev/null 2>&1; then
+  say "Reins needs Node 22 or newer, and this Mac does not have Node."
+  say ""
+  say "  ${bold}brew install node${off}"
+  say ""
+  fail "Install Node, then run this again."
+fi
+
+node_major=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$node_major" -lt 22 ]; then
+  fail "Reins needs Node 22 or newer. This Mac has $(node -v). Try: brew upgrade node"
+fi
+
+command -v git >/dev/null 2>&1 || fail "Reins needs git. Install the Xcode command line tools: xcode-select --install"
+
+# --- Source -----------------------------------------------------------------
+
+if [ -d "$SRC_DIR/.git" ]; then
+  step "Updating Reins in $SRC_DIR"
+  git -C "$SRC_DIR" fetch --quiet --depth 1 origin "$REF"
+  git -C "$SRC_DIR" checkout --quiet FETCH_HEAD
+else
+  step "Downloading Reins into $SRC_DIR"
+  mkdir -p "$(dirname "$SRC_DIR")"
+  rm -rf "$SRC_DIR"
+  git clone --quiet --depth 1 --branch "$REF" "$REPO" "$SRC_DIR" 2>/dev/null \
+    || fail "Could not download Reins from $REPO. If this is a private repo, run: git clone $REPO $SRC_DIR"
+fi
+
+step "Building"
+# Dev dependencies included on purpose: TypeScript is one of them, and the
+# Bridle ships as source rather than as a published tarball.
+( cd "$SRC_DIR" && npm install --silent --no-audit --no-fund >/dev/null )
+( cd "$SRC_DIR" && npx tsc -b protocol bridle )
+
+# --- PATH -------------------------------------------------------------------
+#
+# A symlink rather than `npm link`, which needs a global prefix that is often
+# root-owned and turns a one-line install into a sudo prompt.
+
+target="$SRC_DIR/bridle/lib/cli.js"
+[ -f "$target" ] || fail "The build did not produce $target. Please report this."
+chmod +x "$target"
+
+bin=""
+for candidate in "${REINS_BIN:-}" "$HOME/.local/bin" /usr/local/bin; do
+  [ -n "$candidate" ] || continue
+  if mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ]; then bin="$candidate"; break; fi
+done
+[ -n "$bin" ] || fail "Nowhere writable to put the bridle command. Set REINS_BIN to a directory on your PATH."
+
+ln -sf "$target" "$bin/bridle"
+step "Installed bridle to $bin/bridle"
+
+case ":$PATH:" in
+  *":$bin:"*) ;;
+  *)
+    say ""
+    say "$bin is not on your PATH. Add it:"
+    say ""
+    say "  ${bold}echo 'export PATH=\"$bin:\$PATH\"' >> ~/.zshrc && exec zsh${off}"
+    say ""
+    ;;
+esac
+
+# --- Hand over --------------------------------------------------------------
+
+say ""
+say "${bold}Reins Bridle is installed.${off}"
+say "${dim}Next: pair your iPhone. This prints a QR code — point Reins at it.${off}"
+say ""
+
+# Running `bridle pair` directly would inherit the pipe from `curl | sh` as its
+# stdin, which is already at EOF, so the QR would flash past. Tell them the
+# command instead; it is one line and they are already in a terminal.
+say "  ${bold}bridle pair${off}"
+say ""
