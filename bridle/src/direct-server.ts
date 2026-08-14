@@ -1,0 +1,128 @@
+/**
+ * LAN listener. When the phone and the machine are on the same network, going
+ * through a Relay on the far side of the internet is a waste of a round trip,
+ * and it makes the product useless on a plane or in a lab with no egress.
+ *
+ * The tunnel is the same Noise channel either way, so binding this to the LAN
+ * is safe: an unpaired device gets refused at the handshake, and a paired one
+ * is cryptographically the same peer it would be over the Relay. The app tries
+ * this address first and falls back to the Relay when it does not answer.
+ */
+
+import { createServer, type Server } from 'node:http'
+import { networkInterfaces } from 'node:os'
+import { WebSocketServer, type WebSocket } from 'ws'
+import { TunnelSession } from './tunnel/session.ts'
+import type { BridleCore } from './core.ts'
+
+/** Path the app dials for a direct tunnel. */
+export const DIRECT_PATH = '/v1/tunnel'
+
+/** Options for {@link DirectServer}. */
+export interface DirectServerOptions {
+  /** Bridle package version reported to the app. */
+  version: string
+  /** Port to bind; `0` lets the OS choose. */
+  port?: number
+  /** Progress reporting. */
+  log?: (message: string) => void
+}
+
+/** A WebSocket listener on the local network. */
+export class DirectServer {
+  private readonly http: Server
+  private readonly wss: WebSocketServer
+  private readonly sessions = new Set<TunnelSession>()
+
+  /**
+   * @param core - the machine being served.
+   * @param options - port and reporting hooks.
+   */
+  constructor(private readonly core: BridleCore, private readonly options: DirectServerOptions) {
+    this.http = createServer((_request, response) => {
+      // Anything that is not the tunnel upgrade gets a flat refusal; this
+      // server is not a web server and should not look like one.
+      response.writeHead(426, { 'content-type': 'text/plain' })
+      response.end('reins bridle: websocket upgrade required\n')
+    })
+    this.wss = new WebSocketServer({ server: this.http, path: DIRECT_PATH, maxPayload: 64 * 1024 * 1024 })
+    this.wss.on('connection', (socket: WebSocket) => { this.attach(socket) })
+  }
+
+  /**
+   * Start listening.
+   * @returns the bound port.
+   */
+  listen(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      this.http.once('error', reject)
+      this.http.listen(this.options.port ?? 0, '0.0.0.0', () => {
+        const address = this.http.address()
+        const port = typeof address === 'object' && address !== null ? address.port : 0
+        this.options.log?.(`direct tunnel listening on ${String(port)}`)
+        resolve(port)
+      })
+    })
+  }
+
+  /** The bound port, or `0` before {@link listen} resolves. */
+  get port(): number {
+    const address = this.http.address()
+    return typeof address === 'object' && address !== null ? address.port : 0
+  }
+
+  /** The `ws://…` addresses a phone on the same network can reach. */
+  get addresses(): string[] {
+    const port = this.port
+    if (port === 0) return []
+    return localAddresses().map(host => `ws://${host}:${String(port)}`)
+  }
+
+  /** Stop listening and end every direct tunnel. */
+  close(): void {
+    for (const session of [...this.sessions]) session.dispose('bridle is shutting down')
+    this.sessions.clear()
+    this.wss.close()
+    this.http.close()
+  }
+
+  private attach(socket: WebSocket): void {
+    const session = new TunnelSession(this.core, {
+      send: (bytes: Buffer) => { socket.send(bytes, { binary: true }) },
+      close: () => { socket.close() },
+    }, {
+      version: this.options.version,
+      onAuthenticated: (_key, name) => { this.options.log?.(`${name} attached over the local network`) },
+      onClosed: () => { this.sessions.delete(session) },
+    })
+    this.sessions.add(session)
+    socket.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+      session.receive(Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data))
+    })
+    socket.on('close', () => { session.dispose('phone disconnected') })
+    socket.on('error', (error: Error) => { session.dispose(error.message) })
+  }
+}
+
+/**
+ * Private IPv4 addresses of this machine, best candidate first.
+ * @returns addresses a phone on the same Wi-Fi could dial.
+ */
+export function localAddresses(): string[] {
+  const found: string[] = []
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family !== 'IPv4' || entry.internal) continue
+      found.push(entry.address)
+    }
+  }
+  // 192.168/16 is what home and café networks hand out, so try it before the
+  // 10/8 and 172.16/12 ranges that tend to be corporate VPN legs.
+  return found.sort((a, b) => rank(a) - rank(b))
+}
+
+function rank(address: string): number {
+  if (address.startsWith('192.168.')) return 0
+  if (address.startsWith('10.')) return 1
+  return 2
+}

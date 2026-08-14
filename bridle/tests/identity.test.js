@@ -1,0 +1,153 @@
+/**
+ * The state file holds the only long-term secret on the machine, and the list
+ * of devices allowed to reach a shell. Both halves are tested here.
+ */
+
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+import { deviceIdFor, generateKeyPair } from '@reins/protocol'
+import {
+  acceptPeer,
+  findPeer,
+  loadState,
+  offerAccepts,
+  openPairingOffer,
+  revokePeer,
+  saveState,
+  signingKeys,
+  statePath,
+  staticKeys,
+  touchPeer,
+} from '../lib/index.js'
+
+/**
+ * Run a body against a throwaway REINS_HOME.
+ * @param {(home: string) => void} body - the test body.
+ */
+function withHome(body) {
+  const home = mkdtempSync(join(tmpdir(), 'reins-identity-'))
+  const previous = process.env.REINS_HOME
+  process.env.REINS_HOME = home
+  try {
+    body(home)
+  } finally {
+    if (previous === undefined) delete process.env.REINS_HOME
+    else process.env.REINS_HOME = previous
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+test('first run creates an identity and stores it owner-only', () => {
+  withHome(() => {
+    const state = loadState()
+    assert.equal(staticKeys(state).publicKey.length, 32)
+    assert.equal(signingKeys(state).publicKey.length, 32)
+    assert.equal(state.peers.length, 0)
+    assert.equal(statSync(statePath()).mode & 0o777, 0o600)
+  })
+})
+
+test('the device id is derived from the signing key, not invented', () => {
+  withHome(() => {
+    const state = loadState()
+    assert.equal(state.deviceId, deviceIdFor(signingKeys(state).publicKey))
+  })
+})
+
+test('a second load returns the same identity', () => {
+  withHome(() => {
+    const first = loadState()
+    const second = loadState()
+    assert.equal(second.privateKey, first.privateKey)
+    assert.equal(second.deviceId, first.deviceId)
+  })
+})
+
+test('a state file from a newer bridle is refused rather than misread', () => {
+  withHome(() => {
+    const state = loadState()
+    state.version = 99
+    saveState(state)
+    assert.throws(() => loadState(), /newer Bridle/)
+  })
+})
+
+test('an environment override is applied but never written back', () => {
+  withHome(() => {
+    loadState()
+    process.env.REINS_DSH_URL = 'http://127.0.0.1:9999'
+    try {
+      assert.equal(loadState().dshUrl, 'http://127.0.0.1:9999')
+    } finally {
+      delete process.env.REINS_DSH_URL
+    }
+    assert.notEqual(loadState().dshUrl, 'http://127.0.0.1:9999')
+  })
+})
+
+test('an outstanding offer accepts its own token and nothing else', () => {
+  withHome(() => {
+    const state = loadState()
+    const offer = openPairingOffer(state)
+    assert.equal(offerAccepts(state, offer.token), true)
+    assert.equal(offerAccepts(state, 'some-other-token'), false)
+  })
+})
+
+test('an expired offer is refused', () => {
+  withHome(() => {
+    const state = loadState()
+    const offer = openPairingOffer(state)
+    assert.equal(offerAccepts(state, offer.token, offer.expiresAt + 1), false)
+  })
+})
+
+test('pairing consumes the offer, so one invitation admits one device', () => {
+  withHome(() => {
+    const state = loadState()
+    const offer = openPairingOffer(state)
+    const device = generateKeyPair().publicKey
+    acceptPeer(state, device, 'Alex iPhone')
+    assert.equal(offerAccepts(state, offer.token), false)
+    assert.equal(findPeer(state, device)?.name, 'Alex iPhone')
+  })
+})
+
+test('pairing the same device twice updates it instead of duplicating it', () => {
+  withHome(() => {
+    const state = loadState()
+    const device = generateKeyPair().publicKey
+    acceptPeer(state, device, 'iPhone')
+    openPairingOffer(state)
+    acceptPeer(state, device, 'iPhone 17 Pro')
+    assert.equal(state.peers.length, 1)
+    assert.equal(state.peers[0].name, 'iPhone 17 Pro')
+  })
+})
+
+test('a paired device survives a reload and can be touched', () => {
+  withHome(() => {
+    const state = loadState()
+    const device = generateKeyPair().publicKey
+    acceptPeer(state, device, 'iPad', 1000)
+    touchPeer(state, device, 2000)
+    assert.equal(loadState().peers[0].lastSeen, 2000)
+  })
+})
+
+test('revoking by prefix removes exactly one device', () => {
+  withHome(() => {
+    const state = loadState()
+    const first = generateKeyPair().publicKey
+    acceptPeer(state, first, 'iPhone')
+    openPairingOffer(state)
+    acceptPeer(state, generateKeyPair().publicKey, 'iPad')
+    const removed = revokePeer(state, first.toString('base64url').slice(0, 8))
+    assert.equal(removed?.name, 'iPhone')
+    assert.equal(loadState().peers.length, 1)
+    assert.equal(revokePeer(state, 'nothing-matches-this'), undefined)
+  })
+})

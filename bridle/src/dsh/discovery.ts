@@ -1,0 +1,136 @@
+/**
+ * Finding, and if necessary starting, the dsh a Bridle should serve.
+ *
+ * The friction this removes is real: a person installing Reins should not have
+ * to know which port their harness picked, or start it by hand before opening
+ * the app. Bridle probes the ports dsh actually uses, and can launch one itself
+ * when nothing answers.
+ */
+
+import { spawn } from 'node:child_process'
+import { createConnection } from 'node:net'
+import { DshClient } from './client.ts'
+
+/** Ports probed in order: the web profile default, then the range it falls back through. */
+const CANDIDATE_PORTS = [3080, 3081, 3082, 3083, 8080, 8791]
+
+/** How long a single TCP probe may take. */
+const PROBE_TIMEOUT_MS = 300
+
+/** How long to wait for a freshly spawned dsh to answer `host.describe`. */
+const LAUNCH_TIMEOUT_MS = 45_000
+
+/** A dsh instance Bridle can talk to. */
+export interface DiscoveredDsh {
+  /** Loopback base URL. */
+  url: string
+  /** Whether Bridle started this process itself. */
+  launched: boolean
+}
+
+/**
+ * Whether anything is listening on a loopback TCP port.
+ * @param port - the port to probe.
+ * @returns true when the connection is accepted.
+ */
+export function portOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    const finish = (open: boolean): void => {
+      socket.destroy()
+      resolve(open)
+    }
+    socket.setTimeout(PROBE_TIMEOUT_MS)
+    socket.once('connect', () => { finish(true) })
+    socket.once('timeout', () => { finish(false) })
+    socket.once('error', () => { finish(false) })
+  })
+}
+
+/**
+ * Probe the usual dsh ports for one that answers the harness API.
+ * @param preferred - a URL to try before the candidates, e.g. from config.
+ * @returns the first dsh that answers, or undefined.
+ */
+export async function probeDsh(preferred?: string): Promise<string | undefined> {
+  const urls = [...(preferred === undefined ? [] : [preferred])]
+  for (const port of CANDIDATE_PORTS) urls.push(`http://127.0.0.1:${String(port)}`)
+  const seen = new Set<string>()
+  for (const url of urls) {
+    if (seen.has(url)) continue
+    seen.add(url)
+    let port: number
+    try {
+      const parsed = new URL(url)
+      port = Number(parsed.port === '' ? (parsed.protocol === 'https:' ? 443 : 80) : parsed.port)
+    } catch {
+      continue
+    }
+    if (!await portOpen(port)) continue
+    // Something is listening, but it might be any other local service; only a
+    // successful harness method proves it is dsh.
+    let client: DshClient
+    try {
+      client = new DshClient({ baseUrl: url })
+    } catch {
+      continue
+    }
+    const health = await client.health()
+    if (health.reachable) return url
+  }
+  return undefined
+}
+
+/** How Bridle should behave when no dsh is running. */
+export interface EnsureOptions {
+  /** Configured dsh URL, tried first. */
+  preferred?: string
+  /** Start dsh when nothing answers. */
+  autoStart: boolean
+  /** Command to start dsh; defaults to the published CLI via npx. */
+  command?: string
+  /** Arguments for that command. */
+  args?: string[]
+  /** Port a launched dsh should bind on loopback. */
+  port?: number
+  /** Progress reporting for the CLI. */
+  log?: (message: string) => void
+}
+
+/**
+ * Return a reachable dsh, launching one if allowed.
+ * @param options - discovery and auto-start behaviour.
+ * @returns the discovered or launched instance.
+ * @throws {@link Error} when nothing answers and auto-start is off or fails.
+ */
+export async function ensureDsh(options: EnsureOptions): Promise<DiscoveredDsh> {
+  const log = options.log ?? ((): void => {})
+  const found = await probeDsh(options.preferred)
+  if (found !== undefined) return { url: found, launched: false }
+  if (!options.autoStart) {
+    throw new Error('no dsh web server is running; start one, or run bridle with --auto-start')
+  }
+  const port = options.port ?? 3080
+  const command = options.command ?? 'dsh'
+  const args = options.args ?? ['web', '--host', '127.0.0.1', '--port', String(port), '--no-open']
+  log(`starting dsh on 127.0.0.1:${String(port)}`)
+  const child = spawn(command, args, { stdio: 'ignore', detached: true })
+  child.unref()
+  const url = `http://127.0.0.1:${String(port)}`
+  const client = new DshClient({ baseUrl: url })
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS
+  let spawnFailed: string | undefined
+  child.once('error', (error: Error) => { spawnFailed = error.message })
+  while (Date.now() < deadline) {
+    if (spawnFailed !== undefined) {
+      throw new Error(`could not start dsh with ${JSON.stringify(command)}: ${spawnFailed}`)
+    }
+    const health = await client.health()
+    if (health.reachable) {
+      log(`dsh is up at ${url}`)
+      return { url, launched: true }
+    }
+    await new Promise<void>((resolve) => { setTimeout(resolve, 500) })
+  }
+  throw new Error(`dsh did not answer at ${url} within ${String(LAUNCH_TIMEOUT_MS / 1000)}s`)
+}
