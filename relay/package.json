@@ -1,0 +1,37 @@
+{
+  "name": "@reins/relay",
+  "version": "0.1.0",
+  "description": "Reins Relay — a content-blind switchboard between phones and the Bridles on people's machines.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "reins-relay": "lib/main.js"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "start": "node lib/main.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@reins/protocol": "0.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2"
+  }
+}
