@@ -22,6 +22,9 @@ struct ConversationView: View {
     @State private var showModels = false
     @State private var showInfo = false
     @State private var archiving = false
+    @State private var showTrace = false
+    /// Set by the trace, consumed by the transcript's scroll reader.
+    @State private var jumpTo: String?
     /// Set when a branch succeeds, so the view can offer to follow it.
     @State private var forked: String?
     @State private var atBottom = true
@@ -59,6 +62,13 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showModels) {
             ModelPicker(session: session, sessionId: sessionId)
+        }
+        .sheet(isPresented: $showTrace) {
+            if let conversation {
+                TraceView(conversation: conversation) { itemId in
+                    jumpTo = itemId
+                }
+            }
         }
         .sheet(isPresented: $showInfo) {
             SessionInfoView(sessionId: sessionId)
@@ -163,6 +173,14 @@ struct ConversationView: View {
             )
             .onChange(of: conversation.running) { _, running in
                 if running { atBottom = true }
+            }
+            .onChange(of: jumpTo) { _, target in
+                guard let target else { return }
+                // Stop chasing the tail, or the next streamed chunk would yank
+                // the view straight back down from wherever we just landed.
+                atBottom = false
+                withAnimation { proxy.scrollTo(target, anchor: .top) }
+                jumpTo = nil
             }
         }
     }
@@ -292,6 +310,11 @@ struct ConversationView: View {
                     showModels = true
                 } label: {
                     Label("Model", systemImage: "cpu")
+                }
+                Button {
+                    showTrace = true
+                } label: {
+                    Label("Trace", systemImage: "list.bullet.indent")
                 }
                 Button {
                     Task {

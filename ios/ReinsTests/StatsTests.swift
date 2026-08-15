@@ -188,3 +188,80 @@ final class CommandPrefixTests: XCTestCase {
         XCTAssertNil(SkillCommand(.object(["description": .string("no name")])))
     }
 }
+
+/// The trace's job is to turn a transcript into something scannable, so what is
+/// worth testing is what it drops and how it flattens.
+@MainActor
+final class TraceEntryTests: XCTestCase {
+    func testInjectedContextIsNotAStep() {
+        // The harness pushes context in as a user message. It is not something a
+        // person did, and it is not what anyone is scanning a trace for.
+        let entry = TraceEntry(.user(UserTurn(
+            id: "u1", text: "<system-reminder>…</system-reminder>", images: [],
+            synthetic: true, at: Date()
+        )))
+        XCTAssertNil(entry)
+    }
+
+    func testARealMessageIsAStep() {
+        let entry = TraceEntry(.user(UserTurn(
+            id: "u2", text: "fix the build", images: [], synthetic: false, at: Date()
+        )))
+        XCTAssertEqual(entry?.kind, .user)
+        XCTAssertEqual(entry?.detail, "fix the build")
+    }
+
+    func testAnEmptyStreamingBubbleIsNotAStep() {
+        // It is already on screen as "thinking"; a blank row here is noise.
+        let entry = TraceEntry(.assistant(AssistantTurn(
+            id: "a1", turn: 1, step: 1, text: "", reasoning: "", complete: false, at: Date()
+        )))
+        XCTAssertNil(entry)
+    }
+
+    func testReasoningStandsInBeforeAnyTextArrives() {
+        let entry = TraceEntry(.assistant(AssistantTurn(
+            id: "a2", turn: 1, step: 1, text: "", reasoning: "Let me look at the build log",
+            complete: false, at: Date()
+        )))
+        XCTAssertEqual(entry?.detail, "Let me look at the build log")
+        XCTAssertEqual(entry?.running, true)
+    }
+
+    func testAFailedToolIsMarked() {
+        let entry = TraceEntry(.tool(ToolCard(
+            id: "t1", name: "Bash", arguments: "{}",
+            presentation: .terminal(command: "npm test", cwd: nil, output: nil, exitCode: 1),
+            resultText: nil, failed: true, running: false, at: Date()
+        )))
+        XCTAssertEqual(entry?.failed, true)
+        XCTAssertEqual(entry?.label, "Bash")
+        XCTAssertEqual(entry?.detail, "npm test")
+    }
+
+    func testMultilineOutputCollapsesToOneLine() {
+        // A row is one line tall. Command output with newlines in it would
+        // otherwise make the list ragged and unscannable.
+        let flattened = TraceEntry.oneLine("first\n\nsecond   third\nfourth")
+        XCTAssertEqual(flattened, "first second third fourth")
+    }
+
+    func testAVeryLongLineIsTruncated() {
+        let long = String(repeating: "x", count: 500)
+        let flattened = TraceEntry.oneLine(long)
+        XCTAssertEqual(flattened.count, 201, "200 characters plus the ellipsis")
+        XCTAssertTrue(flattened.hasSuffix("…"))
+    }
+
+    func testSearchMatchesTheArgumentAsWellAsTheTool() {
+        // Someone hunting for a command remembers the path more often than they
+        // remember which tool ran it.
+        let entry = TraceEntry(.tool(ToolCard(
+            id: "t2", name: "Read", arguments: "{}",
+            presentation: .read(path: "/src/auth.ts", lines: [], totalLines: 0),
+            resultText: nil, failed: false, running: false, at: Date()
+        )))
+        XCTAssertTrue(entry?.searchText.contains("auth.ts") == true)
+        XCTAssertTrue(entry?.searchText.contains("Read") == true)
+    }
+}
