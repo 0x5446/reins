@@ -12,6 +12,7 @@ export { TunnelSession, type SessionOptions, type TunnelTransport } from './tunn
 export { RelayClient, toWebSocketUrl, type RelayState } from './relay-client.ts'
 export { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
 export { installService, uninstallService, serviceLogPath, SERVICE_LABEL } from './service.ts'
+export { BackupError, describeBackup, exportIdentity, importIdentity, sameIdentity, type BackupSummary } from './backup.ts'
 export { clearRuntime, readRuntime, writeRuntime, type RuntimeInfo } from './runtime.ts'
 export {
   DEFAULT_DSH_URL,

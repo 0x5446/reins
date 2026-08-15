@@ -8,7 +8,8 @@
  * for the days after that.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -17,7 +18,9 @@ import { BridleCore } from './core.ts'
 import { DirectServer } from './direct-server.ts'
 import { DshClient } from './dsh/client.ts'
 import { ensureDsh, probeDsh } from './dsh/discovery.ts'
-import { loadState, reinsHome, revokePeer, saveState, staticKeys } from './identity.ts'
+import { loadState, reinsHome, revokePeer, saveState, signingKeys, staticKeys } from './identity.ts'
+import { deviceIdFor } from '@reins/protocol'
+import { BackupError, describeBackup, exportIdentity, importIdentity } from './backup.ts'
 import { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
 import { RelayClient } from './relay-client.ts'
 import { clearRuntime, readRuntime, writeRuntime } from './runtime.ts'
@@ -55,6 +58,12 @@ async function main(argv: string[]): Promise<void> {
       return
     case 'service':
       service(options)
+      return
+    case 'backup':
+      await backup(options)
+      return
+    case 'restore':
+      await restore(options)
       return
     case 'doctor':
       await doctor()
@@ -253,6 +262,97 @@ async function printInvitation(invitation: Invitation, state: ReturnType<typeof 
   say('No app yet? Get it at https://reins.novabox.ai/get')
 }
 
+/**
+ * Write an encrypted copy of this machine's identity.
+ *
+ * Without this, `~/.reins/bridle.json` is a single point of failure with no
+ * recovery: lose it and every paired phone stops recognising the machine, with
+ * no way to tell them apart from an impostor.
+ * @param options - parsed command line; the positional argument is the path.
+ */
+async function backup(options: Options): Promise<void> {
+  const target = flagString(options, '_')
+  if (target === undefined) {
+    say('Usage: bridle backup <file>')
+    process.exitCode = 1
+    return
+  }
+  const state = loadState()
+  const passphrase = await readSecret('Passphrase for the backup: ')
+  const again = await readSecret('Again: ')
+  if (passphrase !== again) {
+    say('Those did not match. Nothing was written.')
+    process.exitCode = 1
+    return
+  }
+  const deviceId = deviceIdFor(signingKeys(state).publicKey)
+  try {
+    writeFileSync(target, exportIdentity(state, passphrase, deviceId), { mode: 0o600 })
+  } catch (error) {
+    say(error instanceof BackupError ? error.message : String(error))
+    process.exitCode = 1
+    return
+  }
+  say(`Wrote ${target} (0600).`)
+  say(`It holds this machine's key and ${String(state.peers.length)} paired device(s).`)
+  say('Anyone with this file and its passphrase can become this machine. Store it accordingly.')
+}
+
+/**
+ * Replace this machine's identity with a saved one.
+ *
+ * Destructive, so it says exactly what it is about to displace and requires the
+ * word "replace" — the person doing this is usually mid-migration and tired.
+ * @param options - parsed command line; the positional argument is the path.
+ */
+async function restore(options: Options): Promise<void> {
+  const source = flagString(options, '_')
+  if (source === undefined) {
+    say('Usage: bridle restore <file>')
+    process.exitCode = 1
+    return
+  }
+  let archive: string
+  try {
+    archive = readFileSync(source, 'utf8')
+  } catch {
+    say(`Could not read ${source}`)
+    process.exitCode = 1
+    return
+  }
+
+  let summary
+  try {
+    summary = describeBackup(archive)
+  } catch (error) {
+    say(error instanceof BackupError ? error.message : String(error))
+    process.exitCode = 1
+    return
+  }
+
+  const current = loadState()
+  say(`Backup:  ${summary.machineName} · ${String(summary.peerCount)} device(s) · saved ${summary.exportedAt}`)
+  say(`Current: ${current.machineName} · ${String(current.peers.length)} device(s)`)
+  say('')
+  say('Restoring replaces this machine\'s key. Devices paired to the *current*')
+  say('identity will stop recognising it, and devices in the backup will start.')
+  const confirm = await readLine('Type "replace" to continue: ')
+  if (confirm.trim() !== 'replace') {
+    say('Nothing changed.')
+    return
+  }
+
+  const passphrase = await readSecret('Passphrase: ')
+  try {
+    saveState(importIdentity(archive, passphrase))
+  } catch (error) {
+    say(error instanceof BackupError ? error.message : String(error))
+    process.exitCode = 1
+    return
+  }
+  say('Restored. Restart the bridle for it to take effect.')
+}
+
 async function status(): Promise<void> {
   const state = loadState()
   const runtime = readRuntime()
@@ -359,6 +459,8 @@ function usage(): void {
   bridle revoke <prefix>    remove a paired device
   bridle service install    keep the bridle running after login
   bridle service uninstall  remove the background service
+  bridle backup <file>      save this machine's identity, encrypted
+  bridle restore <file>     put a saved identity back (replaces the current one)
   bridle doctor             check this machine's setup
 
 Options for start:
@@ -379,6 +481,66 @@ Options for start:
 
 function say(message: string): void {
   process.stdout.write(`${message}\n`)
+}
+
+/**
+ * Read one line from the terminal.
+ * @param prompt - shown before the cursor.
+ * @returns what was typed, without the newline.
+ */
+let lines: AsyncIterator<string> | undefined
+
+async function readLine(prompt: string): Promise<string> {
+  process.stdout.write(prompt)
+  // One interface for the whole process, created lazily. A fresh
+  // `createInterface` per prompt reads ahead and swallows the lines the *next*
+  // prompt was going to get — invisible on a terminal, and it silently ate the
+  // second line of every piped `printf 'pass\npass\n' | bridle backup`.
+  lines ??= createInterface({ input: process.stdin, terminal: false })[Symbol.asyncIterator]()
+  const next = await lines.next()
+  return next.done === true ? '' : next.value
+}
+
+/**
+ * Read a line without echoing it.
+ *
+ * Falls back to a visible read when stdin is not a terminal — a pipe has no
+ * echo to suppress, and refusing there would break scripted restores.
+ * @param prompt - shown before the cursor.
+ * @returns what was typed.
+ */
+async function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) return readLine(prompt)
+  process.stdout.write(prompt)
+  process.stdin.setRawMode(true)
+  process.stdin.resume()
+  let value = ''
+  try {
+    for await (const chunk of process.stdin) {
+      const text = String(chunk)
+      // Ctrl-C and Ctrl-D during a passphrase prompt mean "stop", not "submit
+      // what I have so far".
+      if (text.includes('\u0003') || text.includes('\u0004')) {
+        process.stdout.write('\n')
+        process.exit(130)
+      }
+      if (text.includes('\r') || text.includes('\n')) {
+        value += text.split(/[\r\n]/u)[0] ?? ''
+        break
+      }
+      // Backspace, so a typo is recoverable without restarting the command.
+      if (text === '\u007f' || text === '\b') {
+        value = value.slice(0, -1)
+        continue
+      }
+      value += text
+    }
+  } finally {
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
+    process.stdout.write('\n')
+  }
+  return value
 }
 
 function readVersion(): string {

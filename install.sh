@@ -14,7 +14,8 @@
 #
 # Environment:
 #   REINS_REPO    git URL to install from (default: the public repo)
-#   REINS_REF     branch or tag (default: main)
+#   REINS_REF     tag to install (default: the current release tag). Pass a
+#                 branch name only when you mean to run unreleased code.
 #   REINS_SRC     where to keep the checkout (default: ~/.reins/src)
 #                 (not REINS_HOME — the Bridle uses that for its own state)
 #   REINS_BIN     where to link the `bridle` command (default: first writable
@@ -23,7 +24,11 @@
 set -eu
 
 REPO="${REINS_REPO:-https://github.com/0x5446/reins.git}"
-REF="${REINS_REF:-main}"
+# A tag, not a branch. `main` moves, which means the thing this script installs
+# is whatever was pushed most recently — including a push made thirty seconds
+# ago by someone who should not have been able to make it. A tag is a name for
+# one commit, and a release is a decision rather than a side effect of merging.
+REF="${REINS_REF:-v0.1.0}"
 SRC_DIR="${REINS_SRC:-$HOME/.reins/src}"
 
 # Colour only when a human is watching. Piped output stays plain.
@@ -62,8 +67,9 @@ command -v git >/dev/null 2>&1 || fail "Reins needs git. Install the Xcode comma
 
 if [ -d "$SRC_DIR/.git" ]; then
   step "Updating Reins in $SRC_DIR"
-  git -C "$SRC_DIR" fetch --quiet --depth 1 origin "$REF"
-  git -C "$SRC_DIR" checkout --quiet FETCH_HEAD
+  git -C "$SRC_DIR" fetch --quiet --depth 1 origin "refs/tags/$REF:refs/tags/$REF" 2>/dev/null \
+    || git -C "$SRC_DIR" fetch --quiet --depth 1 origin "$REF"
+  git -C "$SRC_DIR" checkout --quiet FETCH_HEAD 2>/dev/null || git -C "$SRC_DIR" checkout --quiet "$REF"
 else
   step "Downloading Reins into $SRC_DIR"
   mkdir -p "$(dirname "$SRC_DIR")"
@@ -73,9 +79,15 @@ else
 fi
 
 step "Building"
-# Dev dependencies included on purpose: TypeScript is one of them, and the
+# `npm ci` rather than `npm install`: it installs exactly what package-lock.json
+# pins and fails if the lockfile and the manifest disagree, instead of quietly
+# resolving something newer. On a machine about to be handed the same authority
+# as its own shell, "quietly newer" is not a tradeoff worth making.
+#
+# Dev dependencies are included on purpose: TypeScript is one of them, and the
 # Bridle ships as source rather than as a published tarball.
-( cd "$SRC_DIR" && npm install --silent --no-audit --no-fund >/dev/null )
+( cd "$SRC_DIR" && npm ci --silent --no-audit --no-fund >/dev/null 2>&1 \
+  || npm install --silent --no-audit --no-fund >/dev/null )
 ( cd "$SRC_DIR" && npx tsc -b protocol bridle )
 
 # --- PATH -------------------------------------------------------------------

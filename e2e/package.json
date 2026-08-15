@@ -2,7 +2,7 @@
   "name": "@reins/e2e",
   "version": "0.1.0",
   "description": "End-to-end tests: a reference phone driving a real Bridle, a real Relay, and a real DeepSeek Harness.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

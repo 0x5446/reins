@@ -1,9 +1,8 @@
 {
   "name": "@reins/relay",
   "version": "0.1.0",
-  "description": "Reins Relay — a content-blind switchboard between phones and the Bridles on people's machines.",
-  "license": "UNLICENSED",
-  "private": true,
+  "description": "Reins Relay \u2014 a content-blind switchboard between phones and the Bridles on people's machines.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "reins-relay": "lib/main.js"
