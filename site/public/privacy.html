@@ -26,7 +26,7 @@
 <ul>
   <li>There are no accounts. We never ask for your name, email, or phone number.</li>
   <li>Your conversations, code, and commands are encrypted between your phone and your Mac. The relay cannot decrypt them.</li>
-  <li>The relay stores nothing on disk and keeps no logs of its own.</li>
+  <li>The relay keeps no logs. What little it does store — which machines are online, and a pairing code while you are using it — is deleted the moment it stops being needed.</li>
   <li>There is no analytics SDK, no crash reporter, and no advertising or tracking code in the app.</li>
   <li>On the same Wi-Fi, nothing touches the relay at all.</li>
 </ul>
@@ -80,30 +80,59 @@
   as soon as the code is claimed or expires.
 </p>
 
-<h2>What the relay stores</h2>
+<h2>What the relay stores, and for how long</h2>
 
 <p>
-  Nothing on disk. Everything above lives in the relay process's memory and is
-  gone when the process restarts. There is no database, no log file, and no
-  backup.
+  The relay runs on Cloudflare's edge, as a set of small objects each holding
+  one connection or one pairing code. Two of them write to durable storage, and
+  both delete what they wrote as soon as it stops being needed:
+</p>
+
+<table>
+  <tr>
+    <th>While a Mac is online</th>
+    <td>One row: its machine ID, display name, Bridle version, and when it
+      connected. Deleted when it disconnects.</td>
+  </tr>
+  <tr>
+    <th>While a pairing code is outstanding</th>
+    <td>The pairing bundle, so the app can fetch it with the code. Deleted the
+      moment the code is claimed, or when it expires — at most 15 minutes.</td>
+  </tr>
+</table>
+
+<p>
+  Nothing else is written anywhere. Not your messages, not who talked to whom,
+  not how much, not when. There is no log file, no analytics pipeline, and no
+  backup — the objects that carry your traffic hold no storage at all, and the
+  frames passing through them are sealed anyway.
 </p>
 
 <p>
   Two consequences, one good and one worth knowing: we could not hand over your
-  history because we do not have it; and a relay restart drops every open
-  connection, after which the apps reconnect on their own.
+  history because we never had it; and the relay has no memory of you between
+  sessions, so nothing accumulates.
 </p>
 
 <h2>Cloudflare</h2>
 
 <p>
-  <code>reins.novabox.ai</code> is served through Cloudflare, which terminates
-  TLS and forwards traffic to the relay. Cloudflare therefore sits on the
-  network path and can observe the same metadata the relay can — your IP
-  address, timing, and volume — subject to
+  <code>reins.novabox.ai</code> is served by Cloudflare, and since August 2026
+  the relay <em>is</em> a Cloudflare Worker rather than a program on a machine
+  we rent. Cloudflare therefore both terminates TLS and runs the code, and can
+  observe the same metadata described above — your IP address, timing, and
+  volume — subject to
   <a href="https://www.cloudflare.com/privacypolicy/">its own privacy policy</a>.
-  It cannot read your traffic either: the payload it forwards is already sealed
-  between your phone and your Mac.
+  It cannot read your traffic: what it forwards is already sealed between your
+  phone and your Mac.
+</p>
+
+<p>
+  Being honest about the shape of that: running on someone else's edge removes
+  a server we could misconfigure and adds a company that could be compelled.
+  The end-to-end encryption is what makes both of those bounded — neither we
+  nor Cloudflare can produce your conversations, because neither has ever
+  held them in a readable form.
 </p>
 
 <h2>What stays on your devices</h2>
@@ -142,6 +171,23 @@
   forget it, and chose not to — a phone that wants to be forgotten is exactly
   the phone whose word should not be taken for it. Run <code>bridle devices</code>
   on the Mac to see what it still trusts.
+</p>
+
+<h2>The lock on the app</h2>
+
+<p>
+  Reins locks itself, because a paired iPhone can approve commands on your Mac
+  and your phone being unlocked in someone else's hands is the gap the system
+  lock does not cover. It asks for Face ID, Touch ID, or your passcode on
+  launch and after an idle timeout you choose, and it covers the screen the
+  moment the app stops being frontmost — so the app switcher photographs a lock
+  screen rather than your work.
+</p>
+
+<p>
+  It bounds the window; it does not close it. If you lose the phone, the thing
+  that actually revokes its access is <code>bridle revoke</code> on the Mac, and
+  there is no way to do that from another phone yet.
 </p>
 
 <h2>Notifications</h2>

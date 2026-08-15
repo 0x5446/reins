@@ -71,16 +71,32 @@
 
 <table>
   <tr>
-    <th>Sessions</th>
-    <td>Everything the Harness is running, live. Switch between them, start new ones, pick a model.</td>
+    <th>Approvals</th>
+    <td>When the agent wants to run something, the request arrives with the full command and diff. Approve or refuse. Anything raised while you were away is waiting when you come back — and sits above everything else in the list, where it cannot be scrolled past or folded away.</td>
   </tr>
   <tr>
-    <th>Approvals</th>
-    <td>When the agent wants to run something, the request comes to your phone with the full command and diff. Approve or refuse. Requests raised while you were away are waiting when you come back.</td>
+    <th>Sessions</th>
+    <td>Everything the Harness is running, grouped by workspace. Start new ones, branch from where a conversation got interesting, archive what is done.</td>
   </tr>
   <tr>
     <th>Reading</th>
     <td>Diffs, tool output, file reads, and to-do lists rendered for a phone screen rather than shrunk to fit one.</td>
+  </tr>
+  <tr>
+    <th>Trace</th>
+    <td>The whole run as one line per step, searchable, with what each one took. For the two questions a transcript cannot answer at a glance: what has it been doing, and where did it go wrong.</td>
+  </tr>
+  <tr>
+    <th>Cost and context</th>
+    <td>How full the context window is and what is filling it, turns and steps, time to first token, and the four token classes broken out — because cache reads and fresh input are an order of magnitude apart in price.</td>
+  </tr>
+  <tr>
+    <th>Control</th>
+    <td>Pick the model and how hard it thinks. Change what the agent is allowed to touch. Run the skills installed on your Mac by typing <code>/</code>.</td>
+  </tr>
+  <tr>
+    <th>Subagents</th>
+    <td>When work is handed to a child agent, see what it is doing instead of watching a tool call sit there.</td>
   </tr>
   <tr>
     <th>Several Macs</th>

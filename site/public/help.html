@@ -63,6 +63,13 @@ exec zsh</code></pre>
   <tr><th><code>bridle backup</code></th><td>Write an encrypted copy of this machine's identity</td></tr>
 </table>
 
+<p>
+  <code>bridle revoke</code> is the one to remember. Forgetting a Mac in the
+  app only removes it from that iPhone — the Mac keeps trusting the phone until
+  you run this there. That is deliberate: a phone that wants to be forgotten is
+  exactly the phone whose word should not be taken for it.
+</p>
+
 <h2>When it will not connect</h2>
 
 <p>Run <code>bridle doctor</code> first. It checks the chain in order and names the broken link.</p>
@@ -98,6 +105,24 @@ exec zsh</code></pre>
 <p>
   That is the direct path working and the relay path not. Confirm the Mac has
   registered: <code>bridle status</code> should show the relay as online.
+</p>
+
+<h3>Searching conversations finds nothing</h3>
+
+<p>
+  dsh ships with its session index switched off, so search has nothing to look
+  through until you turn it on. Add this to
+  <code>~/.dsh/profiles/web/cordis.patch.yml</code> and restart dsh — or just
+  save the file, since the running instance reloads it:
+</p>
+
+<pre><code>- id: session-query-sqlite
+  config:
+    path: ~/.dsh/session-query.sqlite
+    openAt: first-search</code></pre>
+
+<p>
+  The app says so too rather than showing an empty list, but this is the fix.
 </p>
 
 <h3>A conversation opens empty</h3>
