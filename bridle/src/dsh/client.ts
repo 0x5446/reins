@@ -13,6 +13,7 @@
 
 import { isIP } from 'node:net'
 import WebSocket from 'ws'
+import type { AgentClient } from '../agents/types.ts'
 
 /** The dsh unary response body. */
 export type DshResult =
@@ -69,7 +70,7 @@ function nextRpcId(): string {
 }
 
 /** Unary and streaming access to one loopback dsh. */
-export class DshClient {
+export class DshClient implements AgentClient {
   private readonly base: URL
   private readonly requestTimeoutMs: number
 

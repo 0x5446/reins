@@ -176,7 +176,9 @@ interface AgentClient {
 
 `BridleCore` 已经写成可注入：`constructor(state, overrides: { dsh?: AgentClient })`。
 
-> **待办**：`DshClient` 目前是具体类，`index.ts` 直接导出它。要接第二个 agent，需要把它提成 interface。这是一处 20 行的重构，不改任何调用方。§12 依赖它。
+接口现在真的存在（`bridle/src/agents/types.ts`），`DshClient` 声明实现它，`BridleCore` 只认接口。`e2e/src/fake-agent.ts` 是第二个实现，它编译得过这件事本身就是接缝为真的证明。
+
+> **但接口存在 ≠ 第二个 agent 快做完。**这五个方法仍然带着 dsh 的形状：`pump` 点名了 dsh 的两条下行流，`respond` 收的是 dsh 的 `client-response` 信封，`pump` 吐出来的帧是 dsh 的 `server-request` 原样。app 侧的 projection、渲染意图、审批批次也一样。**第二个后端需要的是这个接口之上的一层归一化，而不是这个接口的另一个实现。**早期文档说"20 行重构、不改任何调用方"，那是低估。见 §12。
 
 ---
 
@@ -533,8 +535,9 @@ prologue = "reins-tunnel"        ← 稳定的协议族标识，永不变
               证明：两份实现是同一个协议
 单元        TS 80 · iOS 51
               证明：折叠、解析、限流、地址选择、插件生命周期
-e2e         20（起真 Relay + 真 Bridle + 真 dsh + 脚本手机）
-              证明：配对、审批、重连重放、以及各种拒绝
+e2e         27（起真 Relay + 真 Bridle + 脚本手机）
+              对真 dsh：配对、真实模型回复、重连重放、各种拒绝、版本协商
+              对假 agent：审批与提问的完整往返（见下）
 UI          6（XCUITest，真机或模拟器，连真 Bridle）
               证明：点了真的有反应
 ```
@@ -545,6 +548,12 @@ UI          6（XCUITest，真机或模拟器，连真 Bridle）
 - 没有单元测试，折叠的边界情况（重复 seq、乱序 projection、孤儿工具结果）无法覆盖
 - 没有 e2e，安全属性只是断言而非事实——`the relay only ever sees ciphertext` 必须是可执行的
 - 没有 UI 测试，"能编译"和"能用"之间还有一整个鸿沟
+
+**为什么审批测试用假 agent。**审批只在模型决定要做需要批准的事时发生，等它发生不是测试而是碰运气。`e2e/src/fake-agent.ts` 实现 §4.1 那个五方法接缝，让测试能在选定的时刻抛出一个审批——它上面的一切（隧道、帧、rpcId 关联、回传路径）都是真的。
+
+这同时是**接缝为真的唯一证据**：如果 `AgentClient` 偷偷多长出第六个要求，这个文件编译不过。
+
+> 早期文档声称 e2e 已经覆盖审批。它没有——一条都没有，"代码存在"顶替了"链路能用"。这是 deep review 抓到的，也是四层测试本该在 e2e 层抓到却漏掉的。
 
 **UI 测试与单元测试分属两个 scheme**（`Reins` / `ReinsUI`）：单元测试到处都能跑、几秒钟；UI 测试需要一台配对好的机器、几分钟。合在一起会让每次 `npm run test:ios` 都等一台可能没开的电脑。
 

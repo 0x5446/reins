@@ -9,6 +9,7 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { basename } from 'node:path'
 import { DshClient, type DshHealth } from './dsh/client.ts'
+import type { AgentClient } from './agents/types.ts'
 import { EventLog } from './tunnel/event-log.ts'
 import { loadState, reinsHome, saveState, statePath, staticKeys, type BridleState } from './identity.ts'
 import type { StaticKeyPair } from '@reins/protocol'
@@ -29,7 +30,7 @@ const HEALTH_INTERVAL_MS = 5_000
 export class BridleCore {
   readonly state: BridleState
   readonly keys: StaticKeyPair
-  readonly dsh: DshClient
+  readonly dsh: AgentClient
   readonly events: EventLog
 
   private readonly abort = new AbortController()
@@ -44,7 +45,7 @@ export class BridleCore {
    * @param state - loaded identity state; `dshUrl` selects the harness.
    * @param overrides - injection points for the dsh client and the replay depth.
    */
-  constructor(state: BridleState = loadState(), overrides: { dsh?: DshClient; eventCapacity?: number } = {}) {
+  constructor(state: BridleState = loadState(), overrides: { dsh?: AgentClient; eventCapacity?: number } = {}) {
     this.state = state
     this.keys = staticKeys(state)
     this.dsh = overrides.dsh ?? new DshClient({ baseUrl: state.dshUrl })

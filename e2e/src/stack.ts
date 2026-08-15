@@ -15,6 +15,7 @@ import {
   BridleCore,
   DirectServer,
   DshClient,
+  type AgentClient,
   RelayClient,
   createInvitation,
   loadState,
@@ -35,6 +36,16 @@ export interface StackOptions {
   machineName?: string
   /** Frames the Bridle retains for replay; small values make resync easy to test. */
   eventCapacity?: number
+  /**
+   * Stand in for the harness.
+   *
+   * The seam `docs/architecture.md` §4.1 claims exists. Injecting here lets a
+   * test drive things a real harness cannot be made to do on cue — an approval
+   * arriving at a chosen moment, a downlink dropping mid-turn — without a model
+   * in the loop and without the result depending on what the model felt like
+   * doing. Absent, a real dsh is used.
+   */
+  agent?: AgentClient
 }
 
 /** A running stack and the handles a test needs. */
@@ -82,7 +93,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   saveState(state)
 
   const core = new BridleCore(state, {
-    dsh: new DshClient({ baseUrl: dshUrl }),
+    dsh: options.agent ?? new DshClient({ baseUrl: dshUrl }),
     ...(options.eventCapacity === undefined ? {} : { eventCapacity: options.eventCapacity }),
   })
   await core.start()

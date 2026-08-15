@@ -190,6 +190,31 @@ export class ReinsPhone {
    * @param message - the dsh `client-response` message.
    * @returns the carrier receipt.
    */
+  /**
+   * Answer an approval or a question.
+   *
+   * Builds the envelope the harness expects, which is the part a client has to
+   * get right: the answer is routed by the `rpcId` of the request it replies
+   * to, so echoing the wrong one answers somebody else's question. The iOS app
+   * builds the same shape; keeping it here too is what makes this a reference
+   * rather than a test helper.
+   * @param rpcId - from the `server-request` frame being answered.
+   * @param value - that responder's own payload.
+   * @returns the harness receipt.
+   */
+  answer(rpcId: string, value: unknown): Promise<CallResult> {
+    return this.respond({
+      type: 'client-response',
+      rpcId,
+      result: { ok: true, value },
+    })
+  }
+
+  /**
+   * Send a pre-built response envelope.
+   * @param message - the `client-response` message, verbatim.
+   * @returns the harness receipt.
+   */
   respond(message: unknown): Promise<CallResult> {
     requestCounter += 1
     const id = `r${String(requestCounter)}`
