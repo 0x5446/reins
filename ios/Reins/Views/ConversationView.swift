@@ -23,6 +23,7 @@ struct ConversationView: View {
     @State private var showInfo = false
     @State private var archiving = false
     @State private var showTrace = false
+    @State private var showSubagents = false
     /// Set by the trace, consumed by the transcript's scroll reader.
     @State private var jumpTo: String?
     /// Set when a branch succeeds, so the view can offer to follow it.
@@ -62,6 +63,13 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showModels) {
             ModelPicker(session: session, sessionId: sessionId)
+        }
+        .sheet(isPresented: $showSubagents) {
+            if let conversation {
+                SubagentsView(session: session, conversation: conversation) { childId in
+                    onOpen?(childId)
+                }
+            }
         }
         .sheet(isPresented: $showTrace) {
             if let conversation {
@@ -173,6 +181,11 @@ struct ConversationView: View {
             )
             .onChange(of: conversation.running) { _, running in
                 if running { atBottom = true }
+                // A turn that just ended is the moment a child list is most
+                // likely to have changed and least likely to be mid-write.
+                if !running, conversation.consumeSubagentsStale() {
+                    Task { await session.loadSubagents(conversation) }
+                }
             }
             .onChange(of: jumpTo) { _, target in
                 guard let target else { return }
@@ -266,6 +279,7 @@ struct ConversationView: View {
                     Task { await session.cancel(sessionId: sessionId) }
                 }
             )
+            StatStrip(conversation: conversation) { showInfo = true }
         }
         .animation(.easeInOut(duration: 0.2), value: session.approvals[sessionId])
         .animation(.easeInOut(duration: 0.2), value: session.questions[sessionId])
@@ -315,6 +329,15 @@ struct ConversationView: View {
                     showTrace = true
                 } label: {
                     Label("Trace", systemImage: "list.bullet.indent")
+                }
+                if let children = conversation?.subagents, !children.isEmpty {
+                    // Only when there are any. An always-present row that opens
+                    // an empty screen teaches people to stop tapping it.
+                    Button {
+                        showSubagents = true
+                    } label: {
+                        Label("Subagents (\(children.count))", systemImage: "person.2")
+                    }
                 }
                 Button {
                     Task {
@@ -378,5 +401,79 @@ struct ConversationView: View {
             parts.append("context \(Int(fraction * 100))%")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// The numbers dsh keeps under its own composer, sized for a phone.
+///
+/// These were built and then buried in a menu, which is the same as not having
+/// built them: the first person to use it did not find them. The web UI keeps
+/// seven fields on one line because it has the width; a phone has room for
+/// three, so this shows the three that change what someone does next and puts
+/// the rest one tap away.
+///
+/// Which three depends on what is happening. While a turn runs, the question is
+/// "is this going anywhere" — elapsed and speed. When it is idle, it is "how
+/// much room is left and what has this cost". Context comes first either way,
+/// because it is the only one with a cliff at the end of it.
+private struct StatStrip: View {
+    let conversation: Conversation
+    let onTap: () -> Void
+
+    var body: some View {
+        if let fields = fields {
+            Button(action: onTap) {
+                HStack(spacing: 0) {
+                    ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
+                        if index > 0 {
+                            Text("·")
+                                .foregroundStyle(.quaternary)
+                                .padding(.horizontal, 6)
+                        }
+                        Text(field.text)
+                            .foregroundStyle(field.warn ? AnyShapeStyle(Palette.warn) : AnyShapeStyle(.secondary))
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.quaternary)
+                }
+                .font(.system(size: 11))
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.bottom, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("conversation.stats")
+            .accessibilityLabel("Session statistics")
+        }
+    }
+
+    private struct Field {
+        var text: String
+        var warn = false
+    }
+
+    /// Nil before the session has produced anything worth counting — an empty
+    /// strip of zeroes under a blank conversation is noise with a chevron on it.
+    private var fields: [Field]? {
+        var made: [Field] = []
+        if let fraction = conversation.contextFraction {
+            made.append(Field(text: "ctx \(Int((fraction * 100).rounded()))%", warn: fraction > 0.8))
+        }
+        if let stats = conversation.stats, stats.turns > 0 {
+            if conversation.running {
+                if let rate = stats.tokensPerSecond, rate > 0 {
+                    made.append(Field(text: "\(Int(rate.rounded())) tok/s"))
+                }
+                made.append(Field(text: Format.duration(ms: stats.llmMs)))
+            } else {
+                made.append(Field(text: "\(stats.turns) turns · \(stats.steps) steps"))
+                if let tokens = conversation.tokens {
+                    made.append(Field(text: "\(Format.tokens(tokens.totalInput))↑ \(Format.tokens(tokens.output))↓"))
+                }
+            }
+        }
+        return made.isEmpty ? nil : made
     }
 }

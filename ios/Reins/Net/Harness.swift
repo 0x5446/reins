@@ -198,6 +198,17 @@ public struct Harness: Sendable {
         )
     }
 
+    /// The children this session spawned.
+    ///
+    /// `parentAvailable` comes back false when the machine cannot enumerate —
+    /// it is not the same as "no children", and the UI has to be able to tell
+    /// "nothing spawned anything" from "cannot say".
+    public func subagents(parentSessionId: String) async throws -> (children: [SubagentChild], available: Bool) {
+        let value = try await tunnel.call("subagent.list", .object(["parentSessionId": .string(parentSessionId)]))
+        let children = (value["entries"]?.arrayValue ?? []).compactMap { SubagentChild($0) }
+        return (children, value["parentAvailable"]?.boolValue ?? false)
+    }
+
     /// The slash commands available in a session.
     ///
     /// Per session rather than per machine: skills can be scoped, and asking
@@ -225,18 +236,31 @@ public struct Harness: Sendable {
     /// Both calls answer with the same `groups → models` shape.
     static func catalog(_ value: JSONValue) -> ModelCatalog {
         var options: [ModelOption] = []
+        var efforts: [String: [ReasoningEffort]] = [:]
+        var defaultEfforts: [String: String] = [:]
         for group in value["groups"]?.arrayValue ?? [] {
             let provider = group["id"]?.stringValue ?? ""
             let providerName = group["name"]?.stringValue ?? provider
             for model in group["models"]?.arrayValue ?? [] {
                 guard let id = model["id"]?.stringValue else { continue }
-                options.append(ModelOption(
+                let option = ModelOption(
                     provider: provider,
                     providerName: providerName,
                     model: id,
                     name: model["name"]?.stringValue ?? id,
                     description: model["description"]?.stringValue
-                ))
+                )
+                options.append(option)
+                // Absent for models that do not reason on demand, which is why
+                // the picker keys off "is this list empty" rather than a flag.
+                let levels = (model.path("reasoning", "efforts")?.arrayValue ?? []).compactMap { entry -> ReasoningEffort? in
+                    guard let id = entry["id"]?.stringValue else { return nil }
+                    return ReasoningEffort(id: id, name: entry["name"]?.stringValue ?? id)
+                }
+                if !levels.isEmpty {
+                    efforts[option.id] = levels
+                    defaultEfforts[option.id] = model.path("reasoning", "defaultEffort")?.stringValue
+                }
             }
         }
         let currentProvider = value.path("current", "provider")?.stringValue
@@ -255,7 +279,14 @@ public struct Harness: Sendable {
             let name = failure["name"]?.stringValue ?? failure["id"]?.stringValue ?? "a provider"
             return "\(name): \(failure["message"]?.stringValue ?? "could not be reached")"
         }
-        return ModelCatalog(current: current, options: options, failures: failures)
+        return ModelCatalog(
+            current: current,
+            options: options,
+            failures: failures,
+            efforts: efforts,
+            defaultEfforts: defaultEfforts,
+            currentEffort: value.path("current", "reasoningEffort")?.stringValue
+        )
     }
 
     /// Switch this session's model.

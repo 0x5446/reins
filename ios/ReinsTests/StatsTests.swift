@@ -345,3 +345,32 @@ final class TraceEntryTests: XCTestCase {
         XCTAssertTrue(entry?.searchText.contains("Read") == true)
     }
 }
+
+/// The four token classes, which are four prices and must not be summed away.
+@MainActor
+final class TokenBreakdownTests: XCTestCase {
+    private func usage(_ text: String) -> TokenUsage? {
+        // swiftlint:disable:next force_try
+        TokenUsage(try! JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)))
+    }
+
+    func testAllFourSurvive() {
+        let t = usage("""
+        {"uncachedInputTokens":6,"outputTokens":13,"cacheReadTokens":12800,"cacheWriteTokens":420}
+        """)
+        XCTAssertEqual(t?.uncachedInput, 6)
+        XCTAssertEqual(t?.cacheWrite, 420)
+        XCTAssertEqual(t?.cacheRead, 12_800)
+        XCTAssertEqual(t?.output, 13)
+    }
+
+    func testTotalInputCountsEveryKindThatWasBilledAsInput() {
+        // Writes are billed as input too, and at a premium — leaving them out
+        // of the denominator would flatter the hit rate.
+        let t = usage("""
+        {"uncachedInputTokens":100,"outputTokens":0,"cacheReadTokens":300,"cacheWriteTokens":100}
+        """)
+        XCTAssertEqual(t?.totalInput, 500)
+        XCTAssertEqual(t?.cacheHitRate ?? 0, 0.6, accuracy: 0.001)
+    }
+}

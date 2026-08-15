@@ -15,6 +15,8 @@ struct ModelPicker: View {
     @State private var catalog: ModelCatalog?
     @State private var problem: String?
     @State private var switching: String?
+    /// The level chosen for the current model, before it is sent.
+    @State private var effort: String?
 
     var body: some View {
         NavigationStack {
@@ -67,6 +69,29 @@ struct ModelPicker: View {
                             }
                         }
                         .foregroundStyle(.primary)
+
+                        // Under the model it belongs to, and only for the one
+                        // in use. Showing every model's levels would triple the
+                        // list to answer a question nobody asked about models
+                        // they are not on.
+                        if catalog.current?.id == option.id {
+                            let levels = catalog.efforts(for: option)
+                            if !levels.isEmpty {
+                                Picker("Thinking", selection: Binding(
+                                    get: { effort ?? catalog.currentEffort ?? catalog.defaultEffort(for: option) ?? levels[0].id },
+                                    set: { chosen in
+                                        effort = chosen
+                                        Task { await select(option, effort: chosen, keepOpen: true) }
+                                    }
+                                )) {
+                                    ForEach(levels) { level in
+                                        Text(level.name).tag(level.id)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .listRowInsets(EdgeInsets(top: 4, leading: Metrics.gutter, bottom: 10, trailing: Metrics.gutter))
+                            }
+                        }
                     }
                 }
             }
@@ -109,13 +134,25 @@ struct ModelPicker: View {
         }
     }
 
-    private func select(_ option: ModelOption) async {
+    /// Apply a model, and the thinking level that goes with it.
+    ///
+    /// - Parameters:
+    ///   - effort: nil lets the machine keep whatever the model defaults to.
+    ///   - keepOpen: true when only the level changed. Dismissing then would
+    ///     make trying two levels a matter of reopening the sheet each time.
+    private func select(_ option: ModelOption, effort chosen: String? = nil, keepOpen: Bool = false) async {
         switching = option.id
         defer { switching = nil }
+        // Switching model carries the new model's own default rather than the
+        // level the previous one happened to be on — "Max" on a small model and
+        // "Max" on a large one are not the same amount of money.
+        let level = chosen ?? catalog?.defaultEffort(for: option)
         do {
-            try await session.harness.selectModel(sessionId: sessionId, option: option)
+            try await session.harness.selectModel(sessionId: sessionId, option: option, reasoningEffort: level)
             catalog?.current = option
-            dismiss()
+            catalog?.currentEffort = level
+            effort = level
+            if !keepOpen { dismiss() }
         } catch {
             problem = (error as? LocalizedError)?.errorDescription ?? "That model couldn’t be selected."
         }

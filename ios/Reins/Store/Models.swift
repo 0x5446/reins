@@ -296,12 +296,40 @@ public struct ModelOption: Identifiable, Equatable, Codable {
     public var description: String?
 }
 
+/// How hard the model is asked to think before answering.
+///
+/// Per model, not per provider — the same provider ships models with and
+/// without it, so the choice has to follow the model the picker is showing.
+public struct ReasoningEffort: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+}
+
 /// The models available to a session, and the one in use.
 public struct ModelCatalog: Equatable {
     public var current: ModelOption?
     public var options: [ModelOption]
     /// Provider groups that failed to load, so the picker can say why.
     public var failures: [String]
+    /// Reasoning levels per model id, and each model's own default.
+    ///
+    /// Kept beside the options rather than inside `ModelOption`, because that
+    /// type is persisted as the "new conversations use" choice and adding a
+    /// required field to it would make every stored one fail to decode.
+    public var efforts: [String: [ReasoningEffort]] = [:]
+    public var defaultEfforts: [String: String] = [:]
+    /// What the session is set to right now, when the model supports it.
+    public var currentEffort: String?
+
+    /// The levels this model offers. Empty means it does not take one.
+    public func efforts(for option: ModelOption) -> [ReasoningEffort] {
+        efforts[option.id] ?? []
+    }
+
+    /// The level to preselect for a model the session is not already on.
+    public func defaultEffort(for option: ModelOption) -> String? {
+        defaultEfforts[option.id]
+    }
 }
 
 /// What the machine says about itself.
@@ -451,5 +479,72 @@ public struct PermissionChoice: Equatable, Sendable {
         case "danger-full-access": return "No sandbox and no questions. Everything your account can do, it can do."
         default: return ""
         }
+    }
+}
+
+// MARK: - Subagents
+
+/// One child the agent spawned to do something on its own.
+///
+/// A subagent is a real session with its own log, which is why opening one
+/// needs nothing new — `session.history` serves it like any other. What it does
+/// *not* have is a row in `session.list`, which hides subagents on purpose. So
+/// without this the work is invisible: the parent shows a tool call that sits
+/// there for four minutes and no way to see what is happening inside it.
+public struct SubagentChild: Identifiable, Equatable, Sendable {
+    /// Whether the child can be talked to again, or ran once and is done.
+    public enum Mode: String, Equatable, Sendable {
+        case oneShot = "one-shot"
+        case continuable
+    }
+
+    public var id: String
+    /// The label from the child's descriptor. A continuable child always has
+    /// one; a one-shot child may not, and then there is only the mode to show.
+    public var label: String?
+    public var mode: Mode
+    /// `running` means live in the machine's session store, `inactive` means it
+    /// exists only in persistence. Neither says whether it *succeeded* — the
+    /// machine is explicit that this is activity, not outcome, so the UI must
+    /// not draw a tick from it.
+    public var running: Bool
+    /// Whether this child spawned children of its own.
+    public var hasChildren: Bool
+    /// Time across settled turns, plus the open one when there is one.
+    public var elapsed: TimeInterval?
+
+    public var displayLabel: String {
+        if let label, !label.isEmpty { return label }
+        return mode == .continuable ? "Subagent" : "One-shot task"
+    }
+
+    /// - Parameters:
+    ///   - value: one `entries[]` element from `subagent.list`.
+    ///   - timing: the child's `subagentTiming` projection, when the caller has it.
+    public init?(_ value: JSONValue, timing: JSONValue? = nil) {
+        // `diagnostic` entries describe a child the machine could not interpret.
+        // They are not children and pretending otherwise would put a row on
+        // screen that cannot be opened.
+        guard value["kind"]?.stringValue == "child",
+              let id = value["id"]?.stringValue,
+              let mode = Mode(rawValue: value["mode"]?.stringValue ?? "") else { return nil }
+        self.id = id
+        self.mode = mode
+        label = value["label"]?.stringValue
+        running = value["activity"]?.stringValue == "running"
+        hasChildren = value["hasChildren"]?.boolValue ?? false
+
+        guard let timing else {
+            elapsed = nil
+            return
+        }
+        let settled = (timing["settledMs"]?.doubleValue ?? 0) / 1000
+        // An open turn contributes the span folded into this cut so far, which
+        // is why a running child's number keeps growing between refreshes.
+        let open = timing.path("active", "through")?.doubleValue
+            .flatMap { through in
+                timing.path("active", "since")?.doubleValue.map { (through - $0) / 1000 }
+            } ?? 0
+        elapsed = settled + open > 0 ? settled + open : nil
     }
 }

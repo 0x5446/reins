@@ -118,18 +118,24 @@ struct SessionInfoView: View {
     private var spend: some View {
         if let tokens = conversation?.tokens {
             Section {
-                Row("Sent", Format.tokens(tokens.totalInput))
-                Row("Received", Format.tokens(tokens.output))
+                // Broken out rather than summed, because the three kinds of
+                // input are not the same price. Cache reads are typically
+                // around a tenth of fresh input and cache writes rather more
+                // than it, so a single "sent" figure hides the one number that
+                // decides what a long conversation costs.
+                Row("Fresh input", Format.tokens(tokens.uncachedInput))
+                if tokens.cacheWrite > 0 {
+                    Row("Written to cache", Format.tokens(tokens.cacheWrite))
+                }
+                Row("Read from cache", Format.tokens(tokens.cacheRead))
+                Row("Output", Format.tokens(tokens.output))
                 if let hit = tokens.cacheHitRate {
-                    Row("Served from cache", "\(Int((hit * 100).rounded()))%")
+                    Row("Cache hit rate", "\(Int((hit * 100).rounded()))%")
                 }
             } header: {
                 Text("Tokens")
             } footer: {
-                // Cached input is billed at a fraction of the price on every
-                // provider that offers it, so a high number here is the
-                // difference between a long conversation being cheap and not.
-                Text("Cached input is re-sent every turn but charged at a discount. A long conversation is affordable mostly because of this number.")
+                Text(cacheFootnote(tokens))
             }
         }
     }
@@ -172,6 +178,24 @@ struct SessionInfoView: View {
                 Text("This is a setting on the Mac, not on this conversation. Changing it here changes it for everything running there.")
             }
         }
+    }
+
+    /// Say what the cache numbers mean for this particular conversation, since
+    /// the same three figures read very differently at 5% and at 95%.
+    private func cacheFootnote(_ tokens: TokenUsage) -> String {
+        guard let hit = tokens.cacheHitRate else {
+            return "Nothing has been sent yet."
+        }
+        if hit > 0.6 {
+            return "Most of the input is being re-read from cache, which is charged at a fraction of fresh input. This is why a long conversation stays affordable."
+        }
+        if tokens.totalInput < 5_000 {
+            return "Too early to say much — the cache warms up over the first few turns."
+        }
+        // A low rate late in a conversation usually means something keeps
+        // changing near the front of the prompt, which invalidates everything
+        // after it.
+        return "A low hit rate this far in usually means something near the start of the prompt keeps changing, which throws away the cache behind it."
     }
 
     private func change(to value: String) {

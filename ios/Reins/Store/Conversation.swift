@@ -47,6 +47,12 @@ public final class Conversation {
     /// Slash commands this session offers. Fetched once; skills do not
     /// appear mid-sentence, and a request per keystroke would.
     public var commands: [SkillCommand] = []
+    /// Children this session spawned, and whether the machine could say.
+    public var subagents: [SubagentChild] = []
+    public var subagentsKnown = false
+    /// Set when a `subagent/descriptor` event lands, so the list is refetched
+    /// rather than going stale the moment the agent spawns something.
+    public private(set) var subagentsStale = false
     /// Whether the session is in plan mode, which changes what the composer says.
     public private(set) var planning = false
     /// The session's working directory, learned from the summary.
@@ -179,6 +185,12 @@ public final class Conversation {
         }
     }
 
+    /// Take the refetch flag, so a caller cannot loop on it.
+    public func consumeSubagentsStale() -> Bool {
+        defer { subagentsStale = false }
+        return subagentsStale
+    }
+
     // MARK: - Events
 
     /// Fold one session event.
@@ -217,6 +229,11 @@ public final class Conversation {
                       let status = TodoItem.Status(rawValue: item["status"]?.stringValue ?? "") else { return nil }
                 return TodoItem(content: content, status: status)
             }
+        case "subagent/descriptor":
+            // The descriptor itself is the machine's business — it carries
+            // model-hidden content and the fold has no use for it. What matters
+            // here is only that the child list just changed.
+            subagentsStale = true
         case "request/header":
             modelName = data.path("header", "config", "model")?.stringValue ?? modelName
         default:

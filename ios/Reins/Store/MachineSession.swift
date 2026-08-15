@@ -309,7 +309,21 @@ public final class MachineSession {
         // commands work today by typing their names — so a failure here is a
         // missing convenience, not a broken session, and is swallowed.
         Task { await loadCommands(fresh) }
+        // Once on open, so the menu can say whether there is anything to look
+        // at without making someone tap to find out there is not.
+        Task { await loadSubagents(fresh) }
         return fresh
+    }
+
+    /// Fetch the children of a conversation.
+    ///
+    /// Called when the sheet opens rather than on a timer: a child list is only
+    /// looked at deliberately, and polling it would spend a round trip per
+    /// conversation on something usually empty.
+    public func loadSubagents(_ conversation: Conversation) async {
+        guard let found = try? await harness.subagents(parentSessionId: conversation.sessionId) else { return }
+        conversation.subagents = found.children
+        conversation.subagentsKnown = found.available
     }
 
     private func loadCommands(_ conversation: Conversation) async {
