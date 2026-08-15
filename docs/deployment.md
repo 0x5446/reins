@@ -44,14 +44,16 @@ PORT=8787 node relay/lib/main.js
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/healthz` | 健康检查，给负载均衡用 |
-| `GET` | `/install` | 安装脚本，给 `curl \| sh` 用 |
+| `GET` | `/install` | 安装脚本，**默认关闭**，仅自托管时可开 |
 | `GET` | `/v1/machine/<deviceId>` | 这台机器现在在不在线 |
 | `POST` | `/v1/pair/offer` | Bridle 挂一个短码邀请 |
 | `GET` | `/v1/pair/claim?code=…` | app 用短码换配对载荷 |
 | `WS` | `/v1/bridle` | Bridle 的常连 |
 | `WS` | `/v1/app` | app 的连接 |
 
-`/install` 是哑管道原则的唯一例外，理由很实在：app 让人粘贴 `curl -fsSL https://reins.novabox.ai/install | sh`，这个 URL 总得有东西应答。放在 Relay 里等于一个域名一次部署，不用为了两个页面再养一个静态站。脚本在启动时读一次进内存——每次请求读盘等于给一个公开无认证的接口挂了个磁盘放大器。
+`/install` 这条路由**默认关闭**（`REINS_INSTALL_SCRIPT=` 空字符串）。
+
+它存在是给自托管的人用的——自己跑一套时，一个域名一次部署确实省事。但**官方部署不开它**：把安装脚本和公网中继放在同一个部署单元，等于把一次中继入侵放大成对所有新用户的供应链投毒。官方的安装脚本从仓库直接取（§2）。
 
 ### 前面要放 TLS
 
@@ -101,10 +103,17 @@ cloudflared tunnel run --url http://127.0.0.1:8787 reins
 | 每台机器的并发线路 | 8 | 一个人的几部设备够用，僵尸线路堆不起来 |
 | 每设备待领短码 | 3 | 反复 `bridle pair` 不会把短码空间填满 |
 | 短码有效期上限 | 15 分钟 | Bridle 请求更长也会被砍到这个值 |
-| **全局机器数** | 5,000 | 机器身份就是一对密钥，谁都能造一万个。没有全局上限，这个免费中继就是别人出钱的通用加密转发器 |
-| **全局线路数** | 20,000 | 很多机器各开几条时的内存兜底 |
 
-全局上限是**硬拒绝**而不是软降级：降级的中继让所有人一起变慢，拒绝第 5001 台只让一台失败。已连接的机器重连**不受**上限影响——把正在用的人挤掉是错的那一半。
+全局上限是**容量而非协议**，所以可配，默认保守：
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `REINS_MAX_MACHINES` | 1000 | 机器身份就是一对密钥，谁都能造一万个。没有全局上限，这个免费中继就是别人出钱的通用加密转发器 |
+| `REINS_MAX_CIRCUITS` | 4000 | 很多机器各开几条时的内存兜底 |
+
+按每连接约 40 KB 估：1000 台机器 + 4000 条线路 ≈ 200 MB，一台 1 GB 的小机器扛得住。**机器更大就往上调，不要留着默认值假装容量更大。**
+
+全局上限是**硬拒绝**而不是软降级：降级的中继让所有人一起变慢，拒绝一台只让一台失败。已连接的机器重连**不受**上限影响——把正在用的人挤掉是错的那一半。
 
 另有按调用方的令牌桶限流（允许一个突发，然后必须等）。
 
@@ -161,10 +170,23 @@ Cloudflare 面板里加一条：
 ```sh
 dig +short reins.novabox.ai
 curl -fsSL https://reins.novabox.ai/healthz
-curl -fsSL https://reins.novabox.ai/install | head -3
 ```
 
-第三条应该吐出 `#!/usr/bin/env sh`。到这一步，app 引导页里那行 `curl … | sh` 就是真的了。
+### 安装脚本挂哪
+
+**不挂在 Relay 上**（见 §1）。仓库转公开后直接从 GitHub 取：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/0x5446/reins/main/install.sh | sh
+```
+
+想要一个短一点的地址，就在 Cloudflare 加一条 **Redirect Rule**（不是 Worker，不用写代码）：
+
+```
+reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/reins/main/install.sh
+```
+
+这样 app 里那行 `curl -fsSL https://reins.novabox.ai/install | sh` 仍然成立，但中继被攻破**不会**污染安装链路——两者是不同的信任域。
 
 ### 转公开之前必须做完的
 

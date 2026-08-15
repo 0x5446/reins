@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { CapacityError, OfferStore, RateLimiter, Registry, RelayServer } from '../lib/index.js'
+import { CapacityError, OfferStore, RateLimiter, Registry, RelayServer, limits } from '../lib/index.js'
 
 /**
  * @param {string} device - device id the bundle names.
@@ -92,8 +92,9 @@ test('a machine refuses more circuits than it can serve', () => {
   assert.equal(registry.circuitCount, 8)
 })
 
-test('the relay serves the installer, because the app tells people to curl it', async (t) => {
-  const server = new RelayServer({ port: 0, host: '127.0.0.1' })
+test('the relay serves the installer only when an operator asks for it', async (t) => {
+  const here = new URL('../../install.sh', import.meta.url)
+  const server = new RelayServer({ port: 0, host: '127.0.0.1', installScript: here.pathname })
   const port = await server.listen()
   t.after(() => server.close())
 
@@ -106,10 +107,11 @@ test('the relay serves the installer, because the app tells people to curl it', 
   assert.match(script, /bridle pair/u, 'and it has to end by telling them what to run next')
 })
 
-test('an installer that is not there 404s instead of serving an empty script', async (t) => {
+test('the installer route is off by default', async (t) => {
   // Piping an empty body into `sh` succeeds silently and installs nothing,
-  // which is worse than an error.
-  const server = new RelayServer({ port: 0, host: '127.0.0.1', installScript: null })
+  // which is worse than an error. And the official deployment does not serve
+  // an installer at all: one compromise should not become a supply-chain event.
+  const server = new RelayServer({ port: 0, host: '127.0.0.1' })
   const port = await server.listen()
   t.after(() => server.close())
 
@@ -124,13 +126,14 @@ test('the relay refuses machines past its global ceiling', () => {
   // else paying, and the first symptom is the host out of file descriptors.
   const registry = new Registry()
   const sockets = []
-  // 5000 is the constant; register just past it.
-  for (let i = 0; i < 5000; i += 1) {
+  // Driven off the exported limit rather than a literal, so tuning capacity for
+  // a smaller box does not silently turn this into a no-op test.
+  for (let i = 0; i < limits.maxMachines; i += 1) {
     const socket = { close() {} }
     sockets.push(socket)
     registry.register(`dev-${String(i)}`, 'A Mac', '0.1.0', socket)
   }
-  assert.equal(registry.size, 5000)
+  assert.equal(registry.size, limits.maxMachines)
   assert.throws(() => registry.register('one-too-many', 'A Mac', '0.1.0', { close() {} }), CapacityError)
 })
 
@@ -139,9 +142,9 @@ test('a machine already known can always reconnect, even at the ceiling', () => 
   // is the wrong half of the population to shed, and a laptop that suspends
   // reconnects constantly.
   const registry = new Registry()
-  for (let i = 0; i < 5000; i += 1) {
+  for (let i = 0; i < limits.maxMachines; i += 1) {
     registry.register(`dev-${String(i)}`, 'A Mac', '0.1.0', { close() {} })
   }
   assert.doesNotThrow(() => registry.register('dev-0', 'A Mac', '0.1.0', { close() {} }))
-  assert.equal(registry.size, 5000, 'reconnecting displaces rather than adds')
+  assert.equal(registry.size, limits.maxMachines, 'reconnecting displaces rather than adds')
 })

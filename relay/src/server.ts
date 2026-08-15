@@ -9,7 +9,7 @@
  *
  * Endpoints:
  * - `GET  /healthz`               liveness and coarse counters
- * - `GET  /install`               the Bridle installer, for `curl … | sh`
+ * - `GET  /install`               the Bridle installer; off unless configured
  * - `GET  /v1/machine/:deviceId`  is that machine online, and what is it called
  * - `POST /v1/pair/offer`         a Bridle parks a short-code pairing bundle
  * - `GET  /v1/pair/claim?code=`   an app collects one, once
@@ -19,8 +19,6 @@
 
 import { readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import {
@@ -64,9 +62,11 @@ export interface RelayServerOptions {
    * means one host and one deployment instead of a second static site whose
    * only content is a 100-line shell script. Set to `null` to turn it off.
    *
-   * Defaults to the `install.sh` beside this package, which exists in a git
-   * checkout and not in a published tarball; when it is missing the route
-   * simply does not appear.
+   * **Off unless asked for.** The official deployment does not serve it:
+   * putting the install script and the public relay in one deployment unit
+   * turns a single relay compromise into supply-chain poisoning for every new
+   * user. Self-hosters who want one host for both can point this at their
+   * checkout's `install.sh`.
    */
   installScript?: string | null
 }
@@ -391,10 +391,12 @@ export class RelayServer {
  * @returns the script text, or `undefined` when there is none to serve.
  */
 function readInstaller(configured: string | null | undefined): string | undefined {
-  if (configured === null) return undefined
-  const path = configured ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'install.sh')
+  // Absent means off, not "find one nearby". An earlier version defaulted to
+  // the checkout's install.sh, which meant every relay served an installer
+  // whether its operator intended to or not.
+  if (configured === null || configured === undefined || configured.length === 0) return undefined
   try {
-    return readFileSync(path, 'utf8')
+    return readFileSync(configured, 'utf8')
   } catch {
     return undefined
   }

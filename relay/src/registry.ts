@@ -44,15 +44,33 @@ const MAX_CIRCUITS_PER_MACHINE = 8
  * encrypted forwarder with someone else paying for it, and the first sign of
  * trouble is the host running out of file descriptors.
  *
- * The number is a placeholder for an operator's real capacity. It is a hard
- * refusal rather than a soft one on purpose: a Relay that degrades under load
- * fails everyone at once, where a Relay that refuses the ten-thousand-and-first
- * machine fails one.
+ * Unlike the per-machine limits, this is **capacity, not protocol** — it depends
+ * on the box, so it is configurable and the default is deliberately modest. A
+ * connection costs roughly 40 KB of socket buffers and per-connection state, so
+ * a 1 GB host should not be promising five thousand of them.
+ *
+ * A hard refusal rather than a soft one, on purpose: a Relay that degrades
+ * under load fails everyone at once, where a Relay that refuses one machine
+ * fails one machine.
  */
-const MAX_MACHINES = 5_000
+const MAX_MACHINES = positiveInt(process.env['REINS_MAX_MACHINES'], 1_000)
 
 /** Circuits across every machine. Bounds memory when many machines each hold a few. */
-const MAX_TOTAL_CIRCUITS = 20_000
+const MAX_TOTAL_CIRCUITS = positiveInt(process.env['REINS_MAX_CIRCUITS'], 4_000)
+
+/**
+ * Read a positive integer from the environment.
+ * @param raw - the environment value, if set.
+ * @param fallback - used when unset, empty, or not a positive integer.
+ * @returns the configured limit.
+ */
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const value = Number(raw)
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+/** The configured ceilings, for `/healthz` and for the tests. */
+export const limits = { maxMachines: MAX_MACHINES, maxCircuits: MAX_TOTAL_CIRCUITS } as const
 
 /** Raised when a global budget is exhausted, so the caller can say which. */
 export class CapacityError extends Error {}

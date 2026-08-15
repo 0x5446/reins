@@ -55,6 +55,17 @@ function constant(source, name) {
   return Number.isFinite(product) ? String(product) : undefined
 }
 
+/**
+ * Pull the fallback out of `positiveInt(process.env['NAME'], 1_000)`.
+ * @param {string} source - file contents.
+ * @param {string} name - the environment variable.
+ * @returns {string | undefined} the default, underscores stripped.
+ */
+function envDefault(source, name) {
+  const match = new RegExp(`process\\.env\\['${name}'\\]\\s*,\\s*([0-9_]+)`).exec(source)
+  return match?.[1]?.replaceAll('_', '')
+}
+
 // --- Constants a reimplementer would copy ------------------------------------
 
 const protocolDoc = read('docs/protocol.md')
@@ -82,8 +93,8 @@ const checks = [
   ['心跳间隔（毫秒）', constant(session, 'PING_INTERVAL_MS'), [protocolDoc, deployDoc], ['25 秒', '25s']],
   ['重放缓冲容量', constant(eventLog, 'DEFAULT_CAPACITY'), [protocolDoc], null],
   ['每机器线路上限', constant(registry, 'MAX_CIRCUITS_PER_MACHINE'), [deployDoc], null],
-  ['全局机器上限', constant(registry, 'MAX_MACHINES'), [deployDoc], null],
-  ['全局线路上限', constant(registry, 'MAX_TOTAL_CIRCUITS'), [deployDoc], null],
+  ['全局机器上限（默认）', envDefault(registry, 'REINS_MAX_MACHINES'), [deployDoc], null],
+  ['全局线路上限（默认）', envDefault(registry, 'REINS_MAX_CIRCUITS'), [deployDoc], null],
   ['每设备短码上限', constant(offers, 'MAX_OFFERS_PER_DEVICE'), [deployDoc], null],
 ]
 

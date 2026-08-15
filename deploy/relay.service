@@ -1,0 +1,66 @@
+# The Relay, as a systemd unit.
+#
+#   sudo cp deploy/relay.service /etc/systemd/system/reins-relay.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now reins-relay
+#
+# Deliberately bound to loopback. Nothing on a mainland Chinese host should
+# listen on a public port for a domain that cannot be ICP-filed, and the
+# Cloudflare tunnel reaches it over loopback anyway — so there is no reason to
+# expose it and one clear reason not to.
+
+[Unit]
+Description=Reins Relay — content-blind switchboard
+Documentation=https://github.com/0x5446/reins/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reins
+Group=reins
+WorkingDirectory=/opt/reins
+ExecStart=/usr/bin/node /opt/reins/relay/lib/main.js
+
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+# Sized for a 1 GB host at roughly 40 KB per connection. Raise these on a bigger
+# box rather than leaving the defaults and hoping.
+Environment=REINS_MAX_MACHINES=1000
+Environment=REINS_MAX_CIRCUITS=4000
+# The installer is served from the repository, not from here — a relay that also
+# hands out the install script turns one compromise into a supply-chain event.
+Environment=REINS_INSTALL_SCRIPT=
+
+Restart=always
+RestartSec=2
+# Long enough to let in-flight circuits close on their own during a restart.
+TimeoutStopSec=30
+
+# Hardening. The Relay reads no files after start, writes none, and needs no
+# privileges — so take all of it away and let the unit fail loudly if that ever
+# stops being true.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# One connection is two sockets; the ceilings above imply about 10k fds.
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reins-relay
+
+[Install]
+WantedBy=multi-user.target
