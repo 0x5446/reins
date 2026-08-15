@@ -151,15 +151,49 @@ for (const kind of ['req', 'res', 'cancel', 'respond', 'resume', 'ev', 'resync',
 
 const conversation = read('ios/Reins/Store/Conversation.swift')
 const foldDoc = read('docs/fold.md')
-for (const key of ['title', 'todos', 'contextPressure', 'plan']) {
+
+/**
+ * Keys named in one of fold.md's two projection sections.
+ *
+ * §5.2 is a table and §5.3 is a prose line, so `where` says which. Reading
+ * every backticked token out of the table would pick up the ones in its
+ * description column — `used`, `value.projectedTokens` — and report them as
+ * missing cases.
+ */
+function projectionKeys(heading, where) {
+  const start = foldDoc.indexOf(heading)
+  if (start < 0) {
+    problems.push(`fold.md 里找不到「${heading}」小节`)
+    return []
+  }
+  // Up to the next heading of any level, so adding a §5.4 cannot silently
+  // extend §5.3 to the end of the file.
+  const rest = foldDoc.slice(start + heading.length)
+  const end = rest.search(/\n#{2,4} /)
+  const body = end < 0 ? rest : rest.slice(0, end)
+  const pattern = where === 'firstColumn'
+    ? /^\|\s*`([a-zA-Z][a-zA-Z0-9]*)`\s*\|/gm
+    : /`([a-zA-Z][a-zA-Z0-9]*)`/g
+  const keys = [...body.matchAll(pattern)].map(match => match[1])
+  // A section that suddenly matches nothing means the shape changed and this
+  // check went quiet, which is worse than it failing.
+  expect(keys.length > 0, `fold.md「${heading}」里没有解析出任何 projection 键`)
+  return keys
+}
+
+// Both lists come out of the document rather than being copied into this file.
+// A hand-kept copy is the bug this check exists to prevent, one level up: when
+// §5.3 listed nine keys and this script named three of them, folding one of the
+// other six changed nothing here and the doc quietly became wrong.
+for (const key of projectionKeys('### 5.2 已折叠的键', 'firstColumn')) {
   expect(conversation.includes(`case "${key}"`),
     `fold.md §5.2 说折叠了 ${key}，但 Conversation.swift 里没有这个 case`)
 }
-for (const key of ['permissions', 'sessionStats', 'contextBreakdown']) {
-  // The inverse direction: if one of these gets implemented, the doc listing it
-  // as "not yet folded" becomes a lie, and the person reading it will
-  // reimplement something that already exists.
-  expect(!conversation.includes(`case "${key}"`) || !foldDoc.includes(`\`${key}\``),
+for (const key of projectionKeys('### 5.3 尚未折叠的键', 'prose')) {
+  // The inverse direction: once one of these is implemented, a doc still
+  // listing it as "not yet folded" sends the next reader off to reimplement
+  // something that already exists.
+  expect(!conversation.includes(`case "${key}"`),
     `${key} 现在已经折叠了，但 fold.md §5.3 还把它列在"尚未折叠"里`)
 }
 

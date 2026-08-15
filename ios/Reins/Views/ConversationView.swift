@@ -15,6 +15,7 @@ struct ConversationView: View {
     @State private var renaming = false
     @State private var renameText = ""
     @State private var showModels = false
+    @State private var showInfo = false
     @State private var atBottom = true
 
     var body: some View {
@@ -50,6 +51,10 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showModels) {
             ModelPicker(session: session, sessionId: sessionId)
+        }
+        .sheet(isPresented: $showInfo) {
+            SessionInfoView(sessionId: sessionId)
+                .environment(session)
         }
         .overlay(alignment: .top) { ProblemBanner(session: session) }
     }
@@ -267,9 +272,20 @@ struct ConversationView: View {
                         Label("Stop", systemImage: "stop.circle")
                     }
                 }
-                if let fraction = conversation?.contextFraction {
-                    Section {
-                        Label("Context \(Int(fraction * 100))% full", systemImage: "gauge.with.dots.needle.bottom.50percent")
+                Section {
+                    Button {
+                        showInfo = true
+                    } label: {
+                        // The context percentage rides on the label rather than
+                        // being a dead row of its own: it is the number worth
+                        // seeing without opening anything, and it doubles as the
+                        // reason to open this.
+                        if let fraction = conversation?.contextFraction {
+                            Label("Session · context \(Int((fraction * 100).rounded()))%",
+                                  systemImage: "gauge.with.dots.needle.bottom.50percent")
+                        } else {
+                            Label("Session", systemImage: "gauge.with.dots.needle.bottom.50percent")
+                        }
                     }
                 }
             } label: {

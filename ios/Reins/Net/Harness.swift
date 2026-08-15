@@ -106,6 +106,28 @@ public struct Harness: Sendable {
         try await tunnel.call("session.cancel", .object(["sessionId": .string(sessionId)]))
     }
 
+    /// Change how much the agent is allowed to touch.
+    ///
+    /// Two calls, because the machine uses optimistic concurrency: read the
+    /// namespace's revision, then send the patch against it. Passing a stale
+    /// revision is refused rather than silently overwriting whoever changed it
+    /// in between — which on this machine is most likely the person sitting at
+    /// it, and losing their change would be the worse outcome.
+    ///
+    /// This is a machine-wide setting. `permission` is one namespace and it has
+    /// one value; there is no per-session variant to reach for.
+    public func setPermission(_ preset: String) async throws {
+        let described = try await tunnel.call("settings.describe")
+        let revision = (described["namespaces"]?.arrayValue ?? [])
+            .first { $0["ns"]?.stringValue == "permission" }?["revision"]?.intValue
+        var payload: [String: JSONValue] = [
+            "ns": .string("permission"),
+            "patch": .object(["defaultPreset": .string(preset)]),
+        ]
+        if let revision { payload["expectedRevision"] = .number(Double(revision)) }
+        try await tunnel.call("settings.update", .object(payload))
+    }
+
     /// Set a session's title by hand.
     public func rename(sessionId: String, title: String) async throws {
         try await tunnel.call("session.rename", .object([

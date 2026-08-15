@@ -230,4 +230,31 @@ public enum Format {
         guard let home, !home.isEmpty, path.hasPrefix(home) else { return path }
         return "~" + path.dropFirst(home.count)
     }
+
+    /// A token count, short enough to sit in a row without wrapping.
+    ///
+    /// Deliberately coarse above a thousand. Nobody compares 687,412 to
+    /// 688,003; they want to know it is most of a million.
+    public static func tokens(_ count: Int) -> String {
+        if count < 1_000 { return "\(count)" }
+        if count < 1_000_000 {
+            let thousands = Double(count) / 1_000
+            return thousands < 10
+                ? String(format: "%.1fk", thousands)
+                : "\(Int(thousands.rounded()))k"
+        }
+        return String(format: "%.1fM", Double(count) / 1_000_000)
+    }
+
+    /// A duration in the largest unit that still says something useful.
+    public static func duration(ms: Int) -> String {
+        if ms < 1_000 { return "\(ms)ms" }
+        let seconds = Double(ms) / 1_000
+        if seconds < 60 { return String(format: "%.1fs", seconds) }
+        let minutes = Int(seconds) / 60
+        let rest = Int(seconds) % 60
+        if minutes < 60 { return rest == 0 ? "\(minutes)m" : "\(minutes)m \(rest)s" }
+        let hours = minutes / 60
+        return "\(hours)h \(minutes % 60)m"
+    }
 }

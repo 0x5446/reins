@@ -272,17 +272,23 @@ projection 是 agent 算好的派生状态，两条路到达：
 |---|---|
 | `title` | `title = value` |
 | `todos` | 同 §3.8 |
-| `contextPressure` | `window = value.contextWindow`；`used = value.projectedTokens ?? value.pressureTokens`；`window > 0` 且 `used` 存在时 `contextFraction = min(1, used/window)`，否则置 nil |
+| `contextPressure` | `window = value.contextWindow`；`used = value.projectedTokens ?? value.pressureTokens`；`window > 0` 且 `used` 存在时 `contextFraction = min(1, used/window)`，否则置 nil。另外原样留下 `contextTokens = used`、`contextWindow = window`——"83%" 和 "830k / 1M" 回答的不是同一个问题 |
 | `plan` | `planning = (value.mode == "plan") 或 (value.active == true)` |
+| `sessionStats` | `stats = SessionStats(value)`。`ttftMs` 是**总和**、`ttftSteps` 是次数，平均值要自己除；`ttftSteps == 0` 时返回 nil 而不是 0 |
+| `tokenUsage` | `tokens = TokenUsage(value)`。`cacheHitRate` 在没有任何输入时返回 nil——"还没请求过"和"每次都没命中"是两件事，用 0% 表达前者是错的 |
+| `contextBreakdown` | `contextBreakdown = ContextBreakdown(value)`（system / tools / messages 三段） |
+| `permissions` | `permissions = PermissionChoice(value)`（`options[]` + `currentValue`）。**这是机器级设置**，不是会话级的，改它会影响那台机器上的全部会话 |
 | 其他 | 忽略 |
 
 ### 5.3 尚未折叠的键
 
 数据已在传输中，加一个 case 即可用（无需新请求）：
 
-`permissions` · `sessionStats` · `contextBreakdown` · `tokenUsage` · `subagent` · `subagentTiming` · `goal` · `sessionListMetadata` · `imageLimits`
+`subagent` · `subagentTiming` · `goal` · `sessionListMetadata` · `imageLimits`
 
 形状见 `docs/architecture.md` §3.2。
+
+> `scripts/check-docs.mjs` 从上面两个小节**解析**键名再比对代码，不是手抄一份清单。这一条本身就是被这个 bug 教出来的：早先脚本里硬编了 §5.3 九个键中的三个，于是折叠另外六个中的任何一个，检查都不会响。
 
 ---
 

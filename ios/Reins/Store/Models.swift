@@ -312,3 +312,135 @@ public struct MachineDescription: Equatable {
         attachedSessions = value["attachedSessions"]?.intValue ?? 0
     }
 }
+
+// MARK: - What the session cost
+
+/// Time and shape of the work so far.
+///
+/// Every field here is already arriving in the `sessionStats` projection, and
+/// was being dropped on the floor. On a phone this is the answer to the two
+/// questions the transcript cannot answer at a glance — *is it stuck* and *is
+/// this getting expensive* — so it costs nothing to keep and reads as the
+/// summary line the web UI puts under its composer.
+public struct SessionStats: Equatable, Sendable {
+    public var turns: Int
+    public var steps: Int
+    public var llmMs: Int
+    public var toolMs: Int
+    /// Time to first token, summed over `ttftSteps` steps rather than one.
+    public var ttftMs: Int
+    public var ttftSteps: Int
+    public var decodeMs: Int
+    public var decodeTokens: Int
+
+    public init?(_ value: JSONValue?) {
+        guard let value, let turns = value["turns"]?.intValue else { return nil }
+        self.turns = turns
+        steps = value["steps"]?.intValue ?? 0
+        llmMs = value["llmMs"]?.intValue ?? 0
+        toolMs = value["toolMs"]?.intValue ?? 0
+        ttftMs = value["ttftMs"]?.intValue ?? 0
+        ttftSteps = value["ttftSteps"]?.intValue ?? 0
+        decodeMs = value["decodeMs"]?.intValue ?? 0
+        decodeTokens = value["decodeTokens"]?.intValue ?? 0
+    }
+
+    /// Mean time to first token, or nil before there is one to average.
+    public var averageTtftMs: Int? {
+        ttftSteps > 0 ? ttftMs / ttftSteps : nil
+    }
+
+    /// Output tokens per second while decoding, or nil before decoding happened.
+    public var tokensPerSecond: Double? {
+        decodeMs > 0 ? Double(decodeTokens) / (Double(decodeMs) / 1000) : nil
+    }
+}
+
+/// What has been paid for, in tokens.
+public struct TokenUsage: Equatable, Sendable {
+    public var uncachedInput: Int
+    public var output: Int
+    public var cacheRead: Int
+    public var cacheWrite: Int
+
+    public init?(_ value: JSONValue?) {
+        guard let value, value["outputTokens"] != nil || value["uncachedInputTokens"] != nil else { return nil }
+        uncachedInput = value["uncachedInputTokens"]?.intValue ?? 0
+        output = value["outputTokens"]?.intValue ?? 0
+        cacheRead = value["cacheReadTokens"]?.intValue ?? 0
+        cacheWrite = value["cacheWriteTokens"]?.intValue ?? 0
+    }
+
+    public var totalInput: Int { uncachedInput + cacheRead + cacheWrite }
+
+    /// Share of input served from cache. Nil when nothing went in, rather than
+    /// zero — "no requests yet" and "every request missed" are not the same
+    /// thing and a 0% that means the first is misleading.
+    public var cacheHitRate: Double? {
+        totalInput > 0 ? Double(cacheRead) / Double(totalInput) : nil
+    }
+}
+
+/// Where the context window has gone.
+public struct ContextBreakdown: Equatable, Sendable {
+    public var system: Int
+    public var tools: Int
+    public var messages: Int
+
+    public init?(_ value: JSONValue?) {
+        guard let value, value["systemTokens"] != nil || value["messageTokens"] != nil else { return nil }
+        system = value["systemTokens"]?.intValue ?? 0
+        tools = value["toolsTokens"]?.intValue ?? 0
+        messages = value["messageTokens"]?.intValue ?? 0
+    }
+
+    public var total: Int { system + tools + messages }
+}
+
+/// How much the agent is allowed to touch, and what else it could be set to.
+///
+/// Arrives per session in the `permissions` projection, but it is a *machine*
+/// setting — changing it changes it everywhere. The UI has to say so, because
+/// "read only" that quietly applied to every other conversation would be a
+/// nasty surprise in the other direction too.
+public struct PermissionChoice: Equatable, Sendable {
+    public struct Option: Identifiable, Equatable, Sendable {
+        public var id: String { value }
+        public var value: String
+        public var name: String
+    }
+
+    public var options: [Option]
+    public var current: String
+
+    public init?(_ value: JSONValue?) {
+        guard let value, let current = value["currentValue"]?.stringValue else { return nil }
+        self.current = current
+        options = (value["options"]?.arrayValue ?? []).compactMap { entry in
+            guard let raw = entry["value"]?.stringValue else { return nil }
+            return Option(value: raw, name: entry["name"]?.stringValue ?? raw)
+        }
+    }
+
+    /// The label to show for a raw value. The machine sends the raw string as
+    /// the name too, so this is where `danger-full-access` becomes something
+    /// worth reading on a phone.
+    public static func label(for value: String) -> String {
+        switch value {
+        case "read-only": return "Read only"
+        case "workspace-write": return "Workspace write"
+        case "danger-full-access": return "Full access"
+        default: return value
+        }
+    }
+
+    /// What the choice actually permits, in one line.
+    public static func detail(for value: String) -> String {
+        switch value {
+        case "read-only": return "Look, don’t touch. Every write asks first."
+        case "workspace-write": return "Edit inside the working folder without asking. Anything outside it still asks."
+        case "danger-full-access": return "No sandbox and no questions. Everything your account can do, it can do."
+        default: return ""
+        }
+    }
+}

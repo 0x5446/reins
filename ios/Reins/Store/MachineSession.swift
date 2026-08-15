@@ -390,6 +390,25 @@ public final class MachineSession {
         }
     }
 
+    /// Change how much the agent may touch, machine-wide.
+    ///
+    /// Returns the failure to show inline rather than setting `problem`: this is
+    /// a choice made inside one sheet, and a banner over the whole app would put
+    /// the message somewhere other than the control that produced it. Nothing is
+    /// applied locally on success — the machine answers with a `permissions`
+    /// projection, and letting that be the only source of truth means the
+    /// checkmark cannot disagree with the machine.
+    ///
+    /// - Returns: nil on success, otherwise what to tell the person.
+    public func setPermission(_ preset: String) async -> String? {
+        do {
+            try await harness.setPermission(preset)
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "The Mac would not change the access mode."
+        }
+    }
+
     /// Start a conversation and return its id.
     /// Choose what new conversations start on. `nil` hands the choice back to
     /// the machine.

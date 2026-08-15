@@ -32,6 +32,18 @@ public final class Conversation {
     public private(set) var queue: [QueuedMessage] = []
     /// Fraction of the context window in use, when the machine reports it.
     public private(set) var contextFraction: Double?
+    /// Tokens in the window and its size, kept alongside the fraction because
+    /// "83%" and "830k of 1M" answer different questions.
+    public private(set) var contextTokens: Int?
+    public private(set) var contextWindow: Int?
+    /// Turns, steps, and timings. Nil until the first turn has run.
+    public private(set) var stats: SessionStats?
+    /// Tokens in and out, and how much of the input was cached.
+    public private(set) var tokens: TokenUsage?
+    /// Where the context has gone: system prompt, tool schemas, conversation.
+    public private(set) var contextBreakdown: ContextBreakdown?
+    /// How much the agent may touch, and what else it could be set to.
+    public private(set) var permissions: PermissionChoice?
     /// Whether the session is in plan mode, which changes what the composer says.
     public private(set) var planning = false
     /// The session's working directory, learned from the summary.
@@ -145,8 +157,20 @@ public final class Conversation {
             } else {
                 contextFraction = nil
             }
+            contextTokens = value["projectedTokens"]?.intValue ?? value["pressureTokens"]?.intValue
+            contextWindow = value["contextWindow"]?.intValue
         case "plan":
             planning = value["mode"]?.stringValue == "plan" || value["active"]?.boolValue == true
+        // The four below were already arriving and being discarded. Folding them
+        // is a `case` each; the alternative was a request per number.
+        case "sessionStats":
+            stats = SessionStats(value)
+        case "tokenUsage":
+            tokens = TokenUsage(value)
+        case "contextBreakdown":
+            contextBreakdown = ContextBreakdown(value)
+        case "permissions":
+            permissions = PermissionChoice(value)
         default:
             break
         }
