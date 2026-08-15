@@ -14,6 +14,7 @@
 - 两个入口，一份核心：§8
 - iOS 端：§9
 - 待建子系统（推送 §10、定时 §11、多 agent §12、trace §13）
+- 版本协商（**已修订**）：§14
 - 版本兼容：§14
 - 测试策略：§15
 - 不变量清单：§16
@@ -198,7 +199,8 @@ interface AgentClient {
 | 手机静态私钥 | iOS Keychain，`afterFirstUnlockThisDeviceOnly` | 装机时生成，重置才换 |
 | 机器静态私钥 | `~/.reins/bridle.json`，0600 | 首次运行生成 |
 | 机器签名密钥（Ed25519） | 同上 | 同上，与静态密钥**分离** |
-| 每连接临时密钥 | 内存 | 一次连接 |
+| 每连接临时密钥 | 内存 | 一次连接。**不可用于推送**——推送发生时它已不存在，见 §10.2 |
+| 手机推送私钥（X25519） | Keychain 共享组，`afterFirstUnlockThisDeviceOnly` | 长期，可轮换；app 与通知扩展共用 |
 | 配对令牌 | 状态文件，带过期 | **一次性**，用掉即废 |
 
 **密钥不复用。**签名用 Ed25519，DH 用 X25519，对称加密用握手派生的传输密钥——三者独立。把一个 32 字节秘密同时当 SecretBox key、Ed25519 seed 和 X25519 私钥用，是明确的密码学异味。
@@ -331,43 +333,86 @@ AppModel        设备身份、已配对机器列表、当前连接的机器（�
 
 **这是品类第一痛点**，也是本项目唯一有说服力的付费支点。当前只有本地通知，app 被挂起后连接即断。
 
-### 10.1 难点：Relay 必须保持内容盲
+### 10.1 难点一：Relay 必须保持内容盲
 
 如果 Relay 直接发一条带文字的 APNs 告警，它就读到了通知内容——违反 §2。
 
-**解法：APNs 的 `mutable-content` + Notification Service Extension。**
+**解法：APNs 的 `mutable-content` + Notification Service Extension（NSE）。**Relay 搬的是不透明 blob，NSE 在设备上解密后才成为可见文字。
+
+### 10.2 难点二：NSE 拿不到隧道密钥（早期设计在这里是错的）
+
+早期设计写"NSE 从 Keychain 共享组取密钥解密"。**这行不通。**
+
+Bridle 加密告警用的是隧道密钥，而隧道密钥是每连接临时派生、只存在于内存、连接断开即失效的（§5.2）。推送恰恰发生在 **app 已经挂起、隧道已经断掉**的时候——那把密钥此刻不存在，NSE 无从取起。把它持久化更糟：等于把前向保密扔掉。
+
+**解法：一把独立的、长期的推送密钥，与 Noise 通道完全无关。**
 
 ```
-Bridle                        Relay                    iPhone
-  │ 组装告警文本                 │                         │
-  │ 用隧道密钥加密 ─────────────►│                         │
-  │                             │ 调 APNs，payload 是密文  │
-  │                             │ ───────────────────────►│
-  │                             │                         │ NSE 解密 → 显示
+配对时（或首次注册推送时）：
+  app 生成 X25519 推送密钥对 + 一个 keyId
+  私钥存入 app 与 NSE 共享的 Keychain access group
+       accessibility = afterFirstUnlockThisDeviceOnly
+       （必须是 afterFirstUnlock 而不是 whenUnlocked——
+         通知到达时设备通常是锁屏的，NSE 仍需读到它）
+  公钥 + keyId 经隧道送给 Bridle
+
+发通知时：
+  Bridle 用 sealed box 封给该公钥：
+       临时 X25519 密钥对 → DH(临时私钥, 推送公钥) → HKDF → ChaCha20-Poly1305
+       线上 = 临时公钥(32) ‖ 密文 ‖ 标签(16)
+  这套原语两端都已有（node:crypto / CryptoKit），不引入新依赖
 ```
 
-Relay 搬的是不透明 blob，NSE 在设备上解密后才成为可见文字。**这是把 §2 的性质延伸到推送链路的唯一正确做法**，而且 Apple 原生支持。
+`keyId` 让轮换可行：Bridle 同时保留新旧两把公钥一段宽限期，通知里带 keyId，NSE 据此选私钥。
 
-### 10.2 诚实的泄露
+### 10.3 载荷预算与降级
 
-Relay 必须知道 **device token**（它要调 APNs）。因此它能建立 `device token ↔ 某台机器` 的关联。
+APNs 单条上限 **4 KB**，且 sealed box 有 48 字节固定开销、base64 再乘 1.33。可用明文约 **2.9 KB**——够放标题和正文，但 agent 的输出**必须截断**，不能整段塞。
+
+四件必须定义、早期设计漏掉的事：
+
+| 项 | 规则 |
+|---|---|
+| NSE 失败或超时 | iOS 会显示**原始载荷**。所以可见字段必须预置不泄露内容的占位文案（如"你的 Mac 在等你"），密文只放在 `mutable-content` 的自定义字段里 |
+| 折叠 | 按会话设 `apns-collapse-id`，否则十次审批堆十条通知 |
+| 过期 | 设 `apns-expiration`，一小时后才送达的审批请求没有意义 |
+| 去重 | 载荷带事件序号，NSE 侧丢弃已见过的 |
+
+**不用静默推送做唤醒。**静默推送受系统节流，且用户强杀 app 后不保证送达。用可见告警 + NSE 解密，这是唯一可靠的路径。
+
+### 10.4 诚实的泄露
+
+Relay 必须知道 **device token**（它要调 APNs），因此能建立 `device token ↔ 某台机器` 的关联。
 
 能否避免？只有让 Bridle 自己调 APNs——那需要把 APNs 私钥分发到每个用户的机器上，不可接受。
 
 **所以这是一个真实的、不可消除的元数据泄露，必须写进隐私说明。**Relay 知道：谁在线、谁连谁、搬了多少字节、哪个 token 属于哪台机器。它不知道：任何内容。
 
-### 10.3 落点
+### 10.5 落点
 
 | 改哪 | 做什么 |
 |---|---|
 | `ios/Reins/App/Notifier.swift` | 注册远程通知，拿 device token |
-| 新帧 `push-token {token, environment}` | app→bridle，走加密隧道 |
-| `bridle/src/push.ts` | 存 token；审批/提问/turn 结束/挂死 时组装并加密告警 |
+| `ios/Reins/Net/PushIdentity.swift`（新） | 生成/轮换推送密钥对，写共享 Keychain group |
+| 新帧 `push-register {token, environment, keyId, publicKey}` | app→bridle，走加密隧道 |
+| `bridle/src/push.ts` | 存 token/keyId/公钥；组装并封装告警 |
 | `relay/src/push.ts` | `POST /v1/push`，验签，调 APNs，不解密 |
-| `ios/ReinsNotify/`（新 target） | NSE，从 Keychain 共享组取密钥解密 |
-| `ios/Reins/Reins.entitlements` | `aps-environment` |
+| `ios/ReinsNotify/`（新 target） | NSE，按 keyId 取私钥解密并替换告警 |
+| `ios/Reins/Reins.entitlements` | `aps-environment` + Keychain access group |
 
-**前置条件：付费 Apple Developer Program（$99/年）。**免费个人 team 的 profile 无 `aps-environment`，且后台 Keys 页面不开放，无法签发 APNs key。这是硬阻塞，不是可以绕过的工程问题。
+### 10.6 前置条件与工期
+
+**付费 Apple Developer Program（$99/年）是硬阻塞**：免费个人 team 的 profile 无 `aps-environment`，后台 Keys 页面也不开放，无法签发 APNs key。这不是可以绕过的工程问题。
+
+**工期重估**：早期文档写"一天"，那是在忽略推送密钥协议、载荷预算、NSE target、密钥轮换、以及真机验收矩阵的前提下。实际范围包括：
+
+- 推送密钥的注册/轮换/吊销/重装/多设备语义
+- 完整载荷格式与 4 KB 预算
+- NSE target 的建立、签名、与主 app 的 Keychain 共享
+- Relay 侧 APNs 凭据的保管与调用配额
+- **真机验收矩阵**：锁屏、挂起、用户强杀、NSE 超时、大载荷、密钥轮换中途到达的旧通知
+
+按"数天"计，不按"一天"计。实施前应先补一份规范级文档（`docs/README.md` 的规格等级）。
 
 ---
 
@@ -430,11 +475,54 @@ webui 的轨迹是**横向甘特图**（Turn / Request #N / TOOL 逐行铺开，
 
 ## 14. 版本兼容
 
-app 和 Bridle 各自更新，不保证同步。
+app 和 Bridle 各自更新，不保证同步。上架之后这不是例外而是常态：商店审核有延迟、用户不升级、Bridle 有插件和独立二进制两种形态可各自更新。
 
-- **隧道版本**（`tunnelVersion = 1`）混进 Noise prologue。不匹配则握手直接失败，`fault{reason: "version"}`，app 提示"更新较旧的那一端"。**协议层不做向后兼容**——它太小、太核心，兼容两个版本的收益低于风险。
-- **应用层向前兼容**：未知帧类型、未知事件类型、未知渲染意图，一律容忍。app 可以连上比自己新的 Bridle。
-- **历史瘦身是可选优化**：app 仍然传 `maxMessages`，所以对着没更新的 Bridle 也不会被 22MB 打死。
+### 14.1 之前的设计是错的
+
+原设计把隧道版本混进 Noise prologue（`reins-tunnel/v1`），版本不匹配则握手失败，并声称此时发 `fault{reason:"version"}` 让 app 提示"更新较旧的那一端"。
+
+**这句话做不到。**prologue 不同会让响应方在解密握手消息一时就失败——此时安全通道还没建立，任何拒绝都发不出去，也无法被认证。客户端只能看到"握手失败"，无法区分三种完全不同的情况：版本偏斜、连错了机器、被中间人篡改。
+
+而且"不做向后兼容"在一个会上架的产品上等价于：**任何一次版本推进都硬断一批用户，且他们看不到原因。**
+
+### 14.2 版本移出 prologue，进握手载荷
+
+```
+prologue = "reins-tunnel"        ← 稳定的协议族标识，永不变
+```
+
+版本改为在**握手载荷里协商**。这行得通的原因是一个不对称性：响应方**总能**解密消息一（prologue 一致即可），因此总能读到发起方声明的版本，也总能用消息二发回一个**已认证的**拒绝。
+
+```
+消息一载荷   { versions: [2, 1], name, client, token? }   发起方支持的版本，偏好在前
+消息二载荷   { ok: true,  version: 2, machine, bridle }    响应方选定的共同版本
+             { ok: false, reason: "version", supported: [3, 4] }   无交集时
+```
+
+选定规则：响应方取**双方都支持的最高版本**。之后双方都按该版本讲话。
+
+无交集时的拒绝是可读的，app 因此能说出**具体哪一端旧了**——比较 `supported` 与自己的列表即可。
+
+### 14.3 兼容窗口
+
+- **至少同时支持当前版与上一版**（N 与 N−1）
+- 推新版的顺序固定：**先发能接受双版本的 Bridle，再灰度 app**
+- 只有当旧版本占比降到阈值以下，才移除对它的支持
+- 每次版本推进必须跑新旧双向互通测试：新 app ↔ 旧 Bridle、旧 app ↔ 新 Bridle
+
+### 14.4 这次改动本身会断一次
+
+把版本移出 prologue 是**破坏性的**：现有 v1 客户端的 prologue 是 `reins-tunnel/v1`，改后握手必然失败，所有已配对设备需要重新配对。
+
+**因此这件事必须在公开发布之前做完。**当前只有一台已配对设备（开发者自己的手机），代价是一次重新配对；上架之后再做，代价是全部用户。
+
+这是协议最后一次在没有协商机制的情况下破坏兼容。
+
+### 14.5 应用层始终向前兼容
+
+未知帧类型、未知事件类型、未知渲染意图，一律容忍（§2、§3.3、`fold.md` §2.2）。这条独立于版本协商：即使版本相同，一端也可能带着另一端不认识的扩展。
+
+历史瘦身是可选优化，app 仍然传 `maxMessages`，所以对着没更新的 Bridle 也不会被 22MB 打死。
 
 ---
 
@@ -480,6 +568,9 @@ UI          6（XCUITest，真机或模拟器，连真 Bridle）
 | 10 | 未知事件静默，不渲染噪音 | `testUnknownEventIsSilent` |
 | 11 | 历史瘦身不丢未提交内容 | `chunks of the in-progress message are kept` |
 | 12 | 插件 apply 不阻塞、dispose 不抛 | `dsh-plugin/tests/plugin.test.js` |
+| 13 | 版本不匹配时拒绝是**已认证且可读**的，不是握手失败 | 待补：新旧双向互通测试（§14.3） |
+| 14 | 至少同时支持当前版与上一版 | 待补：同上 |
+| 15 | 推送密钥独立于隧道密钥，且在 app 挂起后仍可解密 | 待补：真机验收矩阵（§10.6） |
 
 ---
 
@@ -504,13 +595,15 @@ UI          6（XCUITest，真机或模拟器，连真 Bridle）
 诚实清单。每一条都是主动选择，不是疏忽。
 
 1. **配对设备 = dsh 完整权限**（§5.4）。无细粒度授权，因为 dsh 无此概念。
-2. **Relay 知道 device token ↔ 机器的关联**（§10.2）。推送落地后不可消除。
+2. **Relay 知道 device token ↔ 机器的关联**（§10.4）。推送落地后不可消除。
 3. **同时只连一台机器**（§9.1）。换电池换来的。
 4. **绑定 dsh**（§12）。深度换可移植性。
 5. **折叠成本在客户端**。大会话首次加载仍然重，瘦身缓解但没消除。
 6. **协议不向后兼容**（§14）。版本不匹配直接拒绝，不做双版本支持。
 7. **iOS 独占**。
-8. **推送依赖付费 Apple 账号**（§10.3）。硬阻塞。
+8. **推送依赖付费 Apple 账号**（§10.6）。硬阻塞，且它同时卡着 TestFlight 与上架——是**一个决策卡三件事**。
+9. **版本移出 prologue 会破坏现有配对一次**（§14.4）。必须在公开发布前做完。
+10. **Relay 会持有 APNs 私钥**（§10.5）。它从"只搬密文的哑管道"变成"还持有一份对外发送凭据"，这是推送带来的、不可避免的信任面扩大。
 
 ---
 
