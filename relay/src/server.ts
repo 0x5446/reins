@@ -9,6 +9,7 @@
  *
  * Endpoints:
  * - `GET  /healthz`               liveness and coarse counters
+ * - `GET  /install`               the Bridle installer, for `curl … | sh`
  * - `GET  /v1/machine/:deviceId`  is that machine online, and what is it called
  * - `POST /v1/pair/offer`         a Bridle parks a short-code pairing bundle
  * - `GET  /v1/pair/claim?code=`   an app collects one, once
@@ -16,7 +17,10 @@
  * - `WS   /v1/app?device=`        a phone attaches as one circuit
  */
 
+import { readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import {
@@ -51,6 +55,20 @@ export interface RelayServerOptions {
   host?: string
   /** Progress reporting. */
   log?: (message: string) => void
+  /**
+   * Path to the Bridle installer served at `GET /install`.
+   *
+   * The Relay is a dumb pipe and this is the one exception, for a practical
+   * reason: the app tells people to paste `curl -fsSL https://<host>/install
+   * | sh`, and that URL has to resolve to something. Serving it from the Relay
+   * means one host and one deployment instead of a second static site whose
+   * only content is a 100-line shell script. Set to `null` to turn it off.
+   *
+   * Defaults to the `install.sh` beside this package, which exists in a git
+   * checkout and not in a published tarball; when it is missing the route
+   * simply does not appear.
+   */
+  installScript?: string | null
 }
 
 /** Coarse, non-identifying counters for `/healthz`. */
@@ -72,11 +90,14 @@ export class RelayServer {
   private readonly attachLimit = new RateLimiter(30, 1)
   private readonly startedAt = Date.now()
   private readonly log: (message: string) => void
+  /** The installer, read once at construction; `undefined` disables the route. */
+  private readonly installer: string | undefined
   private heartbeat: NodeJS.Timeout | undefined
 
-  /** @param options - port, bind address, and logging. */
+  /** @param options - port, bind address, logging, and the installer path. */
   constructor(private readonly options: RelayServerOptions = {}) {
     this.log = options.log ?? ((): void => {})
+    this.installer = readInstaller(options.installScript)
     this.http = createServer((request, response) => { this.onRequest(request, response) })
     this.http.on('upgrade', (request, socket, head) => { this.onUpgrade(request, socket, head) })
   }
@@ -123,6 +144,21 @@ export class RelayServer {
     const url = new URL(request.url ?? '/', 'http://relay.invalid')
     if (request.method === 'GET' && url.pathname === '/healthz') {
       send(response, 200, this.stats)
+      return
+    }
+    if (request.method === 'GET' && url.pathname === '/install') {
+      if (this.installer === undefined) {
+        send(response, 404, { error: 'no installer on this relay' })
+        return
+      }
+      // Plain text, not a download: this is being piped into a shell, and a
+      // Content-Disposition would make a browser save it instead of showing
+      // someone what they are about to run.
+      response.writeHead(200, {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'public, max-age=300',
+      })
+      response.end(this.installer)
       return
     }
     if (request.method === 'GET' && url.pathname.startsWith('/v1/machine/')) {
@@ -333,6 +369,24 @@ export class RelayServer {
         socket.ping()
       }
     }
+  }
+}
+
+/**
+ * Load the installer once, at startup.
+ *
+ * Reading it per request would turn a public unauthenticated endpoint into a
+ * disk read, and the file only changes when the Relay is redeployed anyway.
+ * @param configured - explicit path, `null` to disable, or `undefined` for the default.
+ * @returns the script text, or `undefined` when there is none to serve.
+ */
+function readInstaller(configured: string | null | undefined): string | undefined {
+  if (configured === null) return undefined
+  const path = configured ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'install.sh')
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return undefined
   }
 }
 

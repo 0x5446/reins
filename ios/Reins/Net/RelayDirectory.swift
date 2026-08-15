@@ -9,7 +9,7 @@
 import Foundation
 
 /// Where the app looks when the person typed a code instead of scanning.
-public let defaultRelayURL = "wss://relay.reins.app"
+public let defaultRelayURL = "wss://reins.novabox.ai"
 
 public struct RelayDirectory: Sendable {
     public let base: String

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { OfferStore, RateLimiter, Registry } from '../lib/index.js'
+import { OfferStore, RateLimiter, Registry, RelayServer } from '../lib/index.js'
 
 /**
  * @param {string} device - device id the bundle names.
@@ -90,4 +90,29 @@ test('a machine refuses more circuits than it can serve', () => {
   }
   assert.equal(registry.attach(machine, { close: () => {} }), undefined)
   assert.equal(registry.circuitCount, 8)
+})
+
+test('the relay serves the installer, because the app tells people to curl it', async (t) => {
+  const server = new RelayServer({ port: 0, host: '127.0.0.1' })
+  const port = await server.listen()
+  t.after(() => server.close())
+
+  const response = await fetch(`http://127.0.0.1:${String(port)}/install`)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /text\/plain/u)
+
+  const script = await response.text()
+  assert.match(script, /^#!\/usr\/bin\/env sh/u, 'what comes back has to be runnable by sh')
+  assert.match(script, /bridle pair/u, 'and it has to end by telling them what to run next')
+})
+
+test('an installer that is not there 404s instead of serving an empty script', async (t) => {
+  // Piping an empty body into `sh` succeeds silently and installs nothing,
+  // which is worse than an error.
+  const server = new RelayServer({ port: 0, host: '127.0.0.1', installScript: null })
+  const port = await server.listen()
+  t.after(() => server.close())
+
+  const response = await fetch(`http://127.0.0.1:${String(port)}/install`)
+  assert.equal(response.status, 404)
 })

@@ -66,7 +66,7 @@ export interface BridleState {
 }
 
 /** Default public Relay. Overridable per install; the Relay never sees plaintext either way. */
-export const DEFAULT_RELAY_URL = 'wss://relay.reins.app'
+export const DEFAULT_RELAY_URL = 'wss://reins.novabox.ai'
 
 /** Default dsh loopback address, matching the web profile's own default port. */
 export const DEFAULT_DSH_URL = 'http://127.0.0.1:3080'

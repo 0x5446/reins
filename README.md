@@ -27,17 +27,17 @@ Bridle 主动外连 Relay，**不需要端口转发、不需要公网 IP、不�
 ### 1. 电脑端：装 Bridle
 
 ```sh
-curl -fsSL https://reins.app/install | sh
+curl -fsSL https://reins.novabox.ai/install | sh
 ```
 
-> 域名还没上线。现在从源码装：
+需要 Node 22+ 和 git。脚本不会替你装 Node，只会告诉你缺什么；装完 `bridle` 链接到 `~/.local/bin`。
+
+> Relay 还没部署的时候这个 URL 拿不到东西，从源码装：
 >
 > ```sh
 > git clone https://github.com/0x5446/reins.git ~/.reins/src
 > sh ~/.reins/src/install.sh
 > ```
->
-> 装完 `bridle` 会链接到 `~/.local/bin`。需要 Node 22+ 和 git，脚本不会替你装 Node，只会告诉你缺什么。
 
 ### 2. 电脑端：配对
 
@@ -153,8 +153,10 @@ cd ios && ./run-tests.sh
 
 代码是完整的，跑得起来，测试全绿。但一个商业产品还差这些**不在源码树里**的东西：
 
-1. **域名 `reins.app`** 没注册。app 里所有指向它的链接集中在 `ios/Reins/App/Links.swift` 一个文件里，注册完改一处。
-2. **公共 Relay 没部署**。`relay/` 能直接跑（`npm start`），部署方式见 [`docs/deployment.md`](docs/deployment.md)。在那之前 `bridle --relay <你自己的地址>`。
+1. **Relay 没部署**。域名定在 `reins.novabox.ai`（DNS 在 Cloudflare），Relay 自己会在 `/install` 上供出安装脚本，所以一个域名一次部署就够。步骤见 [`docs/deployment.md`](docs/deployment.md)。在那之前用 `bridle --relay <你自己的地址>`。
+2. **`/help` 和 `/privacy` 两个页面**还没写，现在返回 404。
 3. **App Store / TestFlight** 没提交。需要 Apple 开发者账号和一个真实 bundle id。
-4. **`https://reins.app/install`** 这个 URL 得指向本仓库的 `install.sh`。
+4. **仓库是私有的**，所以 `install.sh` 里的 `git clone` 对外人会失败。要真正对外得转公开或改成从发布产物安装。
+
+app 里所有对外链接集中在 `ios/Reins/App/Links.swift` 一个文件，换域名改一处。
 ```

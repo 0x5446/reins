@@ -234,7 +234,7 @@ async function printInvitation(invitation: Invitation, state: ReturnType<typeof 
   say(`identity:            ${keyFingerprint(staticKeys(state).publicKey)}`)
   say(`expires:             ${new Date(invitation.expiresAt).toLocaleTimeString()}`)
   say('')
-  say('No app yet? Get it at https://reins.app/get')
+  say('No app yet? Get it at https://reins.novabox.ai/get')
 }
 
 async function status(): Promise<void> {

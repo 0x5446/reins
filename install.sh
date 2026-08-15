@@ -2,9 +2,10 @@
 #
 # Install the Reins Bridle on this machine.
 #
-# This is what `curl -fsSL https://reins.app/install | sh` fetches. It runs under
-# plain `sh` with no arguments and no assumptions, because the person running it
-# has just been told to paste a line into Terminal and is not going to debug it.
+# This is what `curl -fsSL https://reins.novabox.ai/install | sh` fetches — the
+# Relay serves this very file at `GET /install`. It runs under plain `sh` with no
+# arguments and no assumptions, because the person running it has just been told
+# to paste a line into Terminal and is not going to debug it.
 #
 # What it does, in order: check Node, fetch the source, build it, put `bridle` on
 # the PATH, and hand over to `bridle pair`. What it does not do: install Node,

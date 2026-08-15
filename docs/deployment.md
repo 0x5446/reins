@@ -1,6 +1,21 @@
 # 部署
 
-三样东西要上线：Relay、install.sh 的托管地址、iOS app。前两样今天就能做，第三样卡在 Apple 那边。
+全部挂在 **`reins.novabox.ai`** 一个域名下：Relay 的 WebSocket、短码 API、还有 `curl | sh` 拉的那个安装脚本。不需要第二个静态站点——它唯一的内容会是两个说明页。
+
+`novabox.ai` 现状（2026-08-15 查）：
+
+| 项 | 值 |
+|---|---|
+| 注册商 | GoDaddy |
+| DNS | Cloudflare（`cameron.ns.cloudflare.com` / `mina.ns.cloudflare.com`） |
+| 邮件 | Cloudflare Email Routing |
+| 根域 | 没有 A 记录，没在跑网站 |
+| 已用子域 | 没有（www / api / app / relay / docs 全空） |
+| 到期 | 2026-10-07 |
+
+`reins.novabox.ai` 是空的，随时能用。
+
+三样东西要上线：Relay、DNS 记录、iOS app。前两样今天就能做，第三样卡在 Apple 那边。
 
 ---
 
@@ -20,17 +35,21 @@ PORT=8787 node relay/lib/main.js
 |---|---|---|
 | `PORT` | `8787` | 监听端口 |
 | `HOST` | `0.0.0.0` | 监听地址 |
+| `REINS_INSTALL_SCRIPT` | 仓库里的 `install.sh` | `/install` 返回哪个文件；设成空字符串就关掉这个路由 |
 
 ### 路由
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/healthz` | 健康检查，给负载均衡用 |
+| `GET` | `/install` | 安装脚本，给 `curl \| sh` 用 |
 | `GET` | `/v1/machine/<deviceId>` | 这台机器现在在不在线 |
 | `POST` | `/v1/pair/offer` | Bridle 挂一个短码邀请 |
 | `GET` | `/v1/pair/claim?code=…` | app 用短码换配对载荷 |
 | `WS` | `/v1/bridle` | Bridle 的常连 |
 | `WS` | `/v1/app` | app 的连接 |
+
+`/install` 是哑管道原则的唯一例外，理由很实在：app 让人粘贴 `curl -fsSL https://reins.novabox.ai/install | sh`，这个 URL 总得有东西应答。放在 Relay 里等于一个域名一次部署，不用为了两个页面再养一个静态站。脚本在启动时读一次进内存——每次请求读盘等于给一个公开无认证的接口挂了个磁盘放大器。
 
 ### 前面要放 TLS
 
@@ -39,12 +58,34 @@ Relay 自己不做 TLS。放在 Caddy / nginx / 云厂商的 LB 后面，证书�
 Caddy 够用，两行：
 
 ```
-relay.reins.app {
+reins.novabox.ai {
 	reverse_proxy 127.0.0.1:8787
 }
 ```
 
 WebSocket 不用额外配置，Caddy 默认透传 upgrade。
+
+### 走 Cloudflare（novabox.ai 已经在上面）
+
+DNS 在 Cloudflare，所以最省事的两条路：
+
+**A. 有公网机器** —— A 记录 `reins` 指向那台机器，橙云（proxied）打开。Cloudflare 的代理支持 WebSocket，不用额外开关。源站上放 Caddy 或者直接让 Cloudflare 回源到 8787。
+
+**B. 没有公网机器** —— Cloudflare Tunnel：
+
+```sh
+cloudflared tunnel create reins
+cloudflared tunnel route dns reins reins.novabox.ai
+cloudflared tunnel run --url http://127.0.0.1:8787 reins
+```
+
+不用开端口、不用公网 IP，和 Bridle 自己的思路一样。
+
+两条路都要注意的：
+
+- **心跳 25 秒**，比 Cloudflare 的 WebSocket 空闲超时（100 秒）短得多，连接不会被中途掐掉。
+- **单帧上限 64 MiB**。Cloudflare 免费版对 WebSocket 消息大小没有明确文档化的限制，但大附件（整个仓库的文件读取、大图）真撞上的时候，先怀疑这一层。要排除嫌疑就临时关橙云（DNS only）对比一次。
+- **不要开 Cloudflare 的缓存规则去缓存 `/v1/*`**。短码是一次性的，缓存住等于把它变成可重放的。`/install` 那条已经自己带了 `max-age=300`。
 
 ### 内建的限制
 
@@ -75,19 +116,31 @@ Relay 看不到明文、看不到你的 dsh 地址、看不到会话内容。它
 
 ---
 
-## 2. install.sh 的托管地址
+## 2. DNS
 
-app 的引导页让人粘贴：
+Cloudflare 面板里加一条：
+
+| 类型 | 名称 | 内容 | 代理 |
+|---|---|---|---|
+| `A`（或 `CNAME`） | `reins` | 你的 Relay 源站 | 橙云开 |
+
+走 Cloudflare Tunnel 的话 `cloudflared tunnel route dns` 会替你加，不用手动建。
+
+加完验一下：
 
 ```sh
-curl -fsSL https://reins.app/install | sh
+dig +short reins.novabox.ai
+curl -fsSL https://reins.novabox.ai/healthz
+curl -fsSL https://reins.novabox.ai/install | head -3
 ```
 
-这个 URL 要指向本仓库的 [`install.sh`](../install.sh)。最省事的做法是在 `reins.app` 上加一条重定向到 raw 文件；**仓库是私有的时候 raw URL 需要 token，所以私有期间只能走 `git clone` + `sh install.sh`**，README 里已经这么写了。
+第三条应该吐出 `#!/usr/bin/env sh`。到这一步，app 引导页里那行 `curl … | sh` 就是真的了。
 
-脚本本身跑得起来、幂等（重跑是更新而不是重装），装完把 `bridle` 链接到 `~/.local/bin`。
+### 私有仓库期间的注意
 
-如果 app 里那行命令要改，改 `ios/Reins/App/Links.swift` 一处。
+安装脚本本身能从 Relay 拿到，但它里面 `git clone` 的是私有仓库——没有 GitHub 访问权的人跑到那一步会失败，脚本会明确说是私有仓库并给出手动 clone 命令。要真正对外，仓库得转公开，或者改成从发布产物安装。
+
+脚本是幂等的（重跑是更新不是重装），装完把 `bridle` 链接到 `~/.local/bin`。app 里那行命令要改的话，改 `ios/Reins/App/Links.swift` 一处。
 
 ---
 
@@ -111,4 +164,12 @@ curl -fsSL https://reins.app/install | sh
 
 ### 还要写的
 
-`https://reins.app/help` 和 `https://reins.app/privacy` 两个页面。隐私页得说清楚：Relay 只看得到密文，不收集会话内容；能观测到的只有在线状态和流量计数。
+`https://reins.novabox.ai/help` 和 `https://reins.novabox.ai/privacy` 两个页面。Relay 现在对这两个路径返回 404。隐私页得说清楚：Relay 只看得到密文，不收集会话内容；能观测到的只有在线状态和流量计数。
+
+页面本身放哪都行——Cloudflare Pages 挂个 Worker 路由，或者跟 `/install` 一样加进 Relay。
+
+---
+
+## 域名本身
+
+`novabox.ai` 的注册到期日是 **2026-10-07**，从今天（2026-08-15）算还有 53 天。GoDaddy 那边确认一下自动续费是开的——域名一掉，所有已配对的 Bridle 会同时连不上 Relay（局域网直连还能用，因为那条路不经过域名）。
