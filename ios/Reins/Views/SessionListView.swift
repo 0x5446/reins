@@ -14,6 +14,13 @@ struct SessionListView: View {
     @State private var query = ""
     @State private var hits: [SearchHit] = []
     @State private var searching = false
+    /// Why the machine could not run a full-text search, when it could not.
+    ///
+    /// Shown rather than swallowed. The first version used `try?`, which turned
+    /// "this Mac has the session index switched off" into an empty list — the
+    /// app telling someone their words matched nothing when the truth was that
+    /// it never asked.
+    @State private var searchUnavailable: String?
     @State private var picking = false
     @State private var renaming: SessionSummary?
     @State private var renameText = ""
@@ -92,6 +99,9 @@ struct SessionListView: View {
                 .scrollContentBackground(.hidden)
                 .background(Palette.paper)
                 .accessibilityIdentifier("sessions.list")
+                // Under the results, not over them: what is on screen is real
+                // and useful, and what is missing is only the message-content
+                // half. A banner would imply the list itself is untrustworthy.
                 // The compose button floats over the bottom-trailing corner, so
                 // the list has to end above it. Without this the last row sits
                 // under the button and cannot be read or tapped.
@@ -106,6 +116,25 @@ struct SessionListView: View {
     private var empty: some View {
         if session.listing && session.sessions.isEmpty {
             Placeholder(icon: "ellipsis", title: "Loading conversations…")
+        } else if !query.isEmpty, searchUnavailable != nil {
+            // Not "nothing matched" — the machine never ran the search, so no
+            // claim about matches is warranted. And the remedy is four lines of
+            // YAML, so it belongs here rather than in a support page: dsh ships
+            // with the index off for everyone, which makes this the single most
+            // likely thing a new user sees when they first tap search.
+            Placeholder(
+                icon: "magnifyingglass",
+                title: "Search is off on this Mac",
+                detail: """
+                dsh ships with its session index disabled. To switch it on, add this to \
+                ~/.dsh/profiles/web/cordis.patch.yml and restart dsh:
+
+                - id: session-query-sqlite
+                  config:
+                    path: ~/.dsh/session-query.sqlite
+                    openAt: first-search
+                """
+            )
         } else if !query.isEmpty {
             Placeholder(icon: "magnifyingglass", title: "Nothing matched", detail: "Try a word from the conversation itself.")
         } else if !session.isOnline {
@@ -153,6 +182,14 @@ struct SessionListView: View {
         guard !query.isEmpty else {
             return session.sessions.map { Row(summary: $0, snippet: nil) }
         }
+        // The machine is the only search backend, deliberately. An earlier
+        // version filtered titles locally as a floor when the machine could not
+        // search, and that was wrong for a reason worth keeping written down:
+        // the two match different things — message contents versus a title —
+        // and blended into one list nobody can tell which is which, so the
+        // local half quietly returns rows the machine would not have. Half a
+        // search that disagrees with the machine is worse than no search that
+        // says so.
         let byId = Dictionary(uniqueKeysWithValues: session.sessions.map { ($0.id, $0) })
         return hits.compactMap { hit in
             guard let summary = byId[hit.id] else { return nil }
@@ -172,8 +209,17 @@ struct SessionListView: View {
         guard !Task.isCancelled else { return }
         searching = true
         defer { searching = false }
-        if let result = try? await session.harness.search(query: text) {
-            hits = result.hits
+        do {
+            hits = try await session.harness.search(query: text).hits
+            searchUnavailable = nil
+        } catch {
+            hits = []
+            // dsh says "session search is disabled: … openAt \"never\"" when the
+            // index was never opened, which is a deployment choice rather than a
+            // fault. Either way the local matches below still stand, so this is
+            // a footnote under results and not a banner over them.
+            searchUnavailable = (error as? LocalizedError)?.errorDescription
+                ?? "This Mac has full-text search turned off."
         }
     }
 }
