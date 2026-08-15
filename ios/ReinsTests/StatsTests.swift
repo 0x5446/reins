@@ -135,3 +135,56 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(Format.duration(ms: 3_720_000), "1h 2m")
     }
 }
+
+/// When the slash-command list should appear, and what it should offer.
+///
+/// The trigger is the whole design: it has to catch someone reaching for a name
+/// they half-remember and get out of the way the moment they are writing a
+/// message rather than a command.
+final class CommandPrefixTests: XCTestCase {
+    func testABareSlashOpensIt() {
+        XCTAssertEqual(commandPrefix(in: "/"), "")
+        XCTAssertEqual(commandPrefix(in: "/br"), "br")
+        XCTAssertEqual(commandPrefix(in: "/competitor-teardown"), "competitor-teardown")
+    }
+
+    func testASpaceClosesIt() {
+        // Past the first space they are writing arguments, and a list over the
+        // transcript would be in the way rather than in the flow.
+        XCTAssertNil(commandPrefix(in: "/bro "))
+        XCTAssertNil(commandPrefix(in: "/bro explain this"))
+    }
+
+    func testTextThatMerelyContainsASlash() {
+        XCTAssertNil(commandPrefix(in: "look at src/main.ts"))
+        XCTAssertNil(commandPrefix(in: ""))
+        XCTAssertNil(commandPrefix(in: "what does / mean here"))
+    }
+
+    func testAMultilineMessageStartingWithASlashIsNotACommand() {
+        // Pasting a diff or a path list should not put a picker over the screen.
+        XCTAssertNil(commandPrefix(in: "/etc/hosts\nand the other one"))
+    }
+
+    func testSummaryTakesTheFirstSentence() {
+        let command = SkillCommand(.object([
+            "name": .string("bro"),
+            "description": .string("Re-explain the previous message simply. Use /bro to get a plain version."),
+        ]))
+        // These descriptions are written for a model, at model length; the first
+        // sentence is what fits on a phone and usually all there is worth reading.
+        XCTAssertEqual(command?.summary, "Re-explain the previous message simply")
+    }
+
+    func testSummaryHandlesAChineseFullStop() {
+        let command = SkillCommand(.object([
+            "name": .string("agently-mail"),
+            "description": .string("通过命令行操作邮件：发送、回复、转发。当用户需要邮件操作时使用。"),
+        ]))
+        XCTAssertEqual(command?.summary, "通过命令行操作邮件：发送、回复、转发")
+    }
+
+    func testANamelessEntryIsDropped() {
+        XCTAssertNil(SkillCommand(.object(["description": .string("no name")])))
+    }
+}

@@ -305,7 +305,16 @@ public final class MachineSession {
         // session is on before it has ever run one, and a wrong model is worth
         // seeing before spending a turn on it rather than after.
         Task { await loadModel(fresh) }
+        // Once, on open. Discovery is the whole point of this list — the
+        // commands work today by typing their names — so a failure here is a
+        // missing convenience, not a broken session, and is swallowed.
+        Task { await loadCommands(fresh) }
         return fresh
+    }
+
+    private func loadCommands(_ conversation: Conversation) async {
+        guard let found = try? await harness.skills(sessionId: conversation.sessionId) else { return }
+        conversation.commands = found
     }
 
     private func existing(_ sessionId: String) -> Conversation? {

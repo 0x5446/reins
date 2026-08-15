@@ -212,6 +212,7 @@ struct ConversationView: View {
                 running: conversation.running,
                 planning: conversation.planning,
                 enabled: session.harnessReachable,
+                commands: conversation.commands,
                 onSend: { text, images in
                     atBottom = true
                     Task { await session.send(sessionId: sessionId, text: text, images: images) }

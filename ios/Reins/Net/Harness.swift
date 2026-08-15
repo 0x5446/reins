@@ -178,6 +178,15 @@ public struct Harness: Sendable {
         )
     }
 
+    /// The slash commands available in a session.
+    ///
+    /// Per session rather than per machine: skills can be scoped, and asking
+    /// the machine in general would offer names that turn out not to work here.
+    public func skills(sessionId: String) async throws -> [SkillCommand] {
+        let value = try await tunnel.call("skill.list", .object(["sessionId": .string(sessionId)]))
+        return (value["skills"]?.arrayValue ?? []).compactMap(SkillCommand.init)
+    }
+
     // MARK: - Models
 
     /// The models this session can switch to.

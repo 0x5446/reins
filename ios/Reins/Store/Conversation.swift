@@ -44,6 +44,9 @@ public final class Conversation {
     public private(set) var contextBreakdown: ContextBreakdown?
     /// How much the agent may touch, and what else it could be set to.
     public private(set) var permissions: PermissionChoice?
+    /// Slash commands this session offers. Fetched once; skills do not
+    /// appear mid-sentence, and a request per keystroke would.
+    public var commands: [SkillCommand] = []
     /// Whether the session is in plan mode, which changes what the composer says.
     public private(set) var planning = false
     /// The session's working directory, learned from the summary.

@@ -12,6 +12,9 @@ struct Composer: View {
     let running: Bool
     let planning: Bool
     let enabled: Bool
+    /// Slash commands this session offers. Empty is fine and common — a machine
+    /// with no skills installed, or a list that has not arrived yet.
+    var commands: [SkillCommand] = []
     let onSend: (String, [PromptImage]) -> Void
     let onStop: () -> Void
 
@@ -23,6 +26,17 @@ struct Composer: View {
 
     var body: some View {
         VStack(spacing: Metrics.tight) {
+            // Above the field, so the list grows away from the thumb and the
+            // field it filters stays visible under it.
+            if let prefix = commandPrefix(in: text), !commands.isEmpty {
+                CommandPicker(commands: commands, filter: prefix) { command in
+                    // A trailing space: every one of these takes an argument or
+                    // is happy without one, and either way the next keystroke
+                    // should not extend the name.
+                    text = "/\(command.name) "
+                }
+                .padding(.horizontal, -Metrics.gutter)
+            }
             if !images.isEmpty || loadingImages {
                 attachments
             }
