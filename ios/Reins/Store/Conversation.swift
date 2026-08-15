@@ -56,6 +56,12 @@ public final class Conversation {
     private var seen: Set<Int> = []
     /// Projection watermarks, so an out-of-order projection frame cannot go backwards.
     private var projectionSeq: [String: Int] = [:]
+    /// Optimistic bubbles, by id, holding the text they were shown with.
+    ///
+    /// The harness mints its own id for a message, so the echoed `user/message`
+    /// can never be matched to the bubble by id. Without this the optimistic
+    /// copy stays on screen and every single message appears twice.
+    private var pending: [(id: String, text: String)] = []
 
     public init(sessionId: String, title: String? = nil, cwd: String? = nil) {
         self.sessionId = sessionId
@@ -72,6 +78,7 @@ public final class Conversation {
         toolIndex = [:]
         seen = []
         projectionSeq = [:]
+        pending = []
         oldestSeq = nil
         loaded = false
     }
@@ -215,8 +222,23 @@ public final class Conversation {
             return
         }
         if text.isEmpty && images.isEmpty { return }
+        // This is the real copy of something already on screen optimistically.
+        // Matching is by text rather than by id because the harness mints the id
+        // and the app never learns which of its sends it belongs to; the oldest
+        // outstanding send with the same body is the right one, since a person
+        // cannot send two messages out of order.
+        clearPending(matching: text)
         let id = message["id"]?.stringValue ?? "u\(seq)"
         append(.user(UserTurn(id: id, text: text, images: images, synthetic: false, at: at)))
+    }
+
+    /// Remove the oldest optimistic bubble whose text matches.
+    private func clearPending(matching text: String) {
+        let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = pending.firstIndex(where: { $0.text == wanted }) else { return }
+        let id = pending.remove(at: index).id
+        items.removeAll { $0.id == id }
+        reindex()
     }
 
     private func applyChunk(_ data: JSONValue, seq: Int, at: Date) {
@@ -356,6 +378,17 @@ public final class Conversation {
         }
     }
 
+    /// State the model without waiting for a turn.
+    ///
+    /// The fold learns the model from `request/header`, which only exists once
+    /// something has run. A session that has never run still has a model, and
+    /// showing it is what lets someone notice it is the wrong one before they
+    /// spend a turn finding out.
+    public func setModel(_ name: String?) {
+        guard let name, !name.isEmpty else { return }
+        modelName = name
+    }
+
     public func setRunning(_ value: Bool) {
         running = value
         if !value { completeStreaming() }
@@ -364,11 +397,13 @@ public final class Conversation {
     /// Show a message optimistically, before the machine has logged it. The real
     /// `user/message` event replaces it by id when it arrives.
     public func showPending(text: String, id: String) {
+        pending.append((id: id, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
         append(.user(UserTurn(id: id, text: text, images: [], synthetic: false, at: Date())))
     }
 
     /// Drop an optimistic message whose send failed.
     public func dropPending(id: String) {
+        pending.removeAll { $0.id == id }
         items.removeAll { $0.id == id }
         reindex()
     }

@@ -1,0 +1,77 @@
+/**
+ * The plugin's contract with its host.
+ *
+ * Two properties matter and neither is about Reins: `apply` must return without
+ * waiting, because Cordis mounts plugins concurrently and a slow one holds up
+ * the harness; and `dispose` must not throw, because a plugin that throws on
+ * unload takes the reload down with it.
+ */
+
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { apply, name } from '../lib/index.js'
+
+/** A stand-in for the Cordis context, capturing the dispose hook. */
+function fakeContext() {
+  const handlers = []
+  return {
+    on(event, handler) {
+      assert.equal(event, 'dispose')
+      handlers.push(handler)
+    },
+    dispose() {
+      for (const handler of handlers) handler()
+    },
+    get count() {
+      return handlers.length
+    },
+  }
+}
+
+/**
+ * Keep this run's identity and state out of the developer's real ~/.reins.
+ * @returns {object} the previous value, to restore.
+ */
+function isolateHome() {
+  const previous = process.env.REINS_HOME
+  process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
+  return previous
+}
+
+test('the plugin names itself for the harness plugin list', () => {
+  assert.equal(name, 'reins-bridle')
+})
+
+test('apply returns immediately and registers exactly one teardown', async (t) => {
+  const previous = isolateHome()
+  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+
+  const ctx = fakeContext()
+  const started = Date.now()
+  // Point at a port nothing is listening on: the plugin must come up anyway and
+  // report dsh as unreachable, exactly as the standalone binary does when the
+  // harness has not started yet.
+  apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', directPort: 0 })
+  const elapsed = Date.now() - started
+
+  assert.ok(elapsed < 500, `apply blocked for ${String(elapsed)}ms; Cordis mounts plugins concurrently`)
+  assert.equal(ctx.count, 1, 'exactly one dispose handler, so a reload cannot leak a listener')
+
+  // Let the async start settle so teardown has something real to tear down.
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.doesNotThrow(() => { ctx.dispose() })
+})
+
+test('disposing twice is not an error', async (t) => {
+  const previous = isolateHome()
+  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+
+  const ctx = fakeContext()
+  apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', noDirect: true })
+  await new Promise(resolve => setTimeout(resolve, 200))
+  ctx.dispose()
+  assert.doesNotThrow(() => { ctx.dispose() }, 'a second unload must be a no-op, not a crash')
+})

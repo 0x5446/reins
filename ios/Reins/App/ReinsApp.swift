@@ -19,6 +19,20 @@ struct ReinsApp: App {
                     model.open(url: url)
                 }
                 .task {
+                    #if DEBUG
+                    // A seam for the UI tests, and only for them.
+                    //
+                    // Pairing is the first thing every flow depends on and the
+                    // one thing a test cannot perform: the real paths are a
+                    // camera pointed at a QR code and a link tapped in another
+                    // app. Handing the link in through the launch environment
+                    // exercises exactly the same `open(url:)` the two real paths
+                    // end at, so nothing downstream is faked — only the delivery.
+                    if let link = ProcessInfo.processInfo.environment["REINS_UITEST_PAIR_LINK"],
+                       let url = URL(string: link) {
+                        model.open(url: url)
+                    }
+                    #endif
                     model.restoreLastConnection()
                 }
         }

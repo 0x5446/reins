@@ -21,6 +21,7 @@ import {
 import { acceptPeer, findPeer, offerAccepts, touchPeer } from '../identity.ts'
 import type { BridleCore, DshStatus } from '../core.ts'
 import type { LoggedEvent } from './event-log.ts'
+import { thinHistory } from './history.ts'
 
 /** The carrier a session writes through. */
 export interface TunnelTransport {
@@ -67,6 +68,8 @@ export interface SessionOptions {
   onAuthenticated?: (peerKey: Buffer, name: string) => void
   /** Called when the session ends, for any reason. */
   onClosed?: (reason: string) => void
+  /** Progress reporting; quiet when absent. */
+  log?: (message: string) => void
 }
 
 /** A single authenticated tunnel. */
@@ -266,9 +269,18 @@ export class TunnelSession {
     const controller = new AbortController()
     this.inflight.set(id, controller)
     try {
-      const result = method === 'session.export'
+      let result = method === 'session.export'
         ? await this.exportSession(payload)
         : await this.core.dsh.call(method, payload, controller.signal)
+      if (method === 'session.history' && result.ok) {
+        const { value, thinning } = thinHistory(result.value)
+        if (thinning !== undefined) {
+          this.options.log?.(
+            `history thinned ${String(thinning.before)} → ${String(thinning.after)} events`,
+          )
+          result = { ok: true, value }
+        }
+      }
       if (!this.closed) this.sendFrame({ t: 'res', id, result })
     } finally {
       this.inflight.delete(id)

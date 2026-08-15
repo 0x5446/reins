@@ -31,6 +31,11 @@ struct ConversationView: View {
         }
         .background(Palette.paper)
         .navigationBarTitleDisplayMode(.inline)
+        // Without this the bar is transparent and the transcript slides under
+        // the title and the clock. A conversation is a wall of text; there is
+        // always something up there to collide with.
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(.regularMaterial, for: .navigationBar)
         .toolbar { toolbar }
         .task {
             let held = session.conversation(sessionId)
@@ -149,7 +154,18 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func header(_ conversation: Conversation) -> some View {
-        if conversation.items.isEmpty && conversation.loaded {
+        if !conversation.loaded {
+            // Until the first page lands there is nothing to draw, and drawing
+            // nothing reads as "this conversation is empty" rather than "still
+            // fetching". A long history is exactly when this matters most.
+            HStack(spacing: Metrics.tight) {
+                Thinking()
+                Text("Loading this conversation…")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, Metrics.gutter)
+        } else if conversation.items.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Nothing here yet")
                     .font(.system(size: 17, weight: .semibold))
@@ -214,10 +230,20 @@ struct ConversationView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
                 if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
+                    Button {
+                        showModels = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(subtitle)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                        }
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    }
+                    .accessibilityLabel("Change model")
+                    .accessibilityIdentifier("conversation.model")
                 }
             }
         }
@@ -249,6 +275,8 @@ struct ConversationView: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
+            .accessibilityLabel("Conversation options")
+            .accessibilityIdentifier("conversation.menu")
         }
     }
 
@@ -261,9 +289,10 @@ struct ConversationView: View {
         if let cwd = conversation?.cwd ?? summary?.cwd {
             parts.append((cwd as NSString).lastPathComponent)
         }
-        if let model = conversation?.modelName {
-            parts.append(model)
-        }
+        // Named even when unknown: a session that has never run has no
+        // `request/header` to learn it from, and that is the same session whose
+        // model is most likely to be the wrong one.
+        parts.append(conversation?.modelName ?? "Choose model")
         if let fraction = conversation?.contextFraction, fraction > 0.7 {
             parts.append("context \(Int(fraction * 100))%")
         }

@@ -1,6 +1,6 @@
 name: Reins
 options:
-  bundleIdPrefix: app.reins
+  bundleIdPrefix: ai.novabox
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -11,7 +11,9 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""
+    # Overridable from the environment so a different machine, or CI, does not
+    # have to edit a tracked file to build. Empty means simulator only.
+    DEVELOPMENT_TEAM: ${REINS_TEAM_ID}
     CODE_SIGN_STYLE: Automatic
     SWIFT_STRICT_CONCURRENCY: minimal
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -24,7 +26,11 @@ targets:
       - path: Reins
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.reins.Reins
+        # Reverse of a domain that is actually owned, so it cannot collide with
+        # someone else's App Store record.
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Reins/Reins.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: Reins
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
@@ -36,8 +42,6 @@ targets:
         # Direct LAN connections skip the relay entirely. iOS gates any local
         # network traffic behind this prompt.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: Reins connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGNING_ALLOWED: NO
     info:
       path: Reins/Info.plist
       properties:
@@ -48,7 +52,7 @@ targets:
         UIBackgroundModes:
           - remote-notification
         CFBundleURLTypes:
-          - CFBundleURLName: app.reins.pair
+          - CFBundleURLName: ai.novabox.reins.pair
             CFBundleURLSchemes:
               - reins
         NSAppTransportSecurity:
@@ -67,8 +71,24 @@ targets:
       - target: Reins
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.reins.ReinsTests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins.tests
         GENERATE_INFOPLIST_FILE: YES
+        # Tests run on the simulator, which needs no team and no profile.
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+
+  ReinsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ReinsUITests
+    dependencies:
+      - target: Reins
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Reins
 
 schemes:
   Reins:
@@ -76,9 +96,23 @@ schemes:
       targets:
         Reins: all
         ReinsTests: [test]
+        ReinsUITests: [test]
     test:
       targets:
         - ReinsTests
+      gatherCoverageData: false
+
+  # Separate scheme: the unit tests run anywhere in seconds, the UI tests need a
+  # paired Bridle and take minutes. Keeping them in one scheme would mean every
+  # `npm run test:ios` waits on a machine that may not be running.
+  ReinsUI:
+    build:
+      targets:
+        Reins: all
+        ReinsUITests: [test]
+    test:
+      targets:
+        - ReinsUITests
       gatherCoverageData: false
     run:
       config: Debug

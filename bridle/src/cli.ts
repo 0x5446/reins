@@ -146,6 +146,22 @@ async function start(options: Options): Promise<void> {
     if (directAddresses.length > 0) say(`local     ${directAddresses[0] ?? ''}`)
   }
 
+  // An address this machine cannot discover for itself: a Cloudflare Tunnel
+  // hostname, an ngrok URL, a port-forwarded public address. Interface
+  // enumeration finds LAN and tailnet addresses on its own, but a name that
+  // resolves to someone else's edge only exists if it is stated.
+  //
+  // It goes first: someone who set this up did so because it is the path they
+  // want used.
+  const advertised = (flagString(options, 'advertise') ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0)
+  if (advertised.length > 0) {
+    directAddresses = [...advertised, ...directAddresses]
+    for (const entry of advertised) say(`advertised ${entry}`)
+  }
+
   const relay = new RelayClient(core, {
     version: VERSION,
     log: say,
@@ -350,6 +366,10 @@ Options for start:
   --dsh <url>         harness address, if it is not on a usual port
   --dsh-command <cmd> how to launch the harness (default: dsh)
   --direct-port <n>   fixed port for the local-network tunnel
+  --advertise <url>   extra address(es) to put in the pairing code, comma
+                      separated. For a tunnel hostname the machine cannot
+                      discover itself, e.g. wss://reins.example.com. LAN and
+                      Tailscale addresses are found automatically.
   --no-direct         do not listen on the local network
   --no-auto-start     never launch the harness
   --pair              show a pairing invitation even if devices are paired

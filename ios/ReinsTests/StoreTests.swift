@@ -489,3 +489,78 @@ final class SessionSummaryTests: XCTestCase {
         XCTAssertNil(SessionSummary(.object(["cwd": .string("/tmp")])))
     }
 }
+
+// MARK: - Optimistic sends against the real echo
+
+@MainActor
+final class OptimisticSendTests: XCTestCase {
+    private func event(_ type: String, seq: Int, data: JSONValue) -> JSONValue {
+        .object(["type": .string(type), "seq": .number(Double(seq)), "time": .number(1_700_000_000_000), "data": data])
+    }
+
+    private func userMessage(_ text: String, id: String, seq: Int) -> JSONValue {
+        event("user/message", seq: seq, data: .object([
+            "id": .string(id),
+            "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
+            "source": .object(["kind": .string("user")]),
+        ]))
+    }
+
+    /// The bug this exists for: the harness mints its own id, so the echoed
+    /// message could never match the optimistic bubble, and every single message
+    /// a person sent appeared on screen twice.
+    func testTheRealMessageReplacesTheOptimisticOne() {
+        let held = Conversation(sessionId: "s1")
+        held.showPending(text: "what model are you", id: "pending-1")
+        XCTAssertEqual(held.items.count, 1)
+
+        held.apply(event: userMessage("what model are you", id: "m-abc", seq: 5), view: nil)
+
+        XCTAssertEqual(held.items.count, 1, "the message must appear once, not twice")
+        guard case .user(let user) = held.items[0] else { return XCTFail("expected a user turn") }
+        XCTAssertEqual(user.id, "m-abc", "the surviving copy is the real one, so later events can address it")
+    }
+
+    /// Two sends of the same text must consume one bubble each, not both at once.
+    func testRepeatedTextClearsOneBubblePerEcho() {
+        let held = Conversation(sessionId: "s1")
+        held.showPending(text: "again", id: "pending-1")
+        held.showPending(text: "again", id: "pending-2")
+        XCTAssertEqual(held.items.count, 2)
+
+        held.apply(event: userMessage("again", id: "m-1", seq: 5), view: nil)
+        XCTAssertEqual(held.items.count, 2, "one optimistic bubble is consumed, one still outstanding")
+
+        held.apply(event: userMessage("again", id: "m-2", seq: 6), view: nil)
+        XCTAssertEqual(held.items.count, 2)
+        XCTAssertEqual(held.items.map(\.id), ["m-1", "m-2"], "both real copies, no optimistic leftovers")
+    }
+
+    /// Whitespace the person typed must not stop the match.
+    func testMatchingIgnoresSurroundingWhitespace() {
+        let held = Conversation(sessionId: "s1")
+        held.showPending(text: "  hello  ", id: "pending-1")
+        held.apply(event: userMessage("hello", id: "m-1", seq: 5), view: nil)
+        XCTAssertEqual(held.items.count, 1)
+    }
+
+    /// A message from somewhere else — the web UI, another phone — must not eat
+    /// an outstanding optimistic bubble that happens to read the same.
+    func testAnUnrelatedMessageStillAppends() {
+        let held = Conversation(sessionId: "s1")
+        held.showPending(text: "mine", id: "pending-1")
+        held.apply(event: userMessage("someone else's", id: "m-1", seq: 5), view: nil)
+        XCTAssertEqual(held.items.count, 2, "no match means nothing is removed")
+    }
+
+    /// A failed send drops its bubble and leaves nothing behind to match later.
+    func testAFailedSendLeavesNoGhost() {
+        let held = Conversation(sessionId: "s1")
+        held.showPending(text: "lost", id: "pending-1")
+        held.dropPending(id: "pending-1")
+        XCTAssertTrue(held.items.isEmpty)
+
+        held.apply(event: userMessage("lost", id: "m-1", seq: 5), view: nil)
+        XCTAssertEqual(held.items.count, 1, "a later real message is unaffected by the dropped bubble")
+    }
+}

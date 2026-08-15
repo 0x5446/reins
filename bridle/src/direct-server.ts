@@ -105,24 +105,65 @@ export class DirectServer {
 }
 
 /**
- * Private IPv4 addresses of this machine, best candidate first.
- * @returns addresses a phone on the same Wi-Fi could dial.
+ * Addresses of this machine a phone could dial, best candidate first.
+ *
+ * Every non-internal IPv4 the host has, minus the ones that provably cannot
+ * work. A wrong guess is cheap — the app tries each in turn and a dead address
+ * costs one failed connect — but a *missing* one is not, because it is the
+ * difference between the tunnel working off-network and not.
+ *
+ * Tailscale is the case worth naming: its interface carries a 100.64/10 address
+ * and the listener already binds every interface, so a phone on the same tailnet
+ * reaches the machine from anywhere with no relay and no configuration. It is in
+ * this list for free.
+ * @returns dialable `ws://host:port` candidates.
  */
 export function localAddresses(): string[] {
+  return dialableAddresses(networkInterfaces())
+}
+
+/**
+ * The selection and ordering, separated from the host so it can be tested
+ * against interface sets this machine does not have.
+ * @param interfaces - as returned by `os.networkInterfaces()`.
+ * @returns dialable addresses, best first.
+ */
+export function dialableAddresses(
+  interfaces: Record<string, { family: string; internal: boolean; address: string }[] | undefined>,
+): string[] {
   const found: string[] = []
-  for (const entries of Object.values(networkInterfaces())) {
+  for (const entries of Object.values(interfaces)) {
     for (const entry of entries ?? []) {
       if (entry.family !== 'IPv4' || entry.internal) continue
+      // 169.254/16 is what an interface gives itself when DHCP failed. It is
+      // never routable off that link, so advertising it only buys a timeout.
+      if (entry.address.startsWith('169.254.')) continue
       found.push(entry.address)
     }
   }
-  // 192.168/16 is what home and café networks hand out, so try it before the
-  // 10/8 and 172.16/12 ranges that tend to be corporate VPN legs.
   return found.sort((a, b) => rank(a) - rank(b))
 }
 
+/** Lower sorts first. */
 function rank(address: string): number {
+  // The home or café network, which is the common case and the fastest path.
   if (address.startsWith('192.168.')) return 0
   if (address.startsWith('10.')) return 1
-  return 2
+  // Tailscale and other CGNAT overlays: slower than the LAN when both work, but
+  // the only one of these that still works after you leave the building.
+  if (isTailnet(address)) return 2
+  // 172.16/12 is private, but on a developer's machine it is usually a Docker
+  // bridge or a VPN leg that a phone cannot reach.
+  if (isCarrierPrivate(address)) return 3
+  return 4
+}
+
+function isTailnet(address: string): boolean {
+  const [first, second] = address.split('.').map(Number)
+  return first === 100 && second !== undefined && second >= 64 && second <= 127
+}
+
+function isCarrierPrivate(address: string): boolean {
+  const [first, second] = address.split('.').map(Number)
+  return first === 172 && second !== undefined && second >= 16 && second <= 31
 }

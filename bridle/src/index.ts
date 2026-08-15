@@ -4,7 +4,7 @@
  */
 
 export { BridleCore, type DshStatus } from './core.ts'
-export { DirectServer, DIRECT_PATH, localAddresses } from './direct-server.ts'
+export { DirectServer, DIRECT_PATH, localAddresses, dialableAddresses } from './direct-server.ts'
 export { DshClient, assertLoopback, type DshHealth, type DshResult } from './dsh/client.ts'
 export { ensureDsh, portOpen, probeDsh, type DiscoveredDsh } from './dsh/discovery.ts'
 export { EventLog, type LoggedEvent, type ReplayResult } from './tunnel/event-log.ts'

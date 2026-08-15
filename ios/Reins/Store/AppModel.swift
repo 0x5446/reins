@@ -51,12 +51,41 @@ public final class AppModel {
         self.clientVersion = clientVersion ?? AppModel.bundleVersion
         self.notifier = notifier ?? Notifier()
         deviceName = defaults.string(forKey: Keys.deviceName) ?? AppModel.defaultDeviceName
+        #if DEBUG
+        // A UI test seam. The welcome flow only exists for a device that has
+        // never paired, and a test machine has usually paired already; without
+        // this the one screen every new user sees is the one screen that can
+        // never be tested.
+        if ProcessInfo.processInfo.environment["REINS_UITEST_FRESH"] == "1" {
+            defaults.removeObject(forKey: Keys.machines)
+            defaults.removeObject(forKey: Keys.lastMachine)
+        }
+        #endif
         machines = AppModel.loadMachines(defaults)
+        loadIdentity()
+    }
+
+    /// Read the identity, or record why it could not be read.
+    ///
+    /// Separate from `init` because this is worth trying more than once. The key
+    /// is stored `afterFirstUnlockThisDeviceOnly`, so a launch that beats the
+    /// first unlock of the day fails with `errSecInteractionNotAllowed` and then
+    /// succeeds seconds later — treating the first answer as final would strand
+    /// the app on an error screen for a condition that has already cleared.
+    private func loadIdentity() {
         do {
             identity = try DeviceIdentity.load()
+            fatal = nil
         } catch {
-            fatal = "Reins couldn’t create this iPhone’s identity. \(error.localizedDescription)"
+            fatal = "Reins couldn’t read this iPhone’s identity. \(error.localizedDescription)"
         }
+    }
+
+    /// Try the identity again, from the error screen.
+    public func retryIdentity() {
+        guard identity == nil else { fatal = nil; return }
+        loadIdentity()
+        if fatal == nil { restoreLastConnection() }
     }
 
     // MARK: - Connection
@@ -187,6 +216,10 @@ public final class AppModel {
     /// rather than waiting out a backoff that started while it was suspended.
     public func enteredForeground() {
         notifier.foreground = true
+        // Coming back to the front is the most likely moment for a Keychain that
+        // refused a pre-unlock read to start answering, so take the free retry
+        // rather than making the person tap the button.
+        if identity == nil { retryIdentity() }
         active?.poke()
     }
 

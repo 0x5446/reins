@@ -14,6 +14,16 @@
 import Foundation
 import Observation
 
+/// Messages per history page.
+///
+/// dsh defaults to 50, and a page is bounded by messages but carries the whole
+/// raw event range they span — which for a streaming-heavy session means tens of
+/// thousands of `assistant/chunk` events. The Bridle strips the superseded ones,
+/// so 50 would be affordable against a current Bridle; this stays lower anyway,
+/// because the app has to survive talking to a Bridle that has not been updated
+/// yet, and because 25 messages already overfills a phone screen several times.
+private let historyPageSize = 25
+
 @MainActor
 @Observable
 public final class MachineSession {
@@ -276,6 +286,10 @@ public final class MachineSession {
         let fresh = Conversation(sessionId: sessionId, title: summary?.title, cwd: summary?.cwd)
         conversations[sessionId] = fresh
         Task { await loadHistory(fresh, reset: false) }
+        // Independently of the history: the machine knows which model this
+        // session is on before it has ever run one, and a wrong model is worth
+        // seeing before spending a turn on it rather than after.
+        Task { await loadModel(fresh) }
         return fresh
     }
 
@@ -307,7 +321,7 @@ public final class MachineSession {
         conversation.loading = true
         defer { conversation.loading = false }
         do {
-            let page = try await harness.history(sessionId: conversation.sessionId)
+            let page = try await harness.history(sessionId: conversation.sessionId, maxMessages: historyPageSize)
             conversation.absorb(page: page, prepend: false)
         } catch let error as CallError where error.code == "disconnected" {
             // Same reasoning as the list: the reconnect retries.
@@ -316,13 +330,22 @@ public final class MachineSession {
         }
     }
 
+    /// Ask which model this session is on.
+    ///
+    /// Failure is silent. The header falls back to offering the picker, which is
+    /// the same thing this call would have enabled.
+    private func loadModel(_ conversation: Conversation) async {
+        guard let catalog = try? await harness.models(sessionId: conversation.sessionId) else { return }
+        conversation.setModel(catalog.current?.name)
+    }
+
     /// Load the page before what is held.
     public func loadOlder(_ conversation: Conversation) async {
         guard conversation.hasMore, let before = conversation.oldestSeq, !conversation.loading else { return }
         conversation.loading = true
         defer { conversation.loading = false }
         do {
-            let page = try await harness.history(sessionId: conversation.sessionId, beforeSeq: before)
+            let page = try await harness.history(sessionId: conversation.sessionId, beforeSeq: before, maxMessages: historyPageSize)
             conversation.absorb(page: page, prepend: true)
         } catch {
             // Scrolling back is optional. A failure leaves what is on screen

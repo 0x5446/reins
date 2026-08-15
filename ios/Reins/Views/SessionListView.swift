@@ -70,7 +70,8 @@ struct SessionListView: View {
                             SessionRow(
                                 summary: row.summary,
                                 snippet: row.snippet,
-                                needsYou: session.approvals[row.summary.id] != nil || session.questions[row.summary.id] != nil
+                                needsYou: session.approvals[row.summary.id] != nil || session.questions[row.summary.id] != nil,
+                                home: session.machineInfo?.cwd
                             )
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: Metrics.gutter, bottom: 6, trailing: Metrics.gutter))
@@ -90,6 +91,13 @@ struct SessionListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Palette.paper)
+                .accessibilityIdentifier("sessions.list")
+                // The compose button floats over the bottom-trailing corner, so
+                // the list has to end above it. Without this the last row sits
+                // under the button and cannot be read or tapped.
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: 72)
+                }
             }
         }
     }
@@ -164,6 +172,8 @@ struct SessionRow: View {
     let summary: SessionSummary
     var snippet: String?
     var needsYou: Bool
+    /// The machine's home directory, so paths read as `~/code/thing`.
+    var home: String?
 
     var body: some View {
         Card {
@@ -182,7 +192,11 @@ struct SessionRow: View {
                 }
                 HStack(spacing: 6) {
                     if let cwd = summary.cwd {
-                        Text((cwd as NSString).lastPathComponent)
+                        // The path relative to home, not just its last
+                        // component: everything in one workspace shares a last
+                        // component, and eight rows all reading "workspace" is
+                        // the same as showing nothing.
+                        Text(Format.path(cwd, home: home))
                             .font(.code(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

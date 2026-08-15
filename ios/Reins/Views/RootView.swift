@@ -26,11 +26,20 @@ public struct RootView: View {
     }
 }
 
-/// The identity could not be created. There is nothing to do in the app until it
-/// can be, so this offers the one action that has ever fixed it.
+/// The identity could not be read.
+///
+/// Retrying comes first, and reset is buried behind a confirmation, because the
+/// most likely cause is temporary and the remedy is not: the key is stored
+/// `afterFirstUnlockThisDeviceOnly`, so an app that wakes before the phone has
+/// been unlocked once gets `errSecInteractionNotAllowed` and would otherwise be
+/// telling the person to throw away every pairing they have to fix a condition
+/// that clears by itself the moment they type their passcode.
 struct FatalView: View {
     @Environment(AppModel.self) private var model
     let message: String
+
+    @State private var confirmingReset = false
+    @State private var retrying = false
 
     var body: some View {
         Placeholder(
@@ -38,9 +47,30 @@ struct FatalView: View {
             title: "Reins can’t start",
             detail: message
         ) {
-            Button("Reset Reins") { model.resetEverything() }
-                .buttonStyle(SecondaryButtonStyle())
-                .padding(.horizontal, Metrics.gutter * 2)
+            VStack(spacing: Metrics.tight) {
+                Button(retrying ? "Trying…" : "Try again") {
+                    retrying = true
+                    // A moment of visible effort. Retrying a Keychain read takes
+                    // microseconds, and a button that flickers reads as broken.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        model.retryIdentity()
+                        retrying = false
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(retrying)
+
+                Button("Reset Reins", role: .destructive) { confirmingReset = true }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(.horizontal, Metrics.gutter * 2)
+        }
+        .alert("Reset Reins?", isPresented: $confirmingReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { model.resetEverything() }
+        } message: {
+            Text("This throws away this iPhone’s key and every pairing. You’ll have to scan a new code on each Mac. Nothing on your Macs changes.")
         }
     }
 }

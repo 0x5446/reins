@@ -39,6 +39,11 @@ struct Composer: View {
                     .font(.system(size: 16))
                     .lineLimit(1...6)
                     .focused($focused)
+                    // The placeholder is deliberately not stable — it states why
+                    // sending is unusual right now — so tests and VoiceOver need
+                    // something that is.
+                    .accessibilityIdentifier("composer.field")
+                    .accessibilityLabel("Message")
                     .padding(.horizontal, Metrics.gap)
                     .padding(.vertical, 8)
                     .background(Palette.well, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
