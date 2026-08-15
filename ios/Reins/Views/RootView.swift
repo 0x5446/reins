@@ -8,6 +8,7 @@ import SwiftUI
 
 public struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppLock.self) private var lock
 
     public init() {}
 
@@ -23,6 +24,16 @@ public struct RootView: View {
         }
         .background(Palette.paper)
         .animation(.easeInOut(duration: 0.22), value: model.isNew)
+        // Over everything, including the sheets — a settings sheet left open
+        // when the app went away would otherwise be on top of the cover.
+        // No animation: a cover that fades in is a cover that is transparent
+        // during the frame the app switcher takes its picture.
+        .overlay {
+            if lock.isCovered {
+                LockScreen()
+                    .transition(.identity)
+            }
+        }
     }
 }
 

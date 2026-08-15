@@ -5,12 +5,14 @@ import SwiftUI
 @main
 struct ReinsApp: App {
     @State private var model = AppModel()
+    @State private var lock = AppLock()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(lock)
                 .tint(Palette.accent)
                 .onOpenURL { url in
                     // A pairing link opened from Messages, Mail, or the Mac's
@@ -38,9 +40,18 @@ struct ReinsApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .active: model.enteredForeground()
-            case .background, .inactive: model.enteredBackground()
-            @unknown default: break
+            case .active:
+                model.enteredForeground()
+                lock.didBecomeActive()
+            case .background, .inactive:
+                model.enteredBackground()
+                // `.inactive` and not only `.background`: iOS photographs the
+                // window for the app switcher while the scene is merely
+                // inactive, so a cover raised on `.background` is raised after
+                // the picture has already been taken.
+                lock.willResignActive()
+            @unknown default:
+                break
             }
         }
     }

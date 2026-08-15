@@ -28,7 +28,18 @@ final class FlowTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = [
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            // The app lock, off. A `-key value` launch argument is a
+            // UserDefaults override, so this needs nothing in the app.
+            //
+            // Every test below is about something else, and whether they meet a
+            // lock screen would otherwise depend on whether this particular
+            // simulator happens to have a passcode — which is exactly the kind
+            // of thing that makes a suite pass on one machine and not another.
+            // `testTheLockStaysOutOfTheWayWithoutAPasscode` covers the lock.
+            "-reins.lock.enabled.v1", "NO",
+        ]
         if let link = pairLink, !link.isEmpty {
             app.launchEnvironment["REINS_UITEST_PAIR_LINK"] = link
         }
@@ -76,6 +87,21 @@ final class FlowTests: XCTestCase {
         // The screen has to say what it is before it asks for anything.
         XCTAssertTrue(app.staticTexts["Reins"].exists)
     }
+
+    // Why there is no UI test for the app lock.
+    //
+    // Whether it engages depends on whether this particular simulator has
+    // biometrics enrolled, and dismissing it depends on simulating a match
+    // through a private `notifyutil` name that differs between Face ID and
+    // Touch ID and between OS versions. A test whose result depends on the
+    // machine it runs on is worse than no test: it fails for reasons that are
+    // not the code and gets muted.
+    //
+    // The state machine — the timeout, the clock moving backwards, the cover
+    // going up on `.inactive`, and the fail-open when a device cannot
+    // authenticate at all — is covered by `LockTests`, which injects both the
+    // clock and the authenticator and so tests the cases a real device cannot
+    // be made to produce on cue.
 
     // MARK: - Conversations
 

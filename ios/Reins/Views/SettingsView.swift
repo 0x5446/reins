@@ -12,6 +12,7 @@ import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppLock.self) private var lock
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingReset = false
     @State private var choosingDefaultModel = false
@@ -19,6 +20,7 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var lock = lock
 
         NavigationStack {
             List {
@@ -48,6 +50,24 @@ struct SettingsView: View {
                     }
                     Row(label: "Key fingerprint", value: model.deviceFingerprint, mono: true)
                         .textCase(nil)
+                }
+
+                Section {
+                    Toggle("Lock Reins", isOn: $lock.isEnabled)
+                        .disabled(!lock.canAuthenticate)
+                    if lock.isEnabled {
+                        Picker("Lock when away", selection: $lock.delay) {
+                            ForEach(LockDelay.allCases) { option in
+                                Text(option.label).tag(option)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Security")
+                } footer: {
+                    Text(lock.canAuthenticate
+                        ? "A paired iPhone can approve commands on your Mac, so an unlocked one in the wrong hands is a shell. Locking bounds how long that lasts — but it is not a substitute for running `bridle revoke` on the Mac if you lose this phone."
+                        : "Set a device passcode in iOS Settings to use this. Without one there is nothing for Reins to check.")
                 }
 
                 Section {
@@ -122,8 +142,13 @@ struct SettingsView: View {
             }
             .confirmationDialog("Start over as a new device?", isPresented: $confirmingReset, titleVisibility: .visible) {
                 Button("Start over", role: .destructive) {
-                    model.resetEverything()
-                    dismiss()
+                    // Irreversible from here, and it takes every pairing with
+                    // it. Whoever is holding the phone has to be its owner.
+                    Task {
+                        guard await lock.confirm("Throw away this iPhone’s key and unpair every Mac.") else { return }
+                        model.resetEverything()
+                        dismiss()
+                    }
                 }
             } message: {
                 Text("This iPhone gets a new key. Every Mac will treat it as one it has never seen, and each will still list the old one until you run `bridle revoke` there.")
@@ -134,8 +159,13 @@ struct SettingsView: View {
                 titleVisibility: .visible
             ) {
                 Button("Forget this Mac", role: .destructive) {
-                    if let target = unpairing { model.unpair(target.id) }
+                    let target = unpairing
                     unpairing = nil
+                    Task {
+                        guard let target,
+                              await lock.confirm("Forget \(target.name) on this iPhone.") else { return }
+                        model.unpair(target.id)
+                    }
                 }
             } message: {
                 Text("It disappears from this iPhone. That Mac still trusts this iPhone until you run `bridle revoke` on it.")
