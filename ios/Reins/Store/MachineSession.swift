@@ -51,13 +51,28 @@ public final class MachineSession {
     /// True while the session list is being fetched.
     public private(set) var listing = false
 
+    /// What a new conversation starts on, when the person has stated one.
+    ///
+    /// dsh has no such setting of its own — it routes a fresh session to
+    /// whichever provider happens to be first, which on a machine with more
+    /// than one configured is a coin toss, and on a machine whose first
+    /// provider has no API key is simply broken. Stating it once here is the
+    /// difference between "new conversation" working and needing two taps of
+    /// repair every time.
+    public private(set) var defaultModel: ModelOption?
+
     private var conversations: [String: Conversation] = [:]
     private var pump: Task<Void, Never>?
     private let notifier: Notifier
+    private let defaults: UserDefaults
 
-    public init(machine: PairedMachine, identity: StaticKeyPair, deviceName: String, clientVersion: String, pairingToken: String?, notifier: Notifier) {
+    public init(machine: PairedMachine, identity: StaticKeyPair, deviceName: String, clientVersion: String, pairingToken: String?, notifier: Notifier, defaults: UserDefaults = .standard) {
         self.machine = machine
         self.notifier = notifier
+        self.defaults = defaults
+        if let data = defaults.data(forKey: MachineSession.defaultModelKey(machine.id)) {
+            defaultModel = try? JSONDecoder().decode(ModelOption.self, from: data)
+        }
         tunnel = Tunnel(
             bundle: machine.reconnectBundle,
             identity: identity,
@@ -376,9 +391,33 @@ public final class MachineSession {
     }
 
     /// Start a conversation and return its id.
+    /// Choose what new conversations start on. `nil` hands the choice back to
+    /// the machine.
+    public func setDefaultModel(_ option: ModelOption?) {
+        defaultModel = option
+        let key = MachineSession.defaultModelKey(machine.id)
+        if let option, let data = try? JSONEncoder().encode(option) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    /// Scoped per machine: two Macs rarely have the same providers configured,
+    /// and a model id from one is meaningless on the other.
+    private static func defaultModelKey(_ machineId: String) -> String {
+        "reins.defaultModel.\(machineId)"
+    }
+
     public func createSession(cwd: String?) async -> String? {
         do {
             let id = try await harness.createSession(cwd: cwd)
+            if let defaultModel {
+                // Best effort. A model that has since been removed from the
+                // machine should not stop the conversation from opening; the
+                // header states what it actually landed on either way.
+                try? await harness.selectModel(sessionId: id, option: defaultModel)
+            }
             var summary = SessionSummary(.object([
                 "sessionId": .string(id),
                 "updatedAt": .number(Date().timeIntervalSince1970 * 1000),

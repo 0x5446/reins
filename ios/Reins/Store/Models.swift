@@ -278,7 +278,7 @@ public struct DirectoryListing: Equatable {
 }
 
 /// One model the session can switch to.
-public struct ModelOption: Identifiable, Equatable {
+public struct ModelOption: Identifiable, Equatable, Codable {
     public var id: String { "\(provider)/\(model)" }
     public var provider: String
     public var providerName: String

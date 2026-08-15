@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingReset = false
+    @State private var choosingDefaultModel = false
     @State private var unpairing: PairedMachine?
 
     var body: some View {
@@ -23,6 +24,20 @@ struct SettingsView: View {
             List {
                 if let session = model.active {
                     connection(session)
+
+                    Section {
+                        Button {
+                            choosingDefaultModel = true
+                        } label: {
+                            LabeledContent("New conversations use") {
+                                Text(session.defaultModel?.name ?? "Machine default")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    } footer: {
+                        Text("dsh routes a new conversation to whichever provider is configured first. Naming one here means it starts on the model you meant.")
+                    }
                 }
 
                 Section("This iPhone") {
@@ -79,6 +94,11 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $choosingDefaultModel) {
+                if let session = model.active {
+                    DefaultModelPicker(session: session)
                 }
             }
             .confirmationDialog("Reset Reins?", isPresented: $confirmingReset, titleVisibility: .visible) {

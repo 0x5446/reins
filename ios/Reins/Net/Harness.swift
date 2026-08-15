@@ -160,7 +160,19 @@ public struct Harness: Sendable {
 
     /// The models this session can switch to.
     public func models(sessionId: String) async throws -> ModelCatalog {
-        let value = try await tunnel.call("session.models", .object(["sessionId": .string(sessionId)]))
+        Harness.catalog(try await tunnel.call("session.models", .object(["sessionId": .string(sessionId)])))
+    }
+
+    /// Every model the machine can route to, independent of any session.
+    ///
+    /// `session.models` needs a session to ask about, which is the wrong shape
+    /// for choosing what a session that does not exist yet should start on.
+    public func machineModels() async throws -> ModelCatalog {
+        Harness.catalog(try await tunnel.call("llm.models", .emptyObject))
+    }
+
+    /// Both calls answer with the same `groups → models` shape.
+    static func catalog(_ value: JSONValue) -> ModelCatalog {
         var options: [ModelOption] = []
         for group in value["groups"]?.arrayValue ?? [] {
             let provider = group["id"]?.stringValue ?? ""
