@@ -112,7 +112,9 @@ struct MachineView: View {
             }
             .navigationDestination(for: String.self) { sessionId in
                 if let session = model.active {
-                    ConversationView(session: session, sessionId: sessionId)
+                    ConversationView(session: session, sessionId: sessionId) { branched in
+                        path.append(branched)
+                    }
                 }
             }
             .toolbar {

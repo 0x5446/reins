@@ -463,6 +463,38 @@ public final class MachineSession {
         }
     }
 
+    /// Branch a conversation and return the new one's id.
+    ///
+    /// The machine keeps the history up to the branch point, so this is the
+    /// "try it the other way without losing this" move — which is worth more on
+    /// a phone than at a keyboard, where re-running something is cheap.
+    public func fork(sessionId: String) async -> String? {
+        do {
+            let id = try await harness.fork(sessionId: sessionId)
+            await refreshSessions()
+            return id
+        } catch {
+            problem = (error as? LocalizedError)?.errorDescription ?? "Could not branch the conversation."
+            return nil
+        }
+    }
+
+    /// Take a conversation out of the list.
+    ///
+    /// Removed locally before the machine confirms, because the list is the
+    /// screen the person is looking at and a row that lingers for a round trip
+    /// reads as a failed tap. `refreshSessions` puts it back if the Mac refused.
+    public func archive(sessionId: String) async {
+        let held = sessions
+        sessions.removeAll { $0.id == sessionId }
+        do {
+            try await harness.archive(sessionId: sessionId)
+        } catch {
+            sessions = held
+            problem = (error as? LocalizedError)?.errorDescription ?? "Could not archive the conversation."
+        }
+    }
+
     public func rename(sessionId: String, title: String) async {
         do {
             try await harness.rename(sessionId: sessionId, title: title)

@@ -10,12 +10,20 @@ import SwiftUI
 struct ConversationView: View {
     let session: MachineSession
     let sessionId: String
+    /// Push another conversation. Supplied by whoever owns the navigation path;
+    /// this view knows a session id, not how the app is navigated.
+    var onOpen: ((String) -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
 
     @State private var conversation: Conversation?
     @State private var renaming = false
     @State private var renameText = ""
     @State private var showModels = false
     @State private var showInfo = false
+    @State private var archiving = false
+    /// Set when a branch succeeds, so the view can offer to follow it.
+    @State private var forked: String?
     @State private var atBottom = true
 
     var body: some View {
@@ -55,6 +63,25 @@ struct ConversationView: View {
         .sheet(isPresented: $showInfo) {
             SessionInfoView(sessionId: sessionId)
                 .environment(session)
+        }
+        .confirmationDialog("Archive this conversation?", isPresented: $archiving, titleVisibility: .visible) {
+            Button("Archive", role: .destructive) {
+                Task {
+                    await session.archive(sessionId: sessionId)
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("It leaves the list on every device. Nothing is deleted — the Mac can bring it back.")
+        }
+        .alert("Branched", isPresented: Binding(get: { forked != nil }, set: { if !$0 { forked = nil } })) {
+            Button("Stay here", role: .cancel) { forked = nil }
+            Button("Open it") {
+                if let forked { onOpen?(forked) }
+                forked = nil
+            }
+        } message: {
+            Text("A copy of this conversation up to now. What you do there does not touch this one.")
         }
         .overlay(alignment: .top) { ProblemBanner(session: session) }
     }
@@ -266,12 +293,26 @@ struct ConversationView: View {
                 } label: {
                     Label("Model", systemImage: "cpu")
                 }
+                Button {
+                    Task {
+                        if let branched = await session.fork(sessionId: sessionId) {
+                            forked = branched
+                        }
+                    }
+                } label: {
+                    Label("Branch from here", systemImage: "arrow.triangle.branch")
+                }
                 if conversation?.running == true {
                     Button(role: .destructive) {
                         Task { await session.cancel(sessionId: sessionId) }
                     } label: {
                         Label("Stop", systemImage: "stop.circle")
                     }
+                }
+                Button(role: .destructive) {
+                    archiving = true
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
                 }
                 Section {
                     Button {
