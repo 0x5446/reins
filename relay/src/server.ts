@@ -30,14 +30,24 @@ import {
   normalizeShortCode,
   verifyPairOffer,
   verifyRegistration,
+  MAX_FRAME_BYTES,
   type PairingBundle,
 } from '@reins/protocol'
 import { OfferStore } from './offers.ts'
 import { RateLimiter } from './rate-limit.ts'
 import { CapacityError, Registry, type Machine } from './registry.ts'
 
-/** Largest tunnel message the Relay will forward; matches the Bridle's own ceiling. */
-const MAX_PAYLOAD = 64 * 1024 * 1024
+/**
+ * Largest tunnel message the Relay will forward.
+ *
+ * `MAX_FRAME_BYTES`, not a number of its own. This relay could carry more —
+ * it is a Node process with a configurable `ws` — but a Bridle that behaves
+ * differently depending on which relay it dialled is worse than one that is
+ * uniformly a little smaller, and the smallest ceiling on any deployed path is
+ * Cloudflare's 32 MiB. Both ends now refuse an oversized frame before writing
+ * it, so this is a backstop rather than the thing anyone should hit.
+ */
+const MAX_PAYLOAD = MAX_FRAME_BYTES
 
 /** How long a Bridle has to complete registration before its socket is dropped. */
 const REGISTER_TIMEOUT_MS = 15_000

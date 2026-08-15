@@ -112,3 +112,74 @@ test('an approval raised while the phone is away is replayed on reconnect', asyn
   )
   assert.ok(ready.seq >= seen)
 })
+
+test('an answer too big for the tunnel fails the call instead of the connection', { timeout: 120_000 }, async (t) => {
+  // The failure this prevents was observed, not imagined: a `session.history`
+  // page came back as 22 MB of streaming chunks. `thinHistory` keeps that one
+  // under the ceiling now, but `session.export` has no such guard and a long
+  // session's archive has no upper bound at all.
+  //
+  // Every WebSocket on the path enforces a size limit by closing the
+  // *connection* with a 1009, so writing an oversized frame produces a tunnel
+  // that drops, reconnects, resumes, answers with the same frame and drops
+  // again — with no error anywhere naming the cause.
+  const agent = new FakeAgent()
+  const stack = await startStack({ agent })
+  t.after(() => stack.stop())
+  await stack.waitForRelay()
+
+  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
+  t.after(() => { phone.close() })
+  await phone.connect()
+
+  agent.answers.set('host.describe', { ok: true, value: { fat: 'x'.repeat(33 * 1024 * 1024) } })
+  const answer = await phone.call('host.describe', {})
+
+  assert.equal(answer.ok, false, 'the call should fail')
+  assert.equal(answer.error.code, 'too-large')
+  assert.match(answer.error.message, /MB/u, 'the message should say how big it was')
+
+  // The point of the whole exercise: the tunnel is still usable afterwards.
+  agent.answers.set('host.describe', { ok: true, value: { cwd: '/tmp' } })
+  const after = await phone.call('host.describe', {})
+  assert.equal(after.ok, true, 'the connection survived')
+  assert.equal(after.value.cwd, '/tmp')
+})
+
+test('a history page too big to send comes back shorter instead of failing', { timeout: 120_000 }, async (t) => {
+  // The observed shape: a 25-message page arrived as 22 MB of streaming
+  // chunks. Thinning handles the usual version of that, but a page still
+  // streaming has nothing superseded to drop — so the remaining answer is to
+  // ask for fewer messages, which is what `maxMessages` is for.
+  const agent = new FakeAgent()
+
+  // Stand in for a harness whose pages are proportional to what was asked for.
+  // Four megabytes a message puts 25 and 12 over the 32 MiB ceiling and 6 under.
+  const perMessage = 4 * 1024 * 1024
+  const asks = []
+  agent.handle('session.history', (payload) => {
+    const messages = payload.maxMessages
+    asks.push(messages)
+    return {
+      ok: true,
+      value: {
+        events: [{ event: { type: 'user/message', seq: 1, time: 0, data: { pad: 'x'.repeat(messages * perMessage) } } }],
+        hasMore: true,
+      },
+    }
+  })
+
+  const stack = await startStack({ agent })
+  t.after(() => stack.stop())
+  await stack.waitForRelay()
+
+  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
+  t.after(() => { phone.close() })
+  await phone.connect()
+
+  const page = await phone.call('session.history', { sessionId: 's1', maxMessages: 25 })
+
+  assert.equal(page.ok, true, 'the caller gets a page, not an error')
+  assert.deepEqual(asks, [25, 12, 6], 'the ask halves until it fits')
+  assert.equal(page.value.hasMore, true, 'and can still page back for the rest')
+})

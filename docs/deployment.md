@@ -122,7 +122,10 @@ sudo cloudflared service install              # 读 /etc/cloudflared/config.yml
 两条路都要注意的：
 
 - **心跳 25 秒**，比 Cloudflare 的 WebSocket 空闲超时（100 秒）短得多，连接不会被中途掐掉。
-- **单帧上限 64 MiB**。Cloudflare 免费版对 WebSocket 消息大小没有明确文档化的限制，但大附件（整个仓库的文件读取、大图）真撞上的时候，先怀疑这一层。要排除嫌疑就临时关橙云（DNS only）对比一次。
+- **单帧上限 32 MiB**，且这不是本机的选择——它是路径上最小的那个天花板（Cloudflare Worker 接收消息的硬限制）。Node relay 本可以更大，但一个 Bridle 不应该因为拨到哪个 relay 而表现不同。
+- **超限的表现是断链，不是报错**。每一层 WebSocket 都用 1009 关掉整条连接来执行这个限制，没有可捕获的单请求失败。没有防护的话，结果是隧道掉线→重连→resume→重发同一个大帧→再掉，无限循环，而且哪一层都说不出原因。两层防护：
+  1. **`session.history` 自动缩页**。页是按*消息数*分的，而 dsh 明确每页是一段连续的原始事件区间——所以一条消息可以跨几万个 `assistant/chunk`，页的字节数没有上限（实测 25 条消息 = 22 MB）。Bridle 发现瘦身后仍然超限时，把 `maxMessages` 减半重问，直到装得下。这不是绕路，小页正是 `maxMessages` 的用途，调用方本来就会跟着 `hasMore` 继续翻。
+  2. **写之前量一次**（`MAX_FRAME_BYTES`），作为兜底。没有分页参数的方法（`session.export` 完全无分页、`session.list` 返回多少是多少）只能走这条：那一个请求答成 `too-large`，隧道不动。
 - **不要开 Cloudflare 的缓存规则去缓存 `/v1/*`**。短码是一次性的，缓存住等于把它变成可重放的。`/install` 那条已经自己带了 `max-age=300`。
 
 ### 内建的限制
@@ -131,7 +134,7 @@ sudo cloudflared service install              # 读 /etc/cloudflared/config.yml
 
 | 限制 | 值 | 为什么 |
 |---|---|---|
-| 单帧最大 | 64 MiB | 附件走 base64 在 JSON 里，图片和大文件读取会撑到这个量级 |
+| 单帧最大 | 32 MiB | 路径上最小的天花板。附件走 base64 涨 4/3，所以原始文件约 24 MiB 以内安全 |
 | 注册超时 | 15 秒 | Bridle 连上后必须在这个时间内签名证明身份 |
 | 心跳 | 25 秒 | 比常见的 60 秒空闲超时短，穿得过大多数中间设备 |
 | 每台机器的并发线路 | 8 | 一个人的几部设备够用，僵尸线路堆不起来 |
@@ -238,7 +241,7 @@ Relay 看不到明文、看不到你的 dsh 地址、看不到会话内容。它
 |---|---|---|
 | 现状：北京 ECS + CF Tunnel | ¥0（机器已存在） | **采用** |
 | 境外 VPS（香港/新加坡） | ¥24/月起 | 未采用。合规干净，且中国用户少一跳折返 |
-| Cloudflare Workers + Durable Objects，无源站 | ¥0（免费版：10 万请求/天、13,000 GB-s/天；入站 WS 消息 20:1 折算；休眠连接不计时长） | 未采用。免费额度对个人量级绰绰有余，但 Relay 要按 Hibernation API 重写，单帧上限从 64 MiB 降到 32 MiB，且绑死 Cloudflare |
+| Cloudflare Workers + Durable Objects，无源站 | ¥0（免费版：10 万请求/天、13,000 GB-s/天；入站 WS 消息 20:1 折算；休眠连接不计时长） | 未采用。免费额度对个人量级绰绰有余，但 Relay 要按 Hibernation API 重写，绑死 Cloudflare。单帧上限本来就已经按它的 32 MiB 对齐了，所以这一条不再是迁移的代价 |
 | 老实备案 | — | 不可行，`.ai` 出局 |
 
 **扩大规模前重新评估这一节。**上面的风险评估建立在"个人、小流量、不公开推广"之上；有真实用户之后每一条的概率都变。

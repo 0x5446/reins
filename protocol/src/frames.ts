@@ -19,6 +19,26 @@ export const TUNNEL_VERSION = 1
  * than the exception. Both ends offer what they can speak and the responder
  * picks the highest they share.
  */
+/**
+ * Largest single tunnel message any hop will carry, in bytes.
+ *
+ * A ceiling rather than a preference: every WebSocket implementation on the
+ * path enforces one, and all of them enforce it the same brutal way — the
+ * oversized message is never delivered and the *connection* is closed with a
+ * 1009. There is no per-request failure and nothing to catch, so a sender that
+ * does not check first produces a tunnel that drops, reconnects, resumes,
+ * resends the same frame and drops again, with no layer able to say why.
+ *
+ * Which is why this is shared: both ends check against it before writing, so
+ * the failure lands on the one request responsible instead of on the tunnel.
+ *
+ * 32 MiB is Cloudflare's limit for a message received by a Worker, and the
+ * lowest ceiling on any path this protocol is deployed over. The Node relay
+ * could carry more; matching the smallest one means a Bridle does not behave
+ * differently depending on which relay it happens to be dialling.
+ */
+export const MAX_FRAME_BYTES = 32 * 1024 * 1024
+
 export const TUNNEL_VERSIONS: readonly number[] = [1]
 
 /**

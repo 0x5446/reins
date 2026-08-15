@@ -75,6 +75,7 @@ const eventLog = read('bridle/src/tunnel/event-log.ts')
 const registry = read('relay/src/registry.ts')
 const offers = read('relay/src/offers.ts')
 const relayServer = read('relay/src/server.ts')
+const frameConstants = read('protocol/src/frames.ts')
 
 /**
  * Render a number the way the docs might write it, so a match is not defeated
@@ -88,7 +89,9 @@ function spellings(value) {
 }
 
 const checks = [
-  ['单帧最大（字节）', constant(relayServer, 'MAX_PAYLOAD'), [protocolDoc, deployDoc], ['64 MiB']],
+  // Lives in protocol/ now, not relay/: both ends check against it before
+  // writing, so it is a protocol fact rather than one relay's setting.
+  ['单帧最大（字节）', constant(frameConstants, 'MAX_FRAME_BYTES'), [protocolDoc, deployDoc], ['32 MiB']],
   ['在途请求上限', constant(session, 'MAX_INFLIGHT'), [protocolDoc], null],
   ['心跳间隔（毫秒）', constant(session, 'PING_INTERVAL_MS'), [protocolDoc, deployDoc], ['25 秒', '25s']],
   ['重放缓冲容量', constant(eventLog, 'DEFAULT_CAPACITY'), [protocolDoc], null],
@@ -117,7 +120,7 @@ for (const [label, value, docs, phrases] of checks) {
   // A derived spelling could drift from the source without the phrase changing,
   // so pin the arithmetic too where it is knowable.
   if (label === '单帧最大（字节）') {
-    expect(Number(value) === 64 * 1024 * 1024, `单帧最大: 源码是 ${value}，不再是文档写的 64 MiB`)
+    expect(Number(value) === 32 * 1024 * 1024, `单帧最大: 源码是 ${value}，不再是文档写的 32 MiB`)
   }
   if (label === '心跳间隔（毫秒）') {
     expect(Number(value) === 25_000, `心跳间隔: 源码是 ${value}ms，不再是文档写的 25 秒`)

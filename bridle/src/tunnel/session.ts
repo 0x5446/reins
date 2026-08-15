@@ -19,11 +19,21 @@ import {
   type ClientFrame,
   type SecureChannel,
   type ServerFrame,
+  MAX_FRAME_BYTES,
 } from '@reins/protocol'
 import { acceptPeer, findPeer, offerAccepts, touchPeer } from '../identity.ts'
 import type { BridleCore, DshStatus } from '../core.ts'
 import type { LoggedEvent } from './event-log.ts'
 import { thinHistory } from './history.ts'
+import type { AgentResult } from '../agents/types.ts'
+
+/**
+ * What to ask dsh for when the caller named no page size.
+ *
+ * dsh's own default is 50. This is only the starting point for the shrink
+ * loop below — the app states its own, and the loop lowers whatever it gets.
+ */
+const DEFAULT_HISTORY_MESSAGES = 25
 
 /** The carrier a session writes through. */
 export interface TunnelTransport {
@@ -285,18 +295,11 @@ export class TunnelSession {
     const controller = new AbortController()
     this.inflight.set(id, controller)
     try {
-      let result = method === 'session.export'
-        ? await this.exportSession(payload)
-        : await this.core.dsh.call(method, payload, controller.signal)
-      if (method === 'session.history' && result.ok) {
-        const { value, thinning } = thinHistory(result.value)
-        if (thinning !== undefined) {
-          this.options.log?.(
-            `history thinned ${String(thinning.before)} → ${String(thinning.after)} events`,
-          )
-          result = { ok: true, value }
-        }
-      }
+      const result = method === 'session.history'
+        ? await this.historyThatFits(payload, controller.signal)
+        : method === 'session.export'
+          ? await this.exportSession(payload)
+          : await this.core.dsh.call(method, payload, controller.signal)
       if (!this.closed) this.sendFrame({ t: 'res', id, result })
     } finally {
       this.inflight.delete(id)
@@ -339,11 +342,105 @@ export class TunnelSession {
   private sendFrame(frame: ServerFrame): void {
     const channel = this.channel
     if (channel === undefined || this.closed) return
+    const encoded = encodeFrame(frame)
+    if (encoded.length > MAX_FRAME_BYTES) {
+      this.sendOversize(frame, encoded.length)
+      return
+    }
     try {
-      this.transport.send(channel.encrypt(encodeFrame(frame)))
+      this.transport.send(channel.encrypt(encoded))
     } catch (error) {
       this.dispose(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  /**
+   * Fetch a history page small enough to send, halving the ask until it fits.
+   *
+   * A page is bounded by *messages*, and dsh is explicit that each one stays
+   * one contiguous raw event range — so a single message can span tens of
+   * thousands of `assistant/chunk` events and the byte size of a page has no
+   * ceiling at all. This is not hypothetical: a 25-message page came back as
+   * 22 MB. `thinHistory` handles the usual shape of that by dropping chunks
+   * that a committed message has already superseded, but a page still
+   * streaming has nothing to drop.
+   *
+   * So when the thinned page is still too big, ask for fewer messages. That is
+   * not a workaround — smaller pages are what `maxMessages` is *for*, and the
+   * caller already knows how to follow `hasMore`. It gets a shorter page and
+   * carries on, instead of an error about a limit it did not set and cannot do
+   * anything about.
+   *
+   * Only history, because only history has a size knob. `session.export` takes
+   * no page argument and `session.list` returns what it returns; for those the
+   * ceiling check in `sendFrame` is the whole answer.
+   */
+  private async historyThatFits(payload: unknown, signal: AbortSignal): Promise<AgentResult> {
+    const request = (payload ?? {}) as Record<string, unknown>
+    const asked = typeof request['maxMessages'] === 'number' ? request['maxMessages'] : DEFAULT_HISTORY_MESSAGES
+    let messages = Math.max(1, Math.floor(asked))
+
+    for (;;) {
+      const attempt = await this.core.dsh.call(
+        'session.history',
+        { ...request, maxMessages: messages },
+        signal,
+      )
+      if (!attempt.ok) return attempt
+
+      const { value, thinning } = thinHistory(attempt.value)
+      if (thinning !== undefined) {
+        this.options.log?.(`history thinned ${String(thinning.before)} → ${String(thinning.after)} events`)
+      }
+      const result: AgentResult = { ok: true, value }
+
+      const size = encodeFrame({ t: 'res', id: 'sizing', result }).length
+      // One message that still does not fit is the end of the line: there is
+      // nothing smaller to ask for. Send it and let `sendFrame` turn it into an
+      // error the caller can read, rather than looping forever.
+      if (size <= MAX_FRAME_BYTES || messages === 1) return result
+
+      const smaller = Math.max(1, Math.floor(messages / 2))
+      this.options.log?.(
+        `history page was ${(size / (1024 * 1024)).toFixed(1)} MB at ${String(messages)} messages; retrying with ${String(smaller)}`,
+      )
+      messages = smaller
+    }
+  }
+
+  /**
+   * Deal with a frame nobody on the path will carry.
+   *
+   * Writing it anyway is the worst option available: the relay closes the
+   * connection with a 1009 before the app sees a byte, the app reconnects and
+   * resumes, the same call is answered with the same oversized frame, and the
+   * tunnel drops again — forever, with no error anywhere that names the cause.
+   * The observed shape of this is a `session.history` page that came back as
+   * 22 MB of streaming chunks; `thinHistory` keeps that one under the ceiling
+   * now, but `session.export` has no such guard and a long session's archive
+   * has no upper bound at all.
+   *
+   * A response can fail on its own, so it does. An event cannot — there is no
+   * request waiting on it — so it is dropped and logged, which loses one frame
+   * instead of the connection. The app notices the sequence gap either way.
+   */
+  private sendOversize(frame: ServerFrame, size: number): void {
+    const megabytes = (size / (1024 * 1024)).toFixed(1)
+    const ceiling = (MAX_FRAME_BYTES / (1024 * 1024)).toFixed(0)
+    this.options.log?.(`dropping a ${megabytes} MB ${frame.t} frame; the ceiling is ${ceiling} MB`)
+    if (frame.t !== 'res') return
+    this.sendFrame({
+      t: 'res',
+      id: frame.id,
+      result: {
+        ok: false,
+        error: {
+          code: 'too-large',
+          message: `That answer is ${megabytes} MB, over the ${ceiling} MB the tunnel can carry in one piece.`,
+          details: { bytes: size, limit: MAX_FRAME_BYTES },
+        },
+      },
+    })
   }
 }
 

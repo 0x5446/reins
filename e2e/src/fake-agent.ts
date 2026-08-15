@@ -34,8 +34,26 @@ export class FakeAgent implements AgentClient {
   /** Answers keyed by method; anything unlisted returns an empty object. */
   readonly answers = new Map<string, AgentResult>()
 
+  /**
+   * Answers computed from the payload, for the cases a fixed value cannot
+   * express — a page whose size depends on how many messages were asked for,
+   * a call that should fail only the third time.
+   */
+  private readonly handlers = new Map<string, (payload: any) => AgentResult>()
+
+  /**
+   * Answer this method by running a function over its payload.
+   * @param method - the method to intercept.
+   * @param handler - called with the payload; its return value is the answer.
+   */
+  handle(method: string, handler: (payload: any) => AgentResult): void {
+    this.handlers.set(method, handler)
+  }
+
   async call(method: string, payload: unknown): Promise<AgentResult> {
     this.calls.push({ method, payload })
+    const handler = this.handlers.get(method)
+    if (handler !== undefined) return Promise.resolve(handler(payload))
     return Promise.resolve(this.answers.get(method) ?? { ok: true, value: {} })
   }
 
