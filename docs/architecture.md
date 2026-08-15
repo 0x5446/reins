@@ -1,97 +1,529 @@
-# Reins 架构
+# Reins 技术架构
 
-## 命名
+本文档描述 Reins 的整体设计、每个接缝的契约、以及新功能应该落在哪里。它同时是一份**扩展指南**——未做的功能（推送、定时任务、多 agent、trace）在这里有明确的落点，实施时不需要重新设计。
 
-| 组件 | 名字 | 由来 |
+写作原则：每个决策给出理由和代价。没有理由的决策是巧合，没有代价的决策是谎话。
+
+- 组件与命名：§1
+- 架构论点（全文的骨架）：§2
+- 三个扩展点：§3
+- 分层与依赖方向：§4
+- 加密与信任：§5
+- 隧道协议：§6
+- 可达性阶梯：§7
+- 两个入口，一份核心：§8
+- iOS 端：§9
+- 待建子系统（推送 §10、定时 §11、多 agent §12、trace §13）
+- 版本兼容：§14
+- 测试策略：§15
+- 不变量清单：§16
+- 明确不做：§17
+- 已知代价：§18
+
+---
+
+## 1. 组件与命名
+
+| 组件 | 是什么 | 跑在哪 | 代码 |
+|---|---|---|---|
+| **Reins** | iOS app | iPhone | `ios/` |
+| **Bridle** | 伴生进程，套住本机 agent | 与 agent 同机 | `bridle/` `dsh-plugin/` |
+| **Relay** | 内容盲交换机 | 公网 | `relay/` |
+| **protocol** | 两端共享的线上格式 | 两端各一份实现 | `protocol/`（TS）+ `ios/Reins/Protocol/`（Swift） |
+
+一句话：**Bridle 套住 agent，Relay 传递密文，Reins 握在手里。**
+
+命名不是装饰。缰绳、笼头、中继——三个词各自说清了自己那一端的职责边界，读代码的人不需要记住一张缩写表。
+
+---
+
+## 2. 架构论点
+
+> **系统是一根管子，两端各有一次折叠。中间的每一层都不理解内容。**
+
+这句话是全文的骨架，所有分层都是它的推论。
+
+dsh 不发送渲染结果，它发送自己那份 append-only 事件日志，每个客户端各自折叠成要显示的东西。这一点决定了整个系统的形状：
+
+- **Relay 不理解内容**——它只有密文，连方法名都看不到。
+- **Bridle 不理解内容**——它转发方法调用和事件帧，不解释语义。唯一的例外是 §3.4 的历史瘦身，而那是**丢弃冗余**，不是**解释语义**。
+- **只有 app 折叠**——`Conversation` 是唯一知道 `assistant/chunk` 该拼进哪个气泡的地方。
+
+### 为什么这样是对的
+
+**折叠是纯函数。**`items = fold(events)`。这带来三个白拿的性质：
+
+1. **断线重连只要补上缺的事件**，不需要重新同步状态——重放收敛到同一个结果。
+2. **历史分页和实时流用同一条代码路径**，`seq` 去重，一页历史盖住实时流的一段不会双渲染。
+3. **可测**——51 个 iOS 单元测试里大半是喂事件、断言 `items`，不需要网络也不需要 UI。
+
+**中间层不理解内容，所以中间层不需要跟着功能升级。**dsh 加一个事件类型、一种工具卡片、一个 projection，Bridle 和 Relay 一行都不用改。这是本项目最重要的可维护性性质，§3 把它具体化成三个扩展点。
+
+### 代价
+
+- **app 必须容忍未知**。不认识的事件类型静默丢弃（`Conversation.apply` 的 `default` 分支），不认识的工具卡片降级成 `.generic`。写死枚举会让插件生态每装一个东西就崩一次。
+- **折叠成本在客户端**。一个流式密集的会话，50 条消息可能对应 12 万条事件。§3.4 是对这个代价的直接回应。
+
+---
+
+## 3. 三个扩展点
+
+功能待办清单里的每一项，都只会落在这三个口子之一。**如果一个新功能需要改三个以上文件，那说明接缝设计错了，先修接缝。**
+
+### 3.1 新方法：透传，零改动
+
+dsh 有 44 个客户端方法。app 调用其中任意一个，只需要在 `ios/Reins/Net/Harness.swift` 加一个函数：
+
+```swift
+public func fork(sessionId: String) async throws -> String {
+    try await tunnel.call("session.fork", .object(["sessionId": .string(sessionId)]))
+        ["sessionId"]?.stringValue ?? ""
+}
+```
+
+Bridle 的 `handleRequest` 是完全泛型的——`method` 是字符串，`payload` 是不透明值。**Bridle 不需要知道 `session.fork` 存在。**
+
+> 唯一的例外是 `session.export`（要处理二进制 zip → base64）和 `session.history`（瘦身）。两个特判都写在 `bridle/src/tunnel/session.ts` 的一处 switch 里，看得见。
+
+### 3.2 新 projection：一个 case
+
+dsh 每个会话带 13 个 projection，我们目前折叠了 4 个。加一个是 `Conversation.applyProjection` 里的一个 case：
+
+```swift
+case "permissions":
+    permissions = PermissionState(value)
+```
+
+**projection 的传输是白拿的**——它们已经在历史页的 `projections` 基线块里，也已经通过 `session/projection` 帧实时下发。不需要新请求，不需要碰 Bridle。
+
+现有 13 个：
+
+| projection | 用了吗 | 内容 |
 |---|---|---|
-| iOS App | **Reins**（缰绳） | 你手里握着的那一头。远程操控 agent。 |
-| 电脑端伴生进程 | **Bridle**（笼头） | 套在马头上的那一头，缰绳接在它上面。与 dsh 同机、只走 loopback。 |
-| 中继服务 | **Relay** | 两条 WebSocket 之间的哑管道，只搬密文。 |
+| `title` `todos` `contextPressure` `plan` | ✓ | 标题、清单、上下文占用、计划模式 |
+| `permissions` | — | `{options[], currentValue}`，访问模式 |
+| `sessionStats` | — | turns / steps / llmMs / toolMs / ttftMs / decodeTokens |
+| `contextBreakdown` | — | 系统提示词 / 工具 / 消息 各占多少 token |
+| `tokenUsage` | — | 缓存命中、输入输出 |
+| `subagent` `subagentTiming` | — | 子 agent 状态与耗时 |
+| `goal` | — | 长任务目标 |
+| `sessionListMetadata` `imageLimits` | — | 列表元数据、图片上限 |
 
-一句话：**Bridle 套住 dsh，Relay 传递密文，Reins 握在手里。**
+### 3.3 新工具卡片：一个 case
 
-## 拓扑
+dsh 在事件旁边附一份**渲染意图**（`view`），host 已经算好了这个工具该怎么画。app 把它翻译成 `ToolPresentation` 的一个 case：
 
 ```
- iPhone                    公网                     用户的电脑
-┌────────┐            ┌──────────┐            ┌──────────────────┐
-│ Reins  │◄──wss─────►│  Relay   │◄──wss─────►│ Bridle           │
-│ (app)  │  密文帧    │ (哑管道) │  密文帧    │  │               │
-└────────┘            └──────────┘            │  ├─ HTTP loopback│
-     ▲                                        │  │  POST /api/*  │
-     └──────── E2E 加密通道（端到端）──────────┘  └─ WS  /api/events.*
-                                               └────────► dsh web
-                                                     127.0.0.1:3080
+generic · terminal · diff · search · read
 ```
 
-- Bridle 主动外连 Relay，**不需要端口转发、不需要公网 IP、不需要动路由器**。
-- Relay 只按 deviceId 撮合两条 socket，转发不透明字节。它拿不到明文、拿不到 dsh 地址、拿不到 API key。
-- dsh 只监听 loopback。Bridle 与它同机，Host 头天然合法，51 个方法（含 loopback 特权方法）全部可用。
-- 备用**直连模式**：同一套加密，App 直接连 Bridle 的 LAN 地址或 Tailscale 地址，不经 Relay。
+新增一种卡片 = `Conversation.callPresentation` / `resultPresentation` 各加一个 case，`ToolCardView` 加一个分支。
 
-## 加密通道
+**关键性质：app 永远不需要知道某个具体工具是干什么的。**`bash`、`read`、某个插件自定义的工具，都只是"带着渲染意图的一次调用"。不认识的意图降级成 `.generic`，显示标题和原始输入——退化，不是崩溃。
 
-静态密钥 + 每连接临时密钥，三次 DH（Noise IK 同构），全部用两端标准库：Node `node:crypto` / Swift `CryptoKit`，**零第三方密码学依赖**。
+### 3.4 反向扩展点：Bridle 的瘦身钩子
 
-### 配对（一次）
-Bridle 生成静态 X25519 密钥对，落盘 `~/.reins/bridle.json`（0600）。
-配对载荷（QR / 短码）包含：`relayURL`、`deviceId`、`bridle静态公钥`、`一次性配对密钥`。
-App 生成自己的静态密钥对存 Keychain，用一次性密钥完成首次握手后，双方互相钉住对方静态公钥（TOFU）。一次性密钥即刻作废。
+三个扩展点都是"加东西"，还有一个"减东西"的位置值得单独说，因为它是本项目唯一允许 Bridle 碰内容的地方。
 
-### 每次连接握手
+`bridle/src/tunnel/history.ts` 的 `thinHistory` 剥掉已提交消息的 `assistant/chunk`。实测：一页 50 条消息 = 120,397 事件 / 22 MB，剥完剩 305 条。
+
+**为什么这不违反"中间层不理解内容"**：它丢弃的是**同一信息的冗余表示**——committed 消息的完整内容已经在 `assistant/message` 里，chunk 只对还没提交的那条有意义。规则一行话："同一个 `turn.step` 已有 message，就丢掉它的 chunk"。它不解释语义，只去重。
+
+**边界**：任何需要理解"这条消息说了什么"才能做的裁剪，都不属于这里，属于 app。
+
+---
+
+## 4. 分层与依赖方向
+
 ```
-app  → bridle : Ea (临时公钥) ‖ Sa (静态公钥, 用一次性/已钉密钥加密)
-bridle → app  : Eb (临时公钥)
-共享 = HKDF-SHA256( DH(Ea,Eb) ‖ DH(Ea,Sb) ‖ DH(Sa,Eb) ‖ DH(Sa,Sb) )
-          ├─ k_a2b  (app → bridle)
-          └─ k_b2a  (bridle → app)
+                 ┌──────────────────────────────────────┐
+   iPhone        │  Views      （只读 Store，不碰网络）  │
+                 │  Store      Conversation / MachineSession / AppModel
+                 │  Net        Tunnel / Harness / Carrier │
+                 │  Protocol   Noise / Frames / Pairing   │
+                 └──────────────┬───────────────────────┘
+                                │  Noise 密文
+                 ┌──────────────┴───────────────────────┐
+   公网          │  Relay      registry / offers / limit │
+                 └──────────────┬───────────────────────┘
+                                │  Noise 密文
+   用户的电脑    ┌──────────────┴───────────────────────┐
+                 │  TunnelSession  握手 / 帧循环          │
+                 │  BridleCore     身份 / 事件日志 / 状态 │
+                 │  AgentClient    ← 唯一的 agent 适配面  │
+                 └──────────────┬───────────────────────┘
+                                │  loopback HTTP + WS
+                                ▼
+                          dsh (127.0.0.1:3080)
 ```
-前向保密（临时密钥）+ 双向认证（静态密钥）。任一方静态公钥不匹配 → 立即断开，App 显示「设备身份变了」。
 
-### 数据帧
-ChaCha20-Poly1305，nonce = 4 字节方向前缀 ‖ 8 字节单调计数器；计数器回退或重复 = 断开（抗重放）。AAD 绑定帧序号，防重排。
+**依赖只向下。**`Views` 不 import `Net`，`Net` 不知道 `Views` 存在。Bridle 的 `TunnelSession` 通过 `BridleCore` 拿 agent，不直接构造。
 
-## 隧道协议（密文之内）
+### 4.1 agent 适配面
 
-单条隧道复用全部 dsh 流量：
+这是可扩展性最重要的一条边。整个 agent 侧的接触面是**五个方法**：
+
+```ts
+interface AgentClient {
+  call(method: string, payload: unknown, signal?: AbortSignal): Promise<AgentResult>
+  respond(message: unknown): Promise<unknown>
+  health(): Promise<AgentHealth>
+  pump(stream: 'mux' | 'host', onFrame, onState, signal): void
+  export(sessionId: string, includeDescendants: boolean): Promise<Response>
+}
+```
+
+`BridleCore` 已经写成可注入：`constructor(state, overrides: { dsh?: AgentClient })`。
+
+> **待办**：`DshClient` 目前是具体类，`index.ts` 直接导出它。要接第二个 agent，需要把它提成 interface。这是一处 20 行的重构，不改任何调用方。§12 依赖它。
+
+---
+
+## 5. 加密与信任
+
+### 5.1 为什么是 Noise_IK
+
+`Noise_IK_25519_ChaChaPoly_SHA256`，两端只用标准库（Node `node:crypto` / Swift `CryptoKit`），零第三方密码学依赖。
+
+选 IK 而不是别的：
+
+- **发起方在第一条消息里就知道响应方的静态公钥**（从配对码拿到），所以不需要额外往返，也不给中间人任何"先冒充再说"的窗口。
+- **双向认证**：消息一的 `s, ss` 认证发起方，消息二的 `ee, se` 给出前向保密。
+- **对比**：HPKE base 模式是单向的、不认证发送方；一个自定义的"共享密钥 + SecretBox"方案没有前向保密，密钥泄露一次全历史可解。
+
+### 5.2 密钥生命周期
+
+| 密钥 | 存哪 | 生命周期 |
+|---|---|---|
+| 手机静态私钥 | iOS Keychain，`afterFirstUnlockThisDeviceOnly` | 装机时生成，重置才换 |
+| 机器静态私钥 | `~/.reins/bridle.json`，0600 | 首次运行生成 |
+| 机器签名密钥（Ed25519） | 同上 | 同上，与静态密钥**分离** |
+| 每连接临时密钥 | 内存 | 一次连接 |
+| 配对令牌 | 状态文件，带过期 | **一次性**，用掉即废 |
+
+**密钥不复用。**签名用 Ed25519，DH 用 X25519，对称加密用握手派生的传输密钥——三者独立。把一个 32 字节秘密同时当 SecretBox key、Ed25519 seed 和 X25519 私钥用，是明确的密码学异味。
+
+### 5.3 配对的两条路
+
+**二维码**（默认）：配对码直接带着机器的静态公钥，手机在第一个字节之前就知道对方是谁。恶意 Relay 无法介入。
+
+**短码**（扫不了码时）：手机从 Relay 换取配对载荷，而 Relay 可能撒谎。所以握手完成后**两端各显示一个 6 位数字**，从 handshake hash 派生：
+
+```
+digits = BE_uint32(sha256("reins-confirm" ‖ handshakeHash)[0..4]) mod 10^6
+```
+
+数字相同 ⇒ 两端的握手记录一致 ⇒ 没有中间人。这是 Bluetooth 数字比对的同一套逻辑。
+
+### 5.4 dsh 没有认证层，这是设计的中心事实
+
+dsh 的安全模型是「只绑 loopback + Host 头信任栅栏」。Bridle 与它同机，请求源是回环、`Host: 127.0.0.1:3080`，天然通过栅栏——**dsh 端零配置，不需要 `--trusted-host`**。
+
+**因此 Bridle 不能是哑转发器。**`socat` 把 `0.0.0.0:3080 → 127.0.0.1:3080` 一转，就等于把一个无认证的远程代码执行接口暴露给整个网段。
+
+Bridle 补回了 dsh 故意不做的认证：
+
+- 监听器**只讲 Noise 隧道**，非 WebSocket upgrade 一律 `426`，不吐一个字节的 API（`direct-server.ts`）
+- 未配对设备完不成 IK 握手
+- e2e 测试 `the direct listener is not a web server` 盯着这条
+
+**推论也要说清楚：配对进来的设备 = dsh 的完整权限。**Bridle 不做细粒度授权，因为 dsh 本身没有这个概念。`bridle revoke` 是唯一的收回手段。这是产品必须诚实告知用户的事。
+
+---
+
+## 6. 隧道协议
+
+单条隧道复用全部流量，手机只持有一个 socket。
 
 | 帧 | 方向 | 语义 |
 |---|---|---|
-| `req {id, method, payload}` | app→bridle | 映射到 `POST /api/<method>` |
-| `res {id, result}` | bridle→app | 该 POST 的 `server-response.result` |
-| `cancel {id}` | app→bridle | 中断在途 HTTP 请求（对应 AbortSignal） |
-| `ev {seq, stream, frame}` | bridle→app | mux / host 事件流帧，带隧道级单调 seq |
-| `resume {since}` | app→bridle | 重连时补发 seq 之后的帧 |
-| `resync {}` | bridle→app | 缓冲已翻篇，App 重拉 list/history |
-| `hello / ready` | 双向 | 版本协商、dsh 状态、bridle 版本 |
-| `ping / pong` | 双向 | 15s 心跳，检测半死连接 |
+| `req {id, method, payload}` | app→bridle | 一元调用 |
+| `res {id, result}` | bridle→app | 应答 |
+| `cancel {id}` | app→bridle | 放弃在途请求 |
+| `respond {id, message}` | app→bridle | 回答审批/提问 |
+| `ev {seq, stream, frame}` | bridle→app | 下行事件，带隧道级序号 |
+| `resume {since}` | app→bridle | 重连后补齐 |
+| `resync {from}` | bridle→app | 缓冲不够了，重新拉状态 |
+| `ready` `status` `ping` `pong` `fault` | 双向 | 生命周期 |
 
-Bridle 侧保留最近 2000 条事件帧的环形缓冲。手机切后台、过隧道、地铁断网回来 → `resume` 秒级续上，不丢帧、不重拉全量。这是移动端相对 webui 的第一个硬优势（webui 断线只能重开流+重拉历史）。
+### 6.1 无损重连
 
-## dsh 侧对接要点
+Bridle 持有一个环形缓冲（`tunnel/event-log.ts`），事件带单调递增 `seq`。重连时 app 发 `resume{since}`，Bridle 重放缺口。
 
-- 上行只有 `POST /api/<method>`（JSON）与 `GET /api/session.export`（ZIP 流），无状态代理即可。
-- 下行两条 WS：`/api/events.mux`（会话事件、审批、提问、队列、任务、投影）与 `/api/events.host`（会话增删、running 翻转、workspace 变更）。客户端在 WS 上不许发消息。
-- 审批/提问是**可应答的服务器请求**：原样 echo `rpcId`，走 `POST /api/respond`。
-- `tool/call` / `tool/result` 帧自带 host 算好的渲染意图（`generic` / `terminal` / `diff` + locations），App 不必认识每个工具就能渲染。
-- 事件类型是 merge-extensible 的开放集合，App 对未知类型必须降级渲染而不是崩。
+**缓冲不够时不静默丢弃，而是发 `resync{from}`。**app 收到后重新拉取**屏幕上正在显示的**会话历史，而不是全部。
 
-完整 API 清单见 [dsh-api-inventory.md](dsh-api-inventory.md)。
+> 这一条是刻意的：调研显示"重连丢东西 / 静默挂死"是整个品类的第一痛点。静默丢帧会让折叠结果与真相不一致，而且永远不会自愈。显式告知虽然更吵，但可自愈。
 
-## 安装与配置流程（摩擦点逐个消灭）
+### 6.2 字节级对齐
 
-1. **电脑端一行命令**：`npx @reins/bridle` 。无需先装 dsh：Bridle 探测本机 dsh（默认端口、`~/.dsh`、运行中进程），没有就引导装/起。
-2. **自动起 dsh**：Bridle 可托管 `dsh web` 子进程，崩溃自动重启，端口冲突自动换。
-3. **配对零输入**：终端直接画 QR；同时给一个本机页面。不能扫码时有 8 位短码可手输。
-4. **App 端三步**：装 App → 扫码 → 用。无账号、无密码、无端口转发、无证书。
-5. **持久化**：Bridle 可 `--install-service` 装成 launchd 常驻，开机自启；`reins status` 一眼看清。
-6. **多机**：一个 App 可配多台电脑，顶部切换器切换，各自独立密钥。
+协议在 TS 和 Swift 里各实现一遍。**"我自己写的服务器能连上我自己写的客户端"证明不了任何事**，所以：
 
-## 仓库结构
+`protocol/scripts/emit-vectors.js` 用固定密钥、固定临时密钥跑出确定性向量，Swift 侧逐字节比对握手消息、handshake hash、确认数、传输层密文、配对链接、帧编码。
+
+这里的失败是协议分叉，不是 flaky test。
+
+> 一个真实教训：Foundation 的 `JSONEncoder` **不保证 key 顺序**（不是声明顺序，而且跨进程不稳定）。帧编码因此改成显式声明顺序（`TunnelFrame.members`）。没有向量的话这个问题不会被发现，因为两端都能正常解析。
+
+---
+
+## 7. 可达性阶梯
+
+**中继是兜底，不是路径。**这是与竞品最重要的架构分歧——调研中最高频的用户抱怨是"为什么我的流量要过你的服务器"。
+
+app 按顺序尝试配对码里的每个候选地址，全部失败才用 Relay：
+
+| 层 | 机制 | 我们的服务器 | 状态 |
+|---|---|---|---|
+| 1 | 同一局域网直连 | 零 | ✓ |
+| 2 | Tailscale / 其他 overlay | 零 | ✓ 自动——Bridle 绑 `0.0.0.0`，网卡枚举天然包含 `100.64/10` |
+| 3 | 用户自带隧道（CF Tunnel / ngrok / 端口转发） | 零 | ✓ `--advertise` |
+| 4 | Relay | 兜底 | ✓ |
+| 5 | P2P 打洞（STUN/ICE） | 仅信令 | 未做，见下 |
+
+地址选择（`dialableAddresses`）丢掉 `169.254/16`（DHCP 失败的自赋地址，只会换来超时），排序为 `192.168` → `10` → tailnet → `172.16/12`（多半是 Docker 网桥）→ 其他。
+
+> **P2P 是否值得做**：能把 Relay 从数据通道缩成信令（每次连接几百字节），但仍需信令点，且约 10-20% 对称 NAT 需要 TURN 兜底——而 TURN 就是中继。鉴于层 1-3 已经覆盖了绝大多数场景且成本为零，**P2P 的边际收益低于实现复杂度，暂不做**。
+
+---
+
+## 8. 两个入口，一份核心
+
+Bridle 有两种装法，共享同一个 `BridleCore`：
+
+| 形态 | 命令 | 适合 |
+|---|---|---|
+| 独立进程 | `bridle` | 需要独立托管，或以后指向别的 agent |
+| dsh 插件 | `dsh plugin --profile web add @reins/bridle-plugin` | 常见场景：一条命令，跟着 dsh 起停 |
+
+**插件仍然走 loopback HTTP 连它自己所在的那个 dsh。**看起来浪费，实际不是：调用不出机器，与独立二进制同一条路径、同一套测试覆盖，**两者不会漂移**。插件文件因此是生命周期包装（约 100 行），不是第二份实现。
+
+插件的两条契约由测试守着：`apply` 必须立刻返回（Cordis 并发挂载，慢插件拖住整个 harness）、`dispose` 不能抛（抛了会带崩整次 reload）。
+
+---
+
+## 9. iOS 端
+
+### 9.1 状态所有权
 
 ```
-bridle/   Node CLI：加密通道、dsh 代理、配对、进程托管
-relay/    Node 服务：哑管道，可部署 Fly/Railway/自建
-ios/      SwiftUI App：Reins
-docs/     架构与 API 清单
+AppModel        设备身份、已配对机器列表、当前连接的机器（同时只连一台）
+ └ MachineSession  一台机器的一切：tunnel、会话列表、审批/提问、打开的会话
+    └ Conversation  一个会话的折叠结果
 ```
+
+**同时只连一台机器**是刻意的：每台机器一个 socket 就是每台机器唤醒一次射频，而"同时盯两台 Mac"的场景比电池代价罕见。切换 = 断开 + 连接，两者都快。
+
+技术选型：SwiftUI + Observation（`@Observable`），iOS 17 起步，无第三方依赖。`Tunnel` 是 actor，`Store` 层 `@MainActor`。
+
+### 9.2 UI 的几条硬规则
+
+这些不是风格偏好，每一条都对应一个具体的失败模式：
+
+1. **发送永不禁用。**离线、规划中、turn 跑到一半都能发，变的是 placeholder。信号一格时给个灰掉的按钮，比让消息排队差得多。
+2. **健康的连接不显示任何东西。**"已连接"是噪音；状态行只在出问题时出现，并且说清楚该怎么办。
+3. **不断言自己不知道的事。**连不上机器时不能说"dsh 没在跑"——没有隧道就没有远端信息。（这条是从一个真实 bug 来的：dsh 好好的，挂的是 Bridle。）
+4. **破坏性操作要能被找到，也要说清代价。**"忘记某台 Mac"曾经只是一个滑动手势——而滑动手势唯一的发现方式是你已经知道它在。
+5. **单向的事要说是单向的。**手机端取消配对不影响电脑端，界面必须写出来。
+
+---
+
+## 10. 待建：推送
+
+**这是品类第一痛点**，也是本项目唯一有说服力的付费支点。当前只有本地通知，app 被挂起后连接即断。
+
+### 10.1 难点：Relay 必须保持内容盲
+
+如果 Relay 直接发一条带文字的 APNs 告警，它就读到了通知内容——违反 §2。
+
+**解法：APNs 的 `mutable-content` + Notification Service Extension。**
+
+```
+Bridle                        Relay                    iPhone
+  │ 组装告警文本                 │                         │
+  │ 用隧道密钥加密 ─────────────►│                         │
+  │                             │ 调 APNs，payload 是密文  │
+  │                             │ ───────────────────────►│
+  │                             │                         │ NSE 解密 → 显示
+```
+
+Relay 搬的是不透明 blob，NSE 在设备上解密后才成为可见文字。**这是把 §2 的性质延伸到推送链路的唯一正确做法**，而且 Apple 原生支持。
+
+### 10.2 诚实的泄露
+
+Relay 必须知道 **device token**（它要调 APNs）。因此它能建立 `device token ↔ 某台机器` 的关联。
+
+能否避免？只有让 Bridle 自己调 APNs——那需要把 APNs 私钥分发到每个用户的机器上，不可接受。
+
+**所以这是一个真实的、不可消除的元数据泄露，必须写进隐私说明。**Relay 知道：谁在线、谁连谁、搬了多少字节、哪个 token 属于哪台机器。它不知道：任何内容。
+
+### 10.3 落点
+
+| 改哪 | 做什么 |
+|---|---|
+| `ios/Reins/App/Notifier.swift` | 注册远程通知，拿 device token |
+| 新帧 `push-token {token, environment}` | app→bridle，走加密隧道 |
+| `bridle/src/push.ts` | 存 token；审批/提问/turn 结束/挂死 时组装并加密告警 |
+| `relay/src/push.ts` | `POST /v1/push`，验签，调 APNs，不解密 |
+| `ios/ReinsNotify/`（新 target） | NSE，从 Keychain 共享组取密钥解密 |
+| `ios/Reins/Reins.entitlements` | `aps-environment` |
+
+**前置条件：付费 Apple Developer Program（$99/年）。**免费个人 team 的 profile 无 `aps-environment`，且后台 Keys 页面不开放，无法签发 APNs key。这是硬阻塞，不是可以绕过的工程问题。
+
+---
+
+## 11. 待建：定时任务
+
+dsh **有**调度能力（`@deepseek-ai/dsh-schedule`），但有三个限制：
+
+1. 只有**模型**能调（`schedule_create` / `list` / `delete` 是会话内工具），44 个客户端方法里没有 `schedule.*`
+2. `deliveryMode: "session-local"`——到点只是在那个会话里塞一轮，不通知任何人
+3. 分叉不继承提醒
+
+所以 webui 上没有入口，任何客户端都没有。**这是一个真空。**
+
+### 落点
+
+```
+dsh-schedule-plugin/     新插件，把 schedule_* 暴露成 schedule.list/create/delete
+bridle/src/push.ts       监听 schedule 分发事件 → 触发推送
+ios/Views/Schedule*.swift 清单、新建、删除
+```
+
+**依赖推送。**没有推送，定时跑完了你还是不知道，与现状无异。因此**排在推送之后，不并行**。
+
+两者合起来是「每天早上 9 点让 agent 跑一件事，跑完推到锁屏上」——调研中 15 个有牵引力的产品，没有一个做到。
+
+---
+
+## 12. 待建：多 agent
+
+当前钉死 dsh 的 44 方法私有 API：**深度上赢，可移植性上输**。
+
+ACP（Agent Client Protocol）是长尾项目的事实标准，registry 有 38 个已验证 agent。但排名前三的产品都不用它——ACP 抹平差异的同时也抹掉了各家 harness 的独有能力。**dsh 目前不在 ACP registry 里。**
+
+### 结论与落点
+
+**不追求"一套吃所有"，而是保留接第二个后端的能力。**
+
+```
+bridle/src/agents/
+  types.ts        AgentClient interface（§4.1 的五个方法）
+  dsh/            现有实现
+  acp/            以后
+```
+
+app 侧需要一个能力协商：ACP 后端缺少工具渲染意图、projection、审批批次等，UI 必须明确标出"这个后端不支持 X"，而不是静默降级。
+
+**这不是现在的问题。**先做深度，等 dsh 热度回落或用户真的要切 agent 再说。
+
+---
+
+## 13. 待建：trace
+
+webui 的轨迹是**横向甘特图**（Turn / Request #N / TOOL 逐行铺开，可拖时间轴）。那是给宽屏做的，塞进 393pt 只会变成一坨。
+
+**不照抄形态，只取信息。**手机上做成纵向一列：每个 turn 一张卡，展开看它的每次请求和工具调用，各带耗时与 token 速率。
+
+数据来源：`sessionStats` + `tokenUsage` projection（§3.2，白拿）+ 事件日志里的 `step/start` `step/end` `request/header`。**不需要新 API。**
+
+---
+
+## 14. 版本兼容
+
+app 和 Bridle 各自更新，不保证同步。
+
+- **隧道版本**（`tunnelVersion = 1`）混进 Noise prologue。不匹配则握手直接失败，`fault{reason: "version"}`，app 提示"更新较旧的那一端"。**协议层不做向后兼容**——它太小、太核心，兼容两个版本的收益低于风险。
+- **应用层向前兼容**：未知帧类型、未知事件类型、未知渲染意图，一律容忍。app 可以连上比自己新的 Bridle。
+- **历史瘦身是可选优化**：app 仍然传 `maxMessages`，所以对着没更新的 Bridle 也不会被 22MB 打死。
+
+---
+
+## 15. 测试策略
+
+```
+向量对齐    protocol/scripts/emit-vectors.js → Swift 逐字节
+              证明：两份实现是同一个协议
+单元        TS 80 · iOS 51
+              证明：折叠、解析、限流、地址选择、插件生命周期
+e2e         20（起真 Relay + 真 Bridle + 真 dsh + 脚本手机）
+              证明：配对、审批、重连重放、以及各种拒绝
+UI          6（XCUITest，真机或模拟器，连真 Bridle）
+              证明：点了真的有反应
+```
+
+四层各自证明不同的东西，都不可省：
+
+- 没有向量，两端可以各自自洽地跑但互不兼容
+- 没有单元测试，折叠的边界情况（重复 seq、乱序 projection、孤儿工具结果）无法覆盖
+- 没有 e2e，安全属性只是断言而非事实——`the relay only ever sees ciphertext` 必须是可执行的
+- 没有 UI 测试，"能编译"和"能用"之间还有一整个鸿沟
+
+**UI 测试与单元测试分属两个 scheme**（`Reins` / `ReinsUI`）：单元测试到处都能跑、几秒钟；UI 测试需要一台配对好的机器、几分钟。合在一起会让每次 `npm run test:ios` 都等一台可能没开的电脑。
+
+---
+
+## 16. 不变量清单
+
+以下每条都有测试守着。**改动使任何一条失效，就是改错了。**
+
+| # | 不变量 | 守卫 |
+|---|---|---|
+| 1 | Relay 只见密文 | e2e `the relay only ever sees ciphertext` |
+| 2 | 直连监听器不是 web 服务器 | e2e `the direct listener is not a web server` |
+| 3 | 配对令牌一次性 | e2e `a stolen pairing token works exactly once` |
+| 4 | 吊销立即生效 | e2e `a revoked device cannot come back` |
+| 5 | 篡改帧撕毁隧道，不被接受 | e2e `a tampered frame tears the tunnel down` |
+| 6 | 错误的机器密钥无法完成握手 | e2e `a device believing the wrong machine key…` |
+| 7 | 重放无损，不够时显式告知 | e2e `replay is gapless… and honest when it cannot be` |
+| 8 | 两份协议实现逐字节一致 | `ParityTests`（16 项） |
+| 9 | 折叠幂等（同一 seq 不双渲染） | `testDuplicateSequenceIsIgnored` |
+| 10 | 未知事件静默，不渲染噪音 | `testUnknownEventIsSilent` |
+| 11 | 历史瘦身不丢未提交内容 | `chunks of the in-progress message are kept` |
+| 12 | 插件 apply 不阻塞、dispose 不抛 | `dsh-plugin/tests/plugin.test.js` |
+
+---
+
+## 17. 明确不做
+
+| 不做 | 理由 |
+|---|---|
+| 工作区增删改（`workspace.*` 7 个方法） | 坐在电脑前做一次的事 |
+| 插件管理 | 同上；且在手机上装插件是奇怪的动作 |
+| `settings.*` / `credentials.*` | dsh 钉死 loopback 的特权方法。把写 API key 的能力延伸到手机，等于扩大了配对设备的权限边界 |
+| 点赞点踩 | 反馈遥测，对自用无价值 |
+| 横向甘特图 trace | 见 §13 |
+| P2P 打洞 | 见 §7 |
+| Android | 不是不做，是现在不做。协议与折叠逻辑可移植，UI 不可 |
+
+**把电脑的管理面搬到手机上，只会让界面变成 webui 的缩小版**——那正是要避免的。
+
+---
+
+## 18. 已知代价
+
+诚实清单。每一条都是主动选择，不是疏忽。
+
+1. **配对设备 = dsh 完整权限**（§5.4）。无细粒度授权，因为 dsh 无此概念。
+2. **Relay 知道 device token ↔ 机器的关联**（§10.2）。推送落地后不可消除。
+3. **同时只连一台机器**（§9.1）。换电池换来的。
+4. **绑定 dsh**（§12）。深度换可移植性。
+5. **折叠成本在客户端**。大会话首次加载仍然重，瘦身缓解但没消除。
+6. **协议不向后兼容**（§14）。版本不匹配直接拒绝，不做双版本支持。
+7. **iOS 独占**。
+8. **推送依赖付费 Apple 账号**（§10.3）。硬阻塞。
+
+---
+
+## 附：新功能该往哪放
+
+| 想加什么 | 改哪 | 大概规模 |
+|---|---|---|
+| 调一个新的 dsh 方法 | `Harness.swift` 加函数 + 调用它的视图 | 几十行 |
+| 显示一个新 projection | `Conversation.applyProjection` 一个 case + 视图 | 几十行 |
+| 支持一种新工具卡片 | `callPresentation`/`resultPresentation` + `ToolCardView` | 上百行 |
+| 访问模式切换 | `permissions` projection + 输入框菜单 | 上百行 |
+| 斜杠命令 | `skill.list` + 输入框选择器（命令是文本，dsh 服务端解析） | 上百行 |
+| subagent | `subagent.*` 四个方法 + 取消列表过滤 | 数百行 |
+| 推送 | §10 六处 | 一天，卡付费账号 |
+| 定时任务 | §11 三处 | 一到两天，依赖推送 |
+| 第二个 agent 后端 | §12，先提 interface | 数天 |

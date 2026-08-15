@@ -1,0 +1,496 @@
+# Reins 线上协议规范
+
+本文档精确到字节。目标是：**一个人（或一个模型）只读这份文档，就能写出与现有实现互通的第三方客户端**，不需要读源码。
+
+规范性用词：**必须**（MUST）、**禁止**（MUST NOT）、**应当**（SHOULD）、**可以**（MAY）。
+
+一致性检验的唯一权威是 `protocol/scripts/emit-vectors.js` 生成的测试向量（`ios/ReinsTests/Fixtures/protocol-vectors.json`）。**本文档与向量冲突时，以向量为准**，并且这属于文档 bug，须修正。
+
+- 术语与总览：§1
+- 配对载荷：§2
+- Noise 通道：§3
+- 隧道帧：§4
+- Relay 线上格式：§5
+- Relay HTTP 接口：§6
+- 直连接口：§7
+- 错误码：§8
+- 测试向量：§9
+
+---
+
+## 1. 术语与总览
+
+| 术语 | 含义 |
+|---|---|
+| **App** | 发起方（Noise initiator）。手机。 |
+| **Bridle** | 响应方（Noise responder）。与 agent 同机。 |
+| **Relay** | 内容盲交换机。只按 circuit 转发不透明字节。 |
+| **carrier** | 承载 Noise 消息的传输。当前有两种：Relay WebSocket、局域网直连 WebSocket。 |
+| **circuit** | Relay 上一条 App↔Bridle 的通路，u32 标识。 |
+| **tunnel frame** | Noise 密文**内部**的应用层帧，JSON。 |
+
+三层嵌套，从外到内：
+
+```
+WebSocket 二进制消息
+  └─ [Relay 路径] mux 帧：u8 type | u32 circuit | payload      ← 仅 Bridle↔Relay 段
+       └─ Noise 消息（握手消息 或 传输密文）
+            └─ 隧道帧（JSON, UTF-8）
+```
+
+**直连路径没有 mux 层**：WebSocket 消息直接就是 Noise 消息。
+
+所有多字节整数**必须**为大端序，除 Noise nonce 外（§3.4）。
+
+---
+
+## 2. 配对载荷
+
+### 2.1 结构
+
+配对码承载一个 JSON 对象。字段顺序**必须**如下（`JSON.stringify` 的插入顺序；向量逐字节比对）：
+
+| 字段 | 类型 | 必需 | 含义 |
+|---|---|---|---|
+| `v` | number | 是 | 载荷版本。当前恒为 `1`。 |
+| `relay` | string | 是 | Relay 基址，如 `wss://reins.novabox.ai`。 |
+| `direct` | string[] | 否 | 直连候选，`ws://host:port`，**最优在前**。字段为 `undefined` 时整个键省略。 |
+| `device` | string | 是 | 设备 id，见 §2.3。 |
+| `key` | string | 是 | Bridle 的 X25519 静态**公钥**，32 字节，base64url 无填充。 |
+| `token` | string | 是 | 一次性配对令牌，base64url 无填充。已配对设备重连时为空串。 |
+| `name` | string | 是 | 机器显示名。 |
+
+序列化规则：
+
+- **必须**为紧凑 JSON（无空格、无换行）
+- **禁止**转义斜杠（`/` 原样输出，不写 `\/`）
+- 顶层键顺序**必须**为上表顺序
+
+> 实现注记：Foundation 的 `JSONEncoder` 用字典承载 keyed container，**不保证键顺序**，且顺序在不同进程间不稳定。Swift 侧因此不能用 `Codable` 合成编码，须显式声明顺序。
+
+### 2.2 深链
+
+```
+reins://pair#<base64url(JSON)>
+```
+
+载荷在 **fragment** 里，因此即使被粘进浏览器也不会发给任何服务器。
+
+解码方**必须**：
+
+1. 校验前缀为 `reins://pair`
+2. 取第一个 `#` 之后的全部内容
+3. base64url 解码（接受无填充；解码前按需补 `=`）
+4. JSON 解析
+5. 校验 `relay`、`device`、`token` 非空，且 `key` 解码后恰为 32 字节
+
+任一步失败**必须**拒绝，**禁止**部分接受。
+
+### 2.3 设备 id
+
+```
+device = base64url( sha256("reins-device" ‖ ed25519_signing_public_key)[0..16] )
+```
+
+取 SHA-256 前 **16 字节**，base64url 无填充（22 字符）。
+
+**注意**：派生自 **Ed25519 签名公钥**，不是 X25519 静态公钥。二者是不同密钥（§3.2）。因此**仅凭配对载荷无法验证 `device` 与 `key` 的对应关系**——这个绑定由 Relay 在注册时验证（§6.1），以及由握手本身验证（连错机器则握手失败）。
+
+### 2.4 短码
+
+给扫不了码的场景。
+
+- 字母表：`BCDFGHJKMNPQRSTVWXYZ23456789`（28 字符，**无元音**，**无** `0 O 1 I L`）
+- 长度：**8** 个字符
+- 显示形式：`XXXX-XXXX`（中间一个连字符）
+- 生成：每字符取一个随机字节，`ALPHABET[byte % 28]`
+
+> 取模引入的偏置：256 mod 28 = 4，前 4 个字符概率略高（约 +2.4%）。8 字符的熵约 38.5 bit，短码只在 15 分钟内有效且一次性（§6.2），此偏置不构成实际风险。
+
+**归一化**（比较前必须执行）：
+
+1. 转大写
+2. 删除所有非 ASCII 字母数字字符
+3. 若结果恰为 8 字符，在第 4 与第 5 字符间插入 `-`；否则原样返回
+
+**完整性判定**：去格式化后**恰为 8 字符**，且每个字符都在字母表内。
+
+> 陷阱：判定**必须**基于去格式化后的字符串。基于归一化结果判断长度是错的——9 个字符的输入归一化后仍是 9 个字符，与"8 字符 + 连字符"同长，会被误判为合法。
+
+### 2.5 确认数
+
+短码路径下，两端各自显示并由人工比对。
+
+```
+digits = BE_uint32( sha256("reins-confirm" ‖ handshake_hash)[0..4] ) mod 1000000
+```
+
+十进制，**左侧补零至 6 位**。
+
+`handshake_hash` 是握手完成时 Noise 对称状态的 `h`（§3.3）。
+
+### 2.6 密钥指纹
+
+给人核对用（`bridle devices` 与 app 设置页显示同一个值）。
+
+```
+hex = uppercase( hex( sha256("reins-identity" ‖ public_key) ) )
+fingerprint = hex[0:4] "-" hex[4:8] "-" hex[8:12] "-" hex[12:16]
+```
+
+即前 8 字节，4 组 4 个十六进制字符，连字符分隔。例：`125B-8CAC-3F65-7256`。
+
+---
+
+## 3. Noise 通道
+
+### 3.1 参数
+
+| 项 | 值 |
+|---|---|
+| 协议名 | `Noise_IK_25519_ChaChaPoly_SHA256` |
+| DH | X25519 |
+| 加密 | ChaCha20-Poly1305 |
+| 哈希 | SHA-256 |
+| 密钥长度 | 32 字节 |
+| 认证标签 | 16 字节 |
+| prologue | UTF-8 `"reins-tunnel/v1"` |
+
+prologue 中的 `1` 是隧道版本。版本不一致时握手在密码学层面直接失败——**这是刻意的**，见 §4.6。
+
+遵循 Noise 规范的标准初始化：`h = SHA256(protocol_name)`（协议名恰好 32 字节则直接用），`ck = h`，随后 `MixHash(prologue)`。
+
+### 3.2 密钥角色
+
+| 密钥 | 属于 | 用途 |
+|---|---|---|
+| X25519 静态密钥对 | 双方各一 | Noise 身份 |
+| X25519 临时密钥对 | 双方各一，每连接新生成 | 前向保密 |
+| Ed25519 签名密钥对 | 仅 Bridle | 向 Relay 证明身份（§6.1），派生 `device` |
+
+**禁止**跨用途复用任何密钥材料。
+
+### 3.3 握手（IK 模式）
+
+**消息一，App → Bridle**：`e, es, s, ss`
+
+```
+e                                     32 字节临时公钥，明文
+MixHash(e)
+MixKey(DH(e, rs))                     rs = Bridle 静态公钥，来自配对码
+EncryptAndHash(s)                     32 + 16 = 48 字节，App 静态公钥密文
+MixKey(DH(s, rs))
+EncryptAndHash(payload)               握手载荷密文
+```
+
+线上：`e ‖ enc(s) ‖ enc(payload)`，即 `32 + 48 + (len(payload) + 16)` 字节。
+
+**消息一载荷**（JSON，键序如下）：
+
+| 字段 | 类型 | 必需 | 含义 |
+|---|---|---|---|
+| `v` | number | 是 | 隧道版本，恒 `1` |
+| `name` | string | 是 | 设备显示名 |
+| `client` | string | 是 | 客户端构建标识，如 `reins-ios/1.0 (1)` |
+| `token` | string | 否 | 一次性配对令牌。**已知设备必须省略此键**（不是发 `null`） |
+
+省略 vs `null` 的区别是语义性的：省略表示"我已被认识"，`null` 会被当作"要兑换一个空令牌"。
+
+**消息二，Bridle → App**：`e, ee, se`
+
+```
+e                                     32 字节临时公钥，明文
+MixHash(e)
+MixKey(DH(e, re))
+MixKey(DH(e, rs))                     rs = App 静态公钥，消息一中获得
+EncryptAndHash(payload)
+```
+
+线上：`e ‖ enc(payload)`。
+
+**消息二载荷**：
+
+| 字段 | 类型 | 必需 | 含义 |
+|---|---|---|---|
+| `ok` | boolean | 是 | 是否接受 |
+| `reason` | string | `ok=false` 时必需 | `version` / `unpaired` / `internal` |
+| `machine` | string | `ok=true` 时应当 | 机器名 |
+| `bridle` | string | `ok=true` 时应当 | Bridle 版本 |
+
+`ok=false` 后 Bridle **必须**关闭连接。
+
+**Bridle 侧接受判定**（顺序不可换）：
+
+1. `v` 缺省视为当前版本；不等于 `1` → `refuse("version")`
+2. **重新读取状态文件**（`bridle pair` / `bridle revoke` 在别的进程里跑，必须在**本次握手**生效，而不是下次重启）
+3. 静态公钥在已配对列表中 → 接受，更新 last-seen
+4. 否则要求 `token` 存在且匹配一个未过期未使用的 offer → 接受并记录设备，**令牌立即作废**
+5. 否则 → `refuse("unpaired")`
+
+**握手完成后**双方各得两个方向密钥：`(k_initiator→responder, k_responder→initiator)`，以及 `handshake_hash = h`。
+
+### 3.4 传输层
+
+每方向一个独立的 64 位计数器，从 **0** 开始，每加密一条消息 **+1**。
+
+**Nonce 构造**（12 字节）：
+
+```
+nonce[0..4]  = 0x00 0x00 0x00 0x00
+nonce[4..12] = counter，小端序 u64
+```
+
+> 这是 Noise 规范的 nonce 布局：前 4 字节恒零，后 8 字节小端计数器。**这是全协议唯一的小端序**。
+
+密文 = `ChaCha20-Poly1305(key, nonce, plaintext, aad = 空)`，标签附在末尾。
+
+**接收方必须**用自己期望的计数器解密，成功后 +1。解密失败（篡改、乱序、重放）**必须**立即撕毁隧道，**禁止**重同步计数器后继续——能静默重同步的流是可伪造的。
+
+**禁止**在同一密钥下重用计数器。
+
+---
+
+## 4. 隧道帧
+
+Noise 明文即一个 JSON 对象，UTF-8 编码。所有帧有字符串字段 `t` 作为判别式。
+
+编码规则：
+
+- 紧凑 JSON
+- **禁止**转义斜杠（方法名如 `goals/create` 必须原样）
+- 整数**必须**不带小数点（`8`，不是 `8.0`）
+- 顶层键顺序**必须**与下表一致
+
+### 4.1 App → Bridle
+
+**`req`** — 调用一个 agent 方法
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `t` | `"req"` | |
+| `id` | string | App 铸造的关联 id，本隧道内唯一 |
+| `method` | string | 方法名，如 `session.prompt` |
+| `payload` | any | 方法载荷 |
+
+**`cancel`** — 放弃在途请求
+
+| `t` = `"cancel"` | `id` = 要放弃的请求 id |
+
+Bridle **必须**中止对应的上游请求。未知 id **必须**静默忽略。
+
+**`respond`** — 回答审批或提问
+
+| `t` = `"respond"` | `id` = 新的关联 id | `message` = agent 的 `client-response` 消息，原样透传 |
+
+**`resume`** — 重连后补齐
+
+| `t` = `"resume"` | `since` = 已持有的最高事件序号；`0` 表示全新订阅 |
+
+**`pong`** — 存活应答
+
+| `t` = `"pong"` | `nonce` = 原样回送 |
+
+### 4.2 Bridle → App
+
+**`ready`** — 连接就绪，**必须**是握手后的第一帧
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `t` | `"ready"` | |
+| `version` | number | 隧道版本 |
+| `bridle` | string | Bridle 版本 |
+| `machine` | string | 机器名 |
+| `dshReachable` | boolean | 本机 agent 当前是否可达 |
+| `host` | any | 可达时为 agent 的 `host.describe` 值；不可达时省略 |
+| `seq` | number | Bridle 已产生的最高事件序号 |
+
+**`res`** — `req` 的应答
+
+```
+{ "t": "res", "id": "...", "result": { "ok": true, "value": ... } }
+{ "t": "res", "id": "...", "result": { "ok": false, "error": { "code", "message", "details" } } }
+```
+
+**`ev`** — 下行事件
+
+| `t` = `"ev"` | `seq` = 隧道级单调序号 | `stream` = `"mux"` \| `"host"` | `frame` = agent 的 `server-request` 帧，原样 |
+
+**`resync`** — 重放缓冲不足
+
+| `t` = `"resync"` | `from` = Bridle 还能提供的最早序号 |
+
+App 收到后**必须**重新拉取**当前屏幕上**的状态，而不是全部。
+
+**`status`** — 本机 agent 起落
+
+| `t` = `"status"` | `dshReachable` = boolean | `detail` = 不可达原因，可选 |
+
+**`ping`** — 存活探测，间隔 **25 秒**
+
+| `t` = `"ping"` | `nonce` = 任意字符串 |
+
+**`fault`** — 协议级拒绝，之后连接关闭
+
+| `t` = `"fault"` | `code` = `version`\|`unpaired`\|`internal`\|`busy` | `message` = 人类可读 |
+
+### 4.3 未知帧
+
+收到未知 `t` 的一方**必须**忽略该帧并继续。**禁止**因此关闭连接。这是向前兼容的基础。
+
+### 4.4 并发上限
+
+Bridle **必须**限制单条隧道的在途 `req` 数量。当前实现为 **64**，超出时以 `code: "busy"` 立即应答，**禁止**排队。
+
+### 4.5 事件序号与重放
+
+- `seq` 由 Bridle 分配，**每条隧道内**单调递增，从 1 开始
+- Bridle 持有环形缓冲；默认容量 **2000** 条（`EventLog` 构造参数可覆盖，测试用小值验证溢出路径）
+- `resume{since}` 时：若 `since >= 缓冲最早序号 - 1`，重放 `since` 之后全部；否则发 `resync{from}`
+- **禁止**静默丢弃
+
+### 4.6 版本策略
+
+隧道版本在 prologue 内，握手在密码学层面即失败。**不做多版本兼容**：协议面小、位置核心，兼容两个版本的收益低于风险。UI 应当提示"更新较旧的一端"。
+
+应用层则**必须**向前兼容：未知帧类型、未知事件类型、未知渲染意图一律容忍。
+
+---
+
+## 5. Relay 线上格式
+
+仅存在于 **Bridle ↔ Relay** 段。App ↔ Relay 段的 WebSocket 消息直接是 Noise 消息。
+
+```
+u8  type
+u32 circuit （大端）
+    payload
+```
+
+头长 **5** 字节。
+
+| type | 值 | 方向 | payload |
+|---|---|---|---|
+| `Open` | `0x01` | Relay→Bridle | JSON `CircuitInfo`，宣告一部手机接入 |
+| `Data` | `0x02` | 双向 | 一条 carrier 消息，原样 |
+| `Close` | `0x03` | 双向 | UTF-8 原因文本，可为空 |
+
+未知 type **必须**拒绝（而非忽略）——这一层是二进制且长度定死，未知类型意味着解析错位。
+
+Relay **禁止**解析 `Data` 的 payload。
+
+---
+
+## 6. Relay HTTP 接口
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/healthz` | 存活与粗粒度计数 |
+| `GET` | `/install` | 安装脚本（`curl \| sh`），文本 |
+| `GET` | `/v1/machine/<deviceId>` | 该机器是否在线 |
+| `POST` | `/v1/pair/offer` | Bridle 挂一个短码邀请 |
+| `GET` | `/v1/pair/claim?code=` | App 用短码换配对载荷，**一次性** |
+| `WS` | `/v1/bridle` | Bridle 常连 |
+| `WS` | `/v1/app?device=` | App 接入为一条 circuit |
+
+### 6.1 Bridle 注册
+
+连上 `/v1/bridle` 后，Relay 发一个随机 nonce，Bridle **必须**在 **15 秒**内回签名：
+
+```
+signature = Ed25519_sign( "reins-relay-registration/v1" ‖ "\n" ‖ nonce )
+```
+
+Relay 验签，并校验 `deviceId == base64url(sha256("reins-device" ‖ signing_public_key)[0..16])`。**这是 `device` 与签名密钥绑定的唯一强制点。**
+
+同一 deviceId 重复注册时，**新连接顶掉旧连接**。
+
+### 6.2 短码邀请
+
+`POST /v1/pair/offer`：
+
+```json
+{ "code", "device", "key", "signature", "bundle", "expiresAt" }
+```
+
+`signature = Ed25519_sign("reins-pair-offer/v1" ‖ "\n" ‖ code)`。
+
+两个域分隔符（`reins-relay-registration/v1` / `reins-pair-offer/v1`）不同，因此一个签名**不能**被当作另一个用途重放。
+
+Relay 侧限制（硬编码，非配置项）：
+
+| 限制 | 值 |
+|---|---|
+| 单帧最大 | 64 MiB |
+| 注册超时 | 15 秒 |
+| 心跳 | 25 秒 |
+| 每机器并发 circuit | 8 |
+| 每设备待领短码 | 3 |
+| 短码有效期上限 | 15 分钟（请求更长会被截断） |
+
+`GET /v1/pair/claim` **必须**在成功返回后立即作废该短码。
+
+---
+
+## 7. 直连接口
+
+Bridle 监听 `0.0.0.0:<port>`（`--direct-port`，`0` 表示由系统分配）。
+
+- 路径：`/v1/tunnel`（`DIRECT_PATH`）
+- **非 WebSocket upgrade 的请求必须返回 `426`**，且**禁止**返回任何 API 内容
+- WebSocket 消息直接是 Noise 消息，**无 mux 头**
+
+广播给配对码的地址由网卡枚举得出：
+
+- 排除 internal（loopback）与非 IPv4
+- 排除 `169.254/16`（DHCP 失败的自赋地址，永不可路由）
+- 排序：`192.168/16` → `10/8` → `100.64/10`（tailnet）→ `172.16/12` → 其他
+- `--advertise` 指定的地址**排在最前**（机器无法自行发现的隧道域名）
+
+---
+
+## 8. 错误码
+
+### 8.1 隧道层（`res.result.error.code` 与 `fault.code`）
+
+| code | 含义 | 可重试 |
+|---|---|---|
+| `disconnected` | 隧道不在 | 是 |
+| `timeout` | 上游未在期限内应答（当前 120 秒） | 是 |
+| `busy` | 在途请求超过上限 | 是 |
+| `internal` | Bridle 内部故障 | 是 |
+| `version` | 隧道版本不匹配 | 否 |
+| `unpaired` | 设备未被认识 | 否 |
+| `bad-request` | 载荷不合法 | 否 |
+
+其余错误码由上游 agent 定义，Bridle **必须**原样透传，**禁止**改写。
+
+### 8.2 判定可重试
+
+`disconnected` / `timeout` / `internal` / `busy` 视为暂时性；其余视为终态。客户端**应当**只对暂时性错误自动重试。
+
+---
+
+## 9. 测试向量
+
+```sh
+npm run vectors      # 生成 ios/ReinsTests/Fixtures/protocol-vectors.json
+```
+
+固定静态密钥与固定临时密钥，使整个握手确定。覆盖：
+
+| 向量 | 断言 |
+|---|---|
+| `protocolName` `prologue` | 常量一致 |
+| `handshake.messageOne` | 逐字节相同（覆盖哈希链、两次 DH、两次 AEAD） |
+| `handshake.messageTwo` | 响应方能恢复发起方身份与载荷，且产出相同 |
+| `handshake.handshakeHash` | 双方派生一致 |
+| `handshake.confirmationNumber` | 确认数一致 |
+| `transport.*` | **多条**帧的密文逐字节一致（一条帧无法暴露计数器不递增） |
+| `pairing.link` | 编解码逐字节往返 |
+| `pairing.fingerprint` | 指纹一致 |
+| `pairing.shortCodeInputs` | 归一化一致 |
+| `frames[]` | 帧编码逐字节一致 |
+
+新实现**应当**先跑通全部向量，再接真实 Bridle。
+
+**已知不可自验的项**：`deviceId` 派生自 Ed25519 签名公钥，而配对载荷只带 X25519 静态公钥，因此客户端无法凭载荷验证 `device` 字段（§2.3）。向量刻意不断言这一项。
