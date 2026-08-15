@@ -13,6 +13,7 @@ import {
   constantTimeEqual,
   generateKeyPair,
   publicKeyOf,
+  negotiateVersion,
 } from '../lib/index.js'
 
 /**
@@ -117,4 +118,32 @@ test('public keys round trip through the raw encoding', () => {
 test('constant-time comparison rejects different lengths without throwing', () => {
   assert.equal(constantTimeEqual(Buffer.from('ab'), Buffer.from('abc')), false)
   assert.equal(constantTimeEqual(Buffer.from('abc'), Buffer.from('abc')), true)
+})
+
+test('the prologue carries no version, so a mismatch can be answered', () => {
+  // The property this protects: both ends mix the *same* prologue regardless of
+  // which versions they speak, so the responder can always decrypt message one
+  // and always send back an authenticated refusal. A version in the prologue
+  // made the mismatch fail inside the handshake, where nothing can be said.
+  assert.equal(TUNNEL_PROLOGUE.toString('utf8'), 'reins-tunnel')
+  assert.ok(!TUNNEL_PROLOGUE.toString('utf8').includes('/v'))
+})
+
+test('negotiation picks the highest shared version', () => {
+  assert.equal(negotiateVersion([2, 1], [1, 2]), 2)
+  assert.equal(negotiateVersion([1], [1, 2]), 1, 'an older app gets the version it can speak')
+  assert.equal(negotiateVersion([3, 2], [1, 2]), 2, 'a newer app falls back to the shared one')
+})
+
+test('no overlap is reported rather than guessed at', () => {
+  assert.equal(negotiateVersion([9], [1]), undefined)
+  assert.equal(negotiateVersion([1], [9]), undefined)
+})
+
+test('a client that predates negotiation is treated as version 1', () => {
+  // The oldest clients send no `versions` key at all. Refusing them would be a
+  // silent break for exactly the population this whole change exists to protect.
+  assert.equal(negotiateVersion(undefined, [1, 2]), 1)
+  assert.equal(negotiateVersion([], [1, 2]), 1)
+  assert.equal(negotiateVersion(undefined, [2]), undefined, 'unless 1 is no longer supported')
 })

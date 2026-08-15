@@ -57,9 +57,34 @@ final class ParityTests: XCTestCase {
     /// no offer to redeem" and would otherwise try to redeem a null one.
     func testHandshakeRequestOmitsAbsentToken() throws {
         let without = try HandshakeRequest(name: "a", client: "b", token: nil).encoded()
-        XCTAssertEqual(String(data: without, encoding: .utf8), #"{"v":1,"name":"a","client":"b"}"#)
+        XCTAssertEqual(String(data: without, encoding: .utf8), #"{"versions":[1],"name":"a","client":"b"}"#)
         let with = try HandshakeRequest(name: "a", client: "b", token: "t").encoded()
-        XCTAssertEqual(String(data: with, encoding: .utf8), #"{"v":1,"name":"a","client":"b","token":"t"}"#)
+        XCTAssertEqual(String(data: with, encoding: .utf8), #"{"versions":[1],"name":"a","client":"b","token":"t"}"#)
+    }
+
+    /// The prologue must carry no version.
+    ///
+    /// This is the property that lets a version mismatch be *answered* instead
+    /// of failing inside the handshake: both ends mix the same prologue, so the
+    /// responder can always decrypt message one and always reply.
+    func testPrologueCarriesNoVersion() {
+        let text = String(data: tunnelPrologue, encoding: .utf8)
+        XCTAssertEqual(text, "reins-tunnel")
+        XCTAssertFalse(text?.contains("/v") ?? true, "a version in the prologue makes a mismatch unanswerable")
+    }
+
+    /// A refusal has to say which end is behind, or "update the older one"
+    /// leaves the person guessing.
+    func testRefusalNamesTheOlderEnd() throws {
+        func reply(_ supported: [Int]) throws -> HandshakeReply {
+            let json = #"{"ok":false,"reason":"version","supported":\#(supported)}"#
+            return try JSONDecoder().decode(HandshakeReply.self, from: Data(json.utf8))
+        }
+        XCTAssertTrue(try reply([9]).weAreTheOldEnd, "the machine speaks newer, so this app is behind")
+        XCTAssertFalse(try reply([0]).weAreTheOldEnd, "the machine speaks older, so it is behind")
+        // No list at all: we cannot tell, and must not claim to.
+        let bare = try JSONDecoder().decode(HandshakeReply.self, from: Data(#"{"ok":false,"reason":"version"}"#.utf8))
+        XCTAssertFalse(bare.weAreTheOldEnd)
     }
 
     /// The other direction: Swift as responder must recover the initiator's

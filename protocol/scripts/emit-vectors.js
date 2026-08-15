@@ -58,7 +58,7 @@ const initiatorEphemeral = pair(FIXTURES.initiatorEphemeral)
 const responderEphemeral = pair(FIXTURES.responderEphemeral)
 const signing = { privateKey: Buffer.from(FIXTURES.bridleSigning, 'hex'), publicKey: signingPublicKeyOf(Buffer.from(FIXTURES.bridleSigning, 'hex')) }
 
-const helloPayload = Buffer.from(JSON.stringify({ v: 1, name: 'Test iPhone', client: 'reins-vectors/1' }), 'utf8')
+const helloPayload = Buffer.from(JSON.stringify({ versions: [1], name: 'Test iPhone', client: 'reins-vectors/1' }), 'utf8')
 const replyPayload = Buffer.from(JSON.stringify({ ok: true, machine: 'Vector Mac', bridle: '0.1.0' }), 'utf8')
 
 const initiator = new NoiseInitiator(app, bridle.publicKey, TUNNEL_PROLOGUE, initiatorEphemeral)

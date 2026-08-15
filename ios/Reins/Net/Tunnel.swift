@@ -44,8 +44,12 @@ public enum Carrier: String, Equatable, Sendable, Codable {
 public enum RefusalReason: Equatable, Sendable {
     /// This device was never paired, or was revoked.
     case unpaired
-    /// The app and the Bridle disagree about the protocol version.
-    case version
+    /// The app and the Bridle share no protocol version.
+    ///
+    /// Carries which end is behind, because "update the older one" is only
+    /// actionable if we say which one that is. The machine tells us what it
+    /// supports precisely so this can be answered.
+    case version(appIsOlder: Bool)
     /// The machine failed internally during the handshake.
     case machineError(String)
 }
@@ -313,7 +317,7 @@ public actor Tunnel {
         guard answer.ok else {
             switch answer.reason {
             case "unpaired": throw RefusalReason.unpaired
-            case "version": throw RefusalReason.version
+            case "version": throw RefusalReason.version(appIsOlder: answer.weAreTheOldEnd)
             default: throw RefusalReason.machineError(answer.reason ?? "unknown")
             }
         }

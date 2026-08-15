@@ -12,6 +12,8 @@ import {
   NoiseResponder,
   TUNNEL_PROLOGUE,
   TUNNEL_VERSION,
+  TUNNEL_VERSIONS,
+  negotiateVersion,
   decodeFrame,
   encodeFrame,
   type ClientFrame,
@@ -33,8 +35,8 @@ export interface TunnelTransport {
 
 /** What the app states in the handshake payload. */
 interface HandshakeRequest {
-  /** Tunnel protocol version. */
-  v?: number
+  /** Versions the app can speak, preferred first. Absent means the pre-negotiation client, i.e. `[1]`. */
+  versions?: number[]
   /** One-time pairing token; required only for a device that is not yet paired. */
   token?: string
   /** Device name, shown in `bridle status` and the revoke list. */
@@ -46,8 +48,12 @@ interface HandshakeRequest {
 /** What the Bridle states back inside handshake message two. */
 interface HandshakeReply {
   ok: boolean
+  /** The version both ends will speak. Present when `ok`. */
+  version?: number
   /** Refusal reason when `ok` is false. */
   reason?: 'version' | 'unpaired' | 'internal'
+  /** What this build can speak. Present when refusing for `version`, so the app can say which end is old. */
+  supported?: number[]
   /** Human-readable machine name. */
   machine?: string
   /** Bridle package version. */
@@ -82,6 +88,8 @@ export class TunnelSession {
   private pingTimer: NodeJS.Timeout | undefined
   private lastSent = 0
   private closed = false
+  /** The version this session negotiated. Set once, at handshake. */
+  private version = TUNNEL_VERSION
 
   /**
    * @param core - the machine this tunnel is attached to.
@@ -144,8 +152,12 @@ export class TunnelSession {
         return
       }
     }
-    if ((request.v ?? TUNNEL_VERSION) !== TUNNEL_VERSION) {
-      this.refuse('version')
+    const version = negotiateVersion(request.versions)
+    if (version === undefined) {
+      // An authenticated refusal, which is the whole point of negotiating in
+      // the payload rather than in the prologue: the app can read this, compare
+      // `supported` against its own list, and say which end is the old one.
+      this.refuse('version', [...TUNNEL_VERSIONS])
       return
     }
     const name = typeof request.name === 'string' && request.name.length > 0 ? request.name : 'iPhone'
@@ -163,8 +175,10 @@ export class TunnelSession {
     } else {
       touchPeer(this.core.state, remoteStatic)
     }
+    this.version = version
     const reply: HandshakeReply = {
       ok: true,
+      version,
       machine: this.core.state.machineName,
       bridle: this.options.version,
     }
@@ -175,8 +189,8 @@ export class TunnelSession {
     this.afterHandshake()
   }
 
-  private refuse(reason: NonNullable<HandshakeReply['reason']>): void {
-    const reply: HandshakeReply = { ok: false, reason }
+  private refuse(reason: NonNullable<HandshakeReply['reason']>, supported?: number[]): void {
+    const reply: HandshakeReply = { ok: false, reason, ...(supported === undefined ? {} : { supported }) }
     try {
       const { message } = this.responder.writeMessage(Buffer.from(JSON.stringify(reply), 'utf8'))
       this.transport.send(message)
@@ -190,7 +204,9 @@ export class TunnelSession {
     const status = this.core.dshStatus
     this.sendFrame({
       t: 'ready',
-      version: TUNNEL_VERSION,
+      // The negotiated version, not this build's newest. A client that asked
+      // for an older one has to be told which one it actually got.
+      version: this.version,
       bridle: this.options.version,
       machine: this.core.state.machineName,
       dshReachable: status.reachable,

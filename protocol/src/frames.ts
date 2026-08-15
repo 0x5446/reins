@@ -10,8 +10,46 @@
 /** Protocol version mixed into the Noise prologue; a mismatch aborts the handshake. */
 export const TUNNEL_VERSION = 1
 
-/** Noise prologue both ends mix in before the first handshake message. */
-export const TUNNEL_PROLOGUE: Buffer = Buffer.from(`reins-tunnel/v${String(TUNNEL_VERSION)}`, 'utf8')
+/**
+ * Versions this build can speak, preferred first.
+ *
+ * A set rather than a number, because the two ends update independently: a
+ * phone sits in the App Store review queue while the Bridle is a `npm
+ * install` away, and after release version skew is the normal case rather
+ * than the exception. Both ends offer what they can speak and the responder
+ * picks the highest they share.
+ */
+export const TUNNEL_VERSIONS: readonly number[] = [1]
+
+/**
+ * Noise prologue both ends mix in before the first handshake message.
+ *
+ * Deliberately carries no version. An earlier design put one here, which made
+ * a mismatch fail *inside* the handshake — before any channel exists, so the
+ * refusal could not be sent and the client could not tell version skew from a
+ * wrong machine key from tampering. The version is negotiated in the handshake
+ * payload instead (see `HelloFrame` / `HandshakeReply`), which works because
+ * the responder can always decrypt message one and can therefore always answer
+ * with an *authenticated* refusal.
+ */
+export const TUNNEL_PROLOGUE: Buffer = Buffer.from('reins-tunnel', 'utf8')
+
+/**
+ * Choose the version two ends will speak.
+ * @param offered - what the initiator says it supports, preferred first.
+ * @param supported - what this build supports.
+ * @returns the highest shared version, or undefined when there is no overlap.
+ */
+export function negotiateVersion(
+  offered: readonly number[] | undefined,
+  supported: readonly number[] = TUNNEL_VERSIONS,
+): number | undefined {
+  // An absent or empty list is the oldest client, which predates negotiation
+  // and can only speak version 1.
+  const wanted = offered === undefined || offered.length === 0 ? [1] : offered
+  const shared = wanted.filter(version => supported.includes(version))
+  return shared.length === 0 ? undefined : Math.max(...shared)
+}
 
 /** Which dsh downlink an event frame came from. */
 export type StreamName = 'mux' | 'host'

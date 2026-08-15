@@ -9,11 +9,25 @@
 
 import Foundation
 
-/// Protocol version mixed into the Noise prologue; a mismatch aborts the handshake.
-public let tunnelVersion = 1
+/// Versions this build can speak, preferred first.
+///
+/// A set rather than a number, because the two ends update independently: this
+/// app sits in a review queue while the Bridle is one `npm install` away, so
+/// after release version skew is the normal case. Both ends offer what they can
+/// speak and the machine picks the highest they share.
+public let tunnelVersions: [Int] = [1]
+
+/// The newest version this build speaks; what it reports about itself.
+public let tunnelVersion = tunnelVersions[0]
 
 /// Noise prologue both ends mix in before the first handshake message.
-public let tunnelPrologue = Data("reins-tunnel/v\(tunnelVersion)".utf8)
+///
+/// Deliberately carries no version. An earlier design put one here, which made
+/// a mismatch fail *inside* the handshake — before any channel exists, so the
+/// machine's refusal could not be sent and this end could not tell version skew
+/// from a wrong machine key from tampering. The version is negotiated in the
+/// handshake payload instead.
+public let tunnelPrologue = Data("reins-tunnel".utf8)
 
 /// Which harness downlink an event frame came from.
 public enum StreamName: String, Codable, Sendable {
@@ -167,7 +181,8 @@ public struct PongFrame: TunnelFrame {
 /// The token is present only while pairing. A device that is already known sends
 /// none, so a stolen pairing QR is worth exactly one connection attempt.
 public struct HandshakeRequest: TunnelFrame {
-    public let v = tunnelVersion
+    /// Every version this build can speak, preferred first.
+    public let versions: [Int] = tunnelVersions
     public let name: String
     public let client: String
     public let token: String?
@@ -179,19 +194,38 @@ public struct HandshakeRequest: TunnelFrame {
     }
 
     var members: [(String, JSONValue?)] {
-        [("v", .number(Double(v))), ("name", .string(name)), ("client", .string(client)), ("token", token.map(JSONValue.string))]
+        [
+            ("versions", .array(versions.map { .number(Double($0)) })),
+            ("name", .string(name)),
+            ("client", .string(client)),
+            ("token", token.map(JSONValue.string)),
+        ]
     }
 }
 
 /// What the Bridle states back inside handshake message two.
 public struct HandshakeReply: Codable, Sendable {
     public let ok: Bool
+    /// The version both ends will speak. Present when `ok`.
+    public let version: Int?
     /// Refusal reason when `ok` is false: `version`, `unpaired`, or `internal`.
     public let reason: String?
+    /// What the machine can speak, when it refused for `version`. Lets this end
+    /// say *which* side is the old one rather than "something went wrong".
+    public let supported: [Int]?
     /// Display name of the machine.
     public let machine: String?
     /// Bridle version string.
     public let bridle: String?
+
+    /// Which end needs updating, for a refusal this end can explain.
+    ///
+    /// If the machine speaks something newer than anything we do, we are behind.
+    /// Otherwise it is.
+    public var weAreTheOldEnd: Bool {
+        guard let supported, let theirBest = supported.max(), let ourBest = tunnelVersions.max() else { return false }
+        return theirBest > ourBest
+    }
 }
 
 // MARK: - Bridle to App

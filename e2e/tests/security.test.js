@@ -180,3 +180,55 @@ function toWs(base) {
 function timeout(ms) {
   return new Promise(resolve => { setTimeout(() => resolve(false), ms).unref() })
 }
+
+test('a client from the future is refused in a way it can act on', { skip, timeout: 60_000 }, async (t) => {
+  // The property: a version mismatch must be an *authenticated answer*, not a
+  // handshake failure. Before this, the version lived in the Noise prologue, so
+  // a mismatch died inside the crypto with nothing sent back — the phone could
+  // not tell version skew from a wrong machine key from tampering.
+  const stack = await startStack({ dshUrl: DSH_URL })
+  t.after(() => stack.stop())
+
+  const phone = new ReinsPhone({
+    bundle: stack.invite().bundle,
+    prefer: 'direct',
+    versions: [99],
+  })
+  t.after(() => { phone.close() })
+
+  await assert.rejects(
+    () => phone.connect(),
+    (error) => {
+      assert.match(String(error.message ?? error), /version/iu, 'the refusal names the reason')
+      return true
+    },
+    'a version with no overlap must be refused, and refused legibly',
+  )
+})
+
+test('a client that predates negotiation still connects', { skip, timeout: 60_000 }, async (t) => {
+  // The oldest clients send no `versions` key at all. Refusing them would be a
+  // silent break for exactly the population the compatibility window exists to
+  // protect, and it is the case a naive implementation gets wrong.
+  const stack = await startStack({ dshUrl: DSH_URL })
+  t.after(() => stack.stop())
+
+  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [] })
+  t.after(() => { phone.close() })
+
+  const ready = await phone.connect()
+  assert.equal(ready.version, 1, 'it is served version 1, which is all it can speak')
+})
+
+test('a client offering several versions gets the highest shared one', { skip, timeout: 60_000 }, async (t) => {
+  const stack = await startStack({ dshUrl: DSH_URL })
+  t.after(() => stack.stop())
+
+  // Offers a version this build does not have, plus one it does. The machine
+  // must fall back rather than refuse.
+  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [7, 1] })
+  t.after(() => { phone.close() })
+
+  const ready = await phone.connect()
+  assert.equal(ready.version, 1)
+})

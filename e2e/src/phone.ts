@@ -13,7 +13,7 @@ import WebSocket from 'ws'
 import {
   NoiseInitiator,
   TUNNEL_PROLOGUE,
-  TUNNEL_VERSION,
+  TUNNEL_VERSIONS,
   decodeFrame,
   encodeFrame,
   generateKeyPair,
@@ -51,6 +51,15 @@ export interface PhoneOptions {
   prefer?: 'direct' | 'relay'
   /** Whether the one-time pairing token should be presented. */
   pairing?: boolean
+  /**
+   * Versions to offer, overriding this build's own set.
+   *
+   * Exists so a test can be a client from the future or from the past without
+   * checking out a different revision — which is the only way to prove the
+   * compatibility window actually holds. `[]` reproduces the oldest clients,
+   * which predate negotiation and send no `versions` key at all.
+   */
+  versions?: number[]
 }
 
 /** Thrown when the Bridle refuses the handshake. */
@@ -99,8 +108,11 @@ export class ReinsPhone {
     const socket = await this.dial()
     this.socket = socket
     const initiator = new NoiseInitiator(this.keys, Buffer.from(this.options.bundle.key, 'base64url'), TUNNEL_PROLOGUE)
+    const offered = this.options.versions ?? [...TUNNEL_VERSIONS]
     const payload = {
-      v: TUNNEL_VERSION,
+      // An empty override means "behave like a client that predates
+      // negotiation": omit the key entirely rather than sending an empty list.
+      ...(offered.length === 0 ? {} : { versions: offered }),
       name: this.options.name ?? 'iPhone',
       client: this.options.client ?? 'reins-reference/0.1.0',
       ...(this.options.pairing === false ? {} : { token: this.options.bundle.token }),

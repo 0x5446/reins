@@ -224,8 +224,13 @@ struct StatusLine: View {
             switch reason {
             case .unpaired:
                 return "\(session.machine.name) doesn’t recognise this iPhone. Run `bridle pair` on the Mac and scan the new code."
-            case .version:
-                return "This app and the Bridle on \(session.machine.name) are different versions. Update the older one."
+            case .version(let appIsOlder):
+                // Naming the end that is behind is the whole reason the machine
+                // sends its supported versions. "Update the older one" leaves
+                // the person to guess, and they will guess wrong half the time.
+                return appIsOlder
+                    ? "Reins is older than the Bridle on \(session.machine.name). Update Reins."
+                    : "The Bridle on \(session.machine.name) is older than Reins. Run `npm update` there, or update the dsh plugin."
             case .machineError(let detail):
                 return detail
             }
