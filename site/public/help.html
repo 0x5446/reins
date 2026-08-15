@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help — Reins</title>
+<meta name="description" content="Installing Bridle, pairing a phone, and what to do when it will not connect.">
+<link rel="stylesheet" href="/_/style.css">
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="/">Reins</a>
+  <h1>Help</h1>
+  <p class="lede">Setting it up, and what to try when it will not connect.</p>
+</header>
+
+<main>
+
+<h2>Installing Bridle</h2>
+
+<p>In Terminal on the Mac that runs the DeepSeek Harness:</p>
+
+<code class="command">curl -fsSL https://reins.novabox.ai/install | sh</code>
+
+<p>
+  It installs Node if you do not have it, builds Bridle, and links the
+  <code>bridle</code> command into <code>~/.local/bin</code>. Re-running it is an
+  upgrade, not a reinstall — it is safe to run whenever.
+</p>
+
+<p>
+  If <code>bridle</code> is not found afterwards, <code>~/.local/bin</code> is
+  not on your <code>PATH</code>. Add it to your shell profile:
+</p>
+
+<pre><code>echo 'export PATH="$HOME/.local/bin:$PATH"' &gt;&gt; ~/.zshrc
+exec zsh</code></pre>
+
+<h2>Pairing a phone</h2>
+
+<code class="command">bridle pair</code>
+
+<p>
+  A QR code appears with a short code under it. In the app, tap
+  <em>Connect</em> and scan the code — or type the short code if the camera is
+  being awkward. The code is good for 15 minutes and works once.
+</p>
+
+<p>
+  Pairing is one-time. After it, the app has a key the Mac recognises and
+  reconnects on its own.
+</p>
+
+<h2>Everyday commands</h2>
+
+<table>
+  <tr><th><code>bridle status</code></th><td>Is it running, is it registered with the relay, can it see the Harness</td></tr>
+  <tr><th><code>bridle doctor</code></th><td>Checks each link in the chain and says which one is broken</td></tr>
+  <tr><th><code>bridle devices</code></th><td>Phones this Mac trusts</td></tr>
+  <tr><th><code>bridle revoke &lt;prefix&gt;</code></th><td>Stop trusting one of them</td></tr>
+  <tr><th><code>bridle service install</code></th><td>Keep Bridle running in the background after login</td></tr>
+  <tr><th><code>bridle backup</code></th><td>Write an encrypted copy of this machine's identity</td></tr>
+</table>
+
+<h2>When it will not connect</h2>
+
+<p>Run <code>bridle doctor</code> first. It checks the chain in order and names the broken link.</p>
+
+<h3>The app says the Mac is offline</h3>
+
+<p>
+  Bridle is not running, or it cannot reach the relay. Run
+  <code>bridle status</code> on the Mac. If it is not running, start it by
+  running <code>bridle</code> with no arguments — or better,
+  <code>bridle service install</code>, so it comes back on its own after a
+  reboot and this stops happening at all.
+</p>
+
+<h3>The app connects but says the Harness is not running</h3>
+
+<p>
+  Bridle is fine; the DeepSeek Harness is not. Start the Harness and the app
+  will notice within a few seconds — there is nothing to restart on the phone.
+</p>
+
+<h3>Pairing fails or the code is refused</h3>
+
+<p>
+  Codes last 15 minutes and are consumed by the first successful pairing. Run
+  <code>bridle pair</code> again for a fresh one. If it fails immediately, check
+  that the Mac's clock is roughly right — an hour of skew is enough to break a
+  handshake.
+</p>
+
+<h3>It works at home but not away</h3>
+
+<p>
+  That is the direct path working and the relay path not. Confirm the Mac has
+  registered: <code>bridle status</code> should show the relay as online.
+</p>
+
+<h3>A conversation opens empty</h3>
+
+<p>
+  Pull down to reload. If it stays empty, the session's history may be larger
+  than one page; tap <em>Load earlier messages</em> at the top.
+</p>
+
+<h2>Moving to a new Mac</h2>
+
+<p>On the old one:</p>
+
+<code class="command">bridle backup ~/reins-identity.bak</code>
+
+<p>On the new one, after installing Bridle:</p>
+
+<code class="command">bridle restore ~/reins-identity.bak</code>
+
+<p>
+  The backup is encrypted with a passphrase you choose and contains this
+  machine's identity and its paired phones. Restoring it means your phones keep
+  working without re-pairing. Losing the passphrase means re-pairing every
+  phone — which is inconvenient rather than fatal.
+</p>
+
+<h2>Removing it</h2>
+
+<pre><code>rm -rf ~/.reins
+rm ~/.local/bin/bridle</code></pre>
+
+<p>
+  If you installed the background service, run
+  <code>bridle service uninstall</code> first. Nothing else on your Mac is
+  touched, and nothing needs to be removed anywhere else — there is no account.
+</p>
+
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/get">Get the app</a>
+  <a href="/privacy">Privacy</a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reins — your coding agent, in your pocket</title>
+<meta name="description" content="Drive the DeepSeek Harness running on your Mac from your iPhone. End-to-end encrypted; the relay only ever sees ciphertext.">
+<link rel="stylesheet" href="/_/style.css">
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="/">Reins</a>
+  <h1>Your coding agent, in your pocket.</h1>
+  <p class="lede">
+    The DeepSeek Harness runs on your Mac, where your code and your keys already
+    are. Reins is the iPhone app that drives it — read what it did, approve what
+    it wants to do next, start the next thing from a train.
+  </p>
+</header>
+
+<main>
+
+<h2>How it fits together</h2>
+
+<p>
+  Three pieces. <strong>Reins</strong> is the app on your phone.
+  <strong>Bridle</strong> is a small program on your Mac that talks to the
+  Harness for it. Between them, when they are not on the same Wi-Fi, sits a
+  <strong>relay</strong> we run.
+</p>
+
+<p>
+  The relay is a switchboard, not a middleman. The app and Bridle set up an
+  encrypted channel with each other and the relay forwards the sealed bytes
+  without being able to open them. That is a property of the design, not a
+  promise about our conduct — see <a href="/privacy">what the relay can and
+  cannot see</a>.
+</p>
+
+<p>
+  On the same Wi-Fi, the app skips the relay entirely and talks to your Mac
+  directly.
+</p>
+
+<h2>Setting up</h2>
+
+<ol class="steps">
+  <li>
+    <h3>Install Bridle on the Mac</h3>
+    <p>Paste this into Terminal. It takes about a minute.</p>
+    <code class="command">curl -fsSL https://reins.novabox.ai/install | sh</code>
+  </li>
+  <li>
+    <h3>Start pairing</h3>
+    <p>Still in Terminal:</p>
+    <code class="command">bridle pair</code>
+    <p>A QR code appears, with a short code underneath it.</p>
+  </li>
+  <li>
+    <h3>Point the phone at it</h3>
+    <p>
+      Open Reins, tap <em>Connect</em>, and scan. If the camera is being
+      difficult, type the short code instead. Pairing is one-time — after this
+      the app reconnects on its own.
+    </p>
+  </li>
+</ol>
+
+<h2>What it does</h2>
+
+<table>
+  <tr>
+    <th>Sessions</th>
+    <td>Everything the Harness is running, live. Switch between them, start new ones, pick a model.</td>
+  </tr>
+  <tr>
+    <th>Approvals</th>
+    <td>When the agent wants to run something, the request comes to your phone with the full command and diff. Approve or refuse. Requests raised while you were away are waiting when you come back.</td>
+  </tr>
+  <tr>
+    <th>Reading</th>
+    <td>Diffs, tool output, file reads, and to-do lists rendered for a phone screen rather than shrunk to fit one.</td>
+  </tr>
+  <tr>
+    <th>Several Macs</th>
+    <td>Pair as many as you like and switch between them.</td>
+  </tr>
+</table>
+
+<h2>Where it is</h2>
+
+<div class="note">
+  <p>
+    <strong>The Mac side works today.</strong> Bridle and the relay are
+    deployed and in daily use.
+  </p>
+  <p>
+    <strong>The app is not on the App Store yet.</strong> Right now getting it
+    means building it yourself with Xcode. <a href="/get">What that involves.</a>
+  </p>
+</div>
+
+</main>
+
+<footer>
+  <a href="/help">Help</a>
+  <a href="/get">Get the app</a>
+  <a href="/privacy">Privacy</a>
+</footer>
+
+</body>
+</html>

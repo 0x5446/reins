@@ -1,0 +1,35 @@
+{
+  // The four pages `reins.novabox.ai` needs that are not the Relay.
+  //
+  // Static assets, no Worker code: there is nothing here to compute, and a
+  // script would be one more thing that can break between someone tapping
+  // "Privacy" in the app and a page appearing.
+  //
+  // Not served by the Relay, on purpose. The Relay is one process on one small
+  // machine; when it is down or being upgraded, the App Store's privacy link
+  // must still resolve. These pages run at the edge with no origin at all.
+  //
+  //   npx wrangler deploy --config site/wrangler.jsonc
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reins-site",
+  "compatibility_date": "2026-08-15",
+  "assets": {
+    "directory": "./public",
+    // `/help` serves help.html. Without this the app's own links would 404.
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  // Path-scoped, never `/*`. A wildcard at the root would swallow /healthz,
+  // /install and every /v1 route — that is, the entire product.
+  //
+  // Assets live under `/_/` so that adding a favicon or an image later is one
+  // file rather than one file plus a route nobody remembers to add. `/_/` can
+  // never collide with the Relay, whose routes are fixed and listed above.
+  "routes": [
+    { "pattern": "reins.novabox.ai/", "zone_name": "novabox.ai" },
+    { "pattern": "reins.novabox.ai/get", "zone_name": "novabox.ai" },
+    { "pattern": "reins.novabox.ai/help", "zone_name": "novabox.ai" },
+    { "pattern": "reins.novabox.ai/privacy", "zone_name": "novabox.ai" },
+    { "pattern": "reins.novabox.ai/_/*", "zone_name": "novabox.ai" }
+  ]
+}

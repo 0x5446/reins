@@ -33,12 +33,15 @@ const skipLive = skip !== false
 /** A public Relay is a round trip to another continent, not a loopback hop. */
 const NET_TIMEOUT_MS = 60_000
 
+/** The same host over plain HTTPS, for the routes that are not WebSockets. */
+const HTTP_BASE = RELAY_URL === undefined ? undefined : RELAY_URL.replace(/^ws/u, 'http')
+
 /**
  * The Relay's health endpoint over plain HTTPS.
  * @returns {Promise<any>} the parsed body.
  */
 async function health() {
-  const url = new URL('/healthz', RELAY_URL.replace(/^ws/u, 'http'))
+  const url = new URL('/healthz', HTTP_BASE)
   const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
   assert.equal(response.status, 200, `GET ${url.href} should be 200`)
   return response.json()
@@ -61,19 +64,49 @@ async function waitForAsync(condition, timeoutMs, what) {
   throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`)
 }
 
-test('the deployed relay answers, and does not serve an install script', { skip, timeout: NET_TIMEOUT_MS }, async () => {
+test('the deployed relay answers', { skip, timeout: NET_TIMEOUT_MS }, async () => {
   const body = await health()
   for (const key of ['machines', 'circuits', 'offers', 'uptimeSeconds']) {
     assert.equal(typeof body[key], 'number', `/healthz reports ${key}`)
   }
+})
 
+test('the installer comes from the repository, not from the relay', { skip, timeout: NET_TIMEOUT_MS }, async () => {
   // A Relay that also hands out the installer turns one compromise into a
-  // supply-chain event. `deploy/relay.service` leaves REINS_INSTALL_SCRIPT
-  // empty; this is the check that it stayed that way.
-  const install = await fetch(new URL('/install', RELAY_URL.replace(/^ws/u, 'http')), {
+  // supply-chain event, so the edge redirects /install to the repository and
+  // REINS_INSTALL_SCRIPT stays empty. `redirect: 'manual'` matters: following
+  // the hop would land on GitHub and pass even if the Relay had started
+  // serving the script itself.
+  const response = await fetch(new URL('/install', HTTP_BASE), {
+    redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   })
-  assert.equal(install.status, 404, 'the deployed relay must not serve /install')
+  assert.equal(response.status, 302, '/install should be an edge redirect')
+  assert.match(
+    response.headers.get('location') ?? '',
+    /^https:\/\/raw\.githubusercontent\.com\//u,
+    'the redirect must point at the repository',
+  )
+})
+
+test('the pages the app links to exist, and have not eaten the relay', { skip, timeout: NET_TIMEOUT_MS }, async () => {
+  // `Links.swift` sends people to these. A 404 behind the app's Privacy button
+  // is also a rejected App Store submission.
+  for (const path of ['/', '/get', '/help', '/privacy', '/_/style.css']) {
+    const response = await fetch(new URL(path, HTTP_BASE), { signal: AbortSignal.timeout(15_000) })
+    assert.equal(response.status, 200, `${path} should be served`)
+  }
+
+  // The site and the Relay share a hostname, split by path. Widening a Worker
+  // route to `/*` would take the whole product offline while every page above
+  // kept returning 200 — so the check that matters is that the Relay's own
+  // routes still reach the Relay.
+  const relayRoutes = await fetch(new URL('/healthz', HTTP_BASE), { signal: AbortSignal.timeout(15_000) })
+  assert.match(
+    relayRoutes.headers.get('content-type') ?? '',
+    /application\/json/u,
+    '/healthz must still be answered by the relay, not by the site',
+  )
 })
 
 test('a phone pairs and drives a machine through the deployed relay', { skip, timeout: NET_TIMEOUT_MS * 3 }, async (t) => {

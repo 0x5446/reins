@@ -26,6 +26,18 @@
 | 隧道配置 | `/etc/cloudflared/config.yml`（本地管理，不是面板管理） |
 | DNS | `reins.novabox.ai` CNAME → `<tunnel-id>.cfargotunnel.com`，橙云开 |
 | `/install` | Cloudflare Redirect Rule → GitHub raw，**不经过 Relay** |
+| `/` `/get` `/help` `/privacy` | Cloudflare Worker `reins-site`（静态资源，无源站） |
+
+一个域名，三样东西按路径分开：
+
+| 路径 | 谁在服务 | 为什么是它 |
+|---|---|---|
+| `/v1/*`、`/healthz` | Relay（隧道回源） | 唯一需要有状态进程的部分 |
+| `/install` | Cloudflare 重定向规则 | 中继和安装链路必须是两个信任域 |
+| `/`、`/get`、`/help`、`/privacy` | Worker 静态资源，跑在边缘 | Relay 是北京一台小机器上的单实例；它挂了隐私页不能跟着挂，而 App Store 审核会去拉那个链接 |
+| `/_/*` | 同上 | 站点自己的静态资源。加 favicon 或图片时不用再加一条路由 |
+
+**Worker 路由绝不能写成 `/*`**。那会把 `/healthz`、`/install`、`/v1/*` 全吞掉，也就是整个产品——而四个页面依然返回 200，看起来一切正常。`deployed.test.js` 里有一条专门盯这个：`/healthz` 的 content-type 必须还是 `application/json`。
 
 验证方式是 `e2e/tests/deployed.test.js`，它打的是真实公网地址而不是进程内的 Relay：
 
@@ -273,8 +285,8 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 |---|---|---|---|
 | 1 | 版本协商落地 | 新旧双向互通测试通过 | — ✅ 已完成 |
 | 2 | 部署 Relay | `deployed.test.js` 打公网地址全绿 | — ✅ 已完成 |
-| 3 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 人工确认 |
-| 4 | 写 `/help` 与 `/privacy` | 隐私页说清 Relay 能观测到什么 | — |
+| 3 | 写 `/help` 与 `/privacy` | 隐私页说清 Relay 能观测到什么 | — ✅ 已完成 |
+| 4 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 人工确认 |
 | 5 | 购买 Developer Program | 账号可签发 APNs key | **$99** |
 | 6 | TestFlight 外测 | 一个非自己的设备装上并完成一次配对 | 5 |
 | 7 | 提交审核 | 加密出口声明、权限说明齐备 | 6 |
@@ -290,11 +302,25 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 
 **这条路可以走，但它是一个不同的产品。**混着说会让所有计划都建立在一个没做的决策上。
 
-### 还要写的
+### 对外页面
 
-`https://reins.novabox.ai/help` 和 `https://reins.novabox.ai/privacy` 两个页面。Relay 现在对这两个路径返回 404。隐私页得说清楚：Relay 只看得到密文，不收集会话内容；能观测到的只有在线状态和流量计数。
+四个页面在 `site/public/`，部署命令：
 
-页面本身放哪都行——Cloudflare Pages 挂个 Worker 路由，或者跟 `/install` 一样加进 Relay。
+```sh
+npx wrangler deploy --config site/wrangler.jsonc
+```
+
+隐私页（`site/public/privacy.html`）是**唯一一份对外承诺 Relay 能看到什么的文档**，所以它里面每一条都要能在代码里对上，而不是能自圆其说。写的时候核对过这几处，改动 Relay 或配对流程时要一起改：
+
+| 页面上的说法 | 权威在哪 |
+|---|---|
+| Relay 不落盘、不记日志 | `relay/src/` 里没有任何 `writeFile` / `console.*` |
+| Relay 内存里存了什么 | `registry.ts` 的 `Machine`、`offers.ts` 的 `HeldOffer` |
+| 机器名是明文 | `Machine.name`，注册时上报，配对前就要显示给 app |
+| 配对期最多 15 分钟持有 bundle | `PairingBundle` 含 LAN 地址、公钥、一次性 token |
+| 手机端解除配对是单向的 | `AppModel.unpair` 只动本地；Mac 侧要 `bridle revoke` |
+
+**不要在隐私页上写代码没做到的事。**"手机上解除配对会同时通知电脑" 这种话写起来顺手，但它是假的——一部想被遗忘的手机，恰恰是最不该听它自称的那一部。
 
 ---
 

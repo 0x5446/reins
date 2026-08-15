@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get the app — Reins</title>
+<meta name="description" content="How to get Reins onto an iPhone today, and what is still in the way of the App Store.">
+<link rel="stylesheet" href="/_/style.css">
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="/">Reins</a>
+  <h1>Getting the app</h1>
+  <p class="lede">Not on the App Store yet. Here is where it actually is.</p>
+</header>
+
+<main>
+
+<div class="note">
+  <p>
+    <strong>Short version:</strong> the Mac side is finished and deployed. The
+    iPhone app is finished too, but shipping it to strangers needs an Apple
+    Developer Program membership that has not been bought yet. Until then it is
+    a build-it-yourself app.
+  </p>
+</div>
+
+<h2>Building it yourself</h2>
+
+<p>You need a Mac with Xcode and an Apple ID. A paid account is not required.</p>
+
+<ol class="steps">
+  <li>
+    <h3>Get the source</h3>
+    <pre><code>git clone https://github.com/0x5446/reins.git
+cd reins</code></pre>
+  </li>
+  <li>
+    <h3>Generate the Xcode project</h3>
+    <p>
+      Your Team ID comes from
+      <a href="https://developer.apple.com/account">developer.apple.com/account</a>
+      — a free Apple ID has one.
+    </p>
+    <pre><code>REINS_TEAM_ID=&lt;your team id&gt; xcodegen generate --spec ios/project.yml</code></pre>
+  </li>
+  <li>
+    <h3>Build to your phone</h3>
+    <p>
+      Open <code>ios/Reins.xcodeproj</code>, plug the phone in, pick it as the
+      destination, and run. The first launch needs
+      <em>Settings → General → VPN &amp; Device Management</em> on the phone to
+      trust your developer certificate.
+    </p>
+  </li>
+</ol>
+
+<h3>The seven-day catch</h3>
+
+<p>
+  An app signed with a free Apple ID stops launching after <strong>seven
+  days</strong>. Rebuilding resets the clock and keeps your data — it is an
+  annoyance, not a loss. A paid membership makes it a year.
+</p>
+
+<h2>What the App Store needs</h2>
+
+<table>
+  <tr><th>Apple Developer Program</th><td>$99 a year. Not bought yet.</td></tr>
+  <tr><th>TestFlight</th><td>Needs the membership. Blocked on it.</td></tr>
+  <tr><th>Push notifications</th><td>Needs the membership — the entitlement is not available to free accounts at all. Blocked on it.</td></tr>
+  <tr><th>Everything else</th><td>Done. Permission strings, encryption export declaration, and this privacy policy are in place.</td></tr>
+</table>
+
+<p>
+  One purchase unblocks all three. Naming that plainly seemed better than a
+  roadmap that implies work is in progress when what is missing is a decision.
+</p>
+
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/help">Help</a>
+  <a href="/privacy">Privacy</a>
+</footer>
+
+</body>
+</html>

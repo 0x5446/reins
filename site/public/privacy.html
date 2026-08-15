@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Reins</title>
+<meta name="description" content="Exactly what the Reins relay can observe, what it stores, and for how long.">
+<link rel="stylesheet" href="/_/style.css">
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="/">Reins</a>
+  <h1>Privacy</h1>
+  <p class="lede">
+    What each part of Reins can see, stated precisely enough to be checked
+    against the source.
+  </p>
+  <p class="updated">Last updated 15 August 2026.</p>
+</header>
+
+<main>
+
+<h2>The short version</h2>
+
+<ul>
+  <li>There are no accounts. We never ask for your name, email, or phone number.</li>
+  <li>Your conversations, code, and commands are encrypted between your phone and your Mac. The relay cannot decrypt them.</li>
+  <li>The relay stores nothing on disk and keeps no logs of its own.</li>
+  <li>There is no analytics SDK, no crash reporter, and no advertising or tracking code in the app.</li>
+  <li>On the same Wi-Fi, nothing touches the relay at all.</li>
+</ul>
+
+<h2>What the relay can see</h2>
+
+<p>
+  The app and Bridle perform a Noise&nbsp;IK handshake with each other and
+  exchange sealed frames. The relay switches those frames between two sockets
+  by circuit number. It has no key material and cannot read the contents.
+</p>
+
+<p>It does necessarily observe:</p>
+
+<table>
+  <tr>
+    <th>Machine identifier</th>
+    <td>A random per-machine ID generated when Bridle is installed. It is not derived from your hardware and is not linked to you.</td>
+  </tr>
+  <tr>
+    <th>Machine name</th>
+    <td>The display name Bridle reports, so the app can show you which Mac you are about to connect to. This is in the clear, and it defaults to your computer's name — edit <code>machineName</code> in <code>~/.reins/bridle.json</code> if that name says more about you than you would like.</td>
+  </tr>
+  <tr>
+    <th>Bridle version</th>
+    <td>Reported at registration.</td>
+  </tr>
+  <tr>
+    <th>Who is connected to whom</th>
+    <td>That some phone has an open circuit to some machine, and when it opened.</td>
+  </tr>
+  <tr>
+    <th>Traffic volume and timing</th>
+    <td>Unavoidable for anything that forwards bytes. Enough to tell that you are busy, not what you are doing.</td>
+  </tr>
+  <tr>
+    <th>Network address</th>
+    <td>Your IP address, as with any server you connect to.</td>
+  </tr>
+</table>
+
+<p>It never sees: your prompts, the model's replies, file contents, diffs, command output, your Harness's address, your API keys, or your file paths.</p>
+
+<h3>During pairing</h3>
+
+<p>
+  While a pairing code is outstanding — <strong>at most 15 minutes</strong>, and
+  usually a few seconds — the relay holds the pairing bundle so the app can
+  fetch it with the short code. That bundle contains your machine's name, its
+  public key, its local network addresses, and a one-time token. It is dropped
+  as soon as the code is claimed or expires.
+</p>
+
+<h2>What the relay stores</h2>
+
+<p>
+  Nothing on disk. Everything above lives in the relay process's memory and is
+  gone when the process restarts. There is no database, no log file, and no
+  backup.
+</p>
+
+<p>
+  Two consequences, one good and one worth knowing: we could not hand over your
+  history because we do not have it; and a relay restart drops every open
+  connection, after which the apps reconnect on their own.
+</p>
+
+<h2>Cloudflare</h2>
+
+<p>
+  <code>reins.novabox.ai</code> is served through Cloudflare, which terminates
+  TLS and forwards traffic to the relay. Cloudflare therefore sits on the
+  network path and can observe the same metadata the relay can — your IP
+  address, timing, and volume — subject to
+  <a href="https://www.cloudflare.com/privacypolicy/">its own privacy policy</a>.
+  It cannot read your traffic either: the payload it forwards is already sealed
+  between your phone and your Mac.
+</p>
+
+<h2>What stays on your devices</h2>
+
+<h3>On the Mac</h3>
+
+<p>
+  Bridle keeps its identity key and its list of paired phones under
+  <code>~/.reins</code>. Your conversations stay wherever the DeepSeek Harness
+  already keeps them; Bridle does not copy them anywhere.
+</p>
+
+<h3>On the phone</h3>
+
+<p>
+  The app keeps its identity key in the iOS Keychain, and the list of paired
+  Macs plus a cache of recent conversations in its own sandboxed storage.
+  Deleting the app deletes all of it.
+</p>
+
+<p>
+  Unpairing a Mac in the app's settings is <strong>one-sided</strong>: the phone
+  forgets that machine, but the Mac still lists the phone until you run
+  <code>bridle revoke</code> there. We could have made the app ask the Mac to
+  forget it, and chose not to — a phone that wants to be forgotten is exactly
+  the phone whose word should not be taken for it. Run <code>bridle devices</code>
+  on the Mac to see what it still trusts.
+</p>
+
+<h2>Notifications</h2>
+
+<p>
+  Push notifications are <strong>not implemented</strong>. When they are, they
+  will require sending an Apple device token to the relay and associating it
+  with a machine, and the notification body will not contain your content. This
+  page will be updated before that ships, not after.
+</p>
+
+<h2>Children</h2>
+
+<p>Reins is a developer tool and is not directed at children under 13.</p>
+
+<h2>Changes</h2>
+
+<p>
+  Material changes will be reflected here with a new date at the top. Because
+  the relay keeps no record of who uses it, there is no mailing list to notify
+  — checking this page is the only mechanism, which is a real limitation of
+  collecting nothing.
+</p>
+
+<h2>Checking any of this</h2>
+
+<p>
+  The claims above are structural, so they can be verified rather than trusted.
+  The relay's entire state is in <code>relay/src/registry.ts</code> and
+  <code>relay/src/offers.ts</code>, and a test named <em>the relay only ever
+  sees ciphertext</em> asserts the central claim on every run.
+</p>
+
+<h2>Contact</h2>
+
+<p>Questions or a privacy request: <a href="mailto:hi@novabox.ai">hi@novabox.ai</a>.</p>
+
+</main>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/help">Help</a>
+  <a href="/get">Get the app</a>
+</footer>
+
+</body>
+</html>

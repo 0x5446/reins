@@ -33,6 +33,10 @@ fi
 
 echo "Testing on $sim"
 
+# xcodebuild refuses to start if the result bundle already exists, which turns
+# every second run into a failure that looks like a test failure and is not.
+rm -rf build/Reins.xcresult
+
 # xcbeautify is nice to have and not worth a hard dependency; without it the raw
 # log is still readable, just long.
 if command -v xcbeautify >/dev/null 2>&1; then

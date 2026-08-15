@@ -1,15 +1,20 @@
 /// Everywhere the app sends someone outside itself.
 ///
-/// One file, because these move together and because they are the part of the
-/// product that cannot be finished in a source tree: the host has to be
-/// deployed and the pages written before any of them resolve. Keeping them here
-/// means that is one edit rather than a search across the views, and it makes
-/// the list of what shipping still needs readable in one screen.
+/// One file, because these move together. Keeping them here means changing a
+/// destination is one edit rather than a search across the views.
 ///
-/// Everything is on one host on purpose. The Relay already answers on
-/// `reins.novabox.ai`, its own routes live under `/v1` and `/healthz`, and
-/// `/install` is served by it too — so a second static site would exist only to
-/// hold two pages. See `docs/deployment.md`.
+/// One host, three things behind it, split by path — `docs/deployment.md` has
+/// the full picture:
+///
+/// - `/v1/*` and `/healthz` are the Relay itself.
+/// - `/install` is a Cloudflare redirect to the repository. It is deliberately
+///   *not* served by the Relay: a relay that also hands out the installer turns
+///   one compromise into a supply-chain event.
+/// - `/`, `/get`, `/help` and `/privacy` are static pages at the edge, with no
+///   origin. They resolve when the Relay is down, which is the state a privacy
+///   link most needs to survive.
+///
+/// `e2e/tests/deployed.test.js` checks that every URL below is a 200.
 
 import Foundation
 
