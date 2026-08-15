@@ -1,0 +1,83 @@
+{
+  // The Relay, as a Worker with three Durable Object classes.
+  //
+  // Same wire protocol as `relay/` (docs/protocol.md is authoritative for both),
+  // different substrate: no box, no file descriptors, no process to drain. What
+  // it buys is that the Relay stops being one small machine in one city that
+  // takes every connection down when it restarts.
+  //
+  //   npx wrangler dev    --config relay-worker/wrangler.jsonc
+  //   npx wrangler deploy --config relay-worker/wrangler.jsonc
+  //
+  // See ./README.md for the matching model, where short codes live, and the
+  // limits this substrate imposes that the Node Relay does not have.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reins-relay",
+  "main": "src/index.ts",
+
+  // Pinned to a behaviour, not to today. From 2026-04-07 the runtime answers a
+  // client's Close frame itself, which is what lets `webSocketClose` be the one
+  // place a circuit is torn down; moving this date forward means re-reading the
+  // hibernation semantics below, so it should be a decision rather than a
+  // reflex. Anything newer also needs a Wrangler new enough to know the date —
+  // 4.80's runtime stops at 2026-04-08.
+  "compatibility_date": "2026-04-08",
+
+  // The Relay reports nothing about itself to anyone. Wrangler's usage
+  // telemetry is a developer-machine thing rather than a deployed one, but the
+  // same principle applies and it is one line.
+  "send_metrics": false,
+
+  // SQLite-backed, and not because SQLite is wanted: it is the only storage
+  // backend the Workers Free plan offers, and running on the free plan is the
+  // point of this deployment. Nothing here stores more than a few hundred bytes
+  // per online machine.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Exchange", "Switchboard", "PairCode"]
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      // One per live Bridle connection, addressed by a unique id. It holds the
+      // Bridle socket and the phone sockets attached to it, so forwarding a
+      // frame is a memory operation and never a network hop.
+      { "name": "SWITCHBOARD", "class_name": "Switchboard" },
+      // The one global object: the machine directory, the census /healthz
+      // reports, the global ceilings, and the per-caller rate limits.
+      { "name": "EXCHANGE", "class_name": "Exchange" },
+      // One per outstanding short code, addressed by the code itself. This is
+      // what makes `GET /v1/pair/claim?code=` routable: the claimer knows the
+      // code and nothing else.
+      { "name": "PAIR_CODE", "class_name": "PairCode" }
+    ]
+  },
+
+  // Capacity, not protocol — same meaning as the Node Relay's environment
+  // variables, and the same defaults, though what they protect is different
+  // here (README §容量上限).
+  "vars": {
+    "REINS_MAX_MACHINES": "1000",
+    "REINS_MAX_CIRCUITS": "4000"
+  },
+
+  // Off, deliberately. Workers Logs would persist request URLs, and
+  // `/v1/machine/<deviceId>` and `/v1/app?device=<deviceId>` put a device id in
+  // one. `site/public/privacy.html` promises the Relay keeps no log; a checkbox
+  // in a dashboard is not a reason to stop that being true.
+  "observability": { "enabled": false },
+
+  // Path-scoped, never `/*` — the same rule `site/wrangler.jsonc` follows and
+  // for the same reason, from the other side. A wildcard here would swallow
+  // `/install` (an edge Redirect Rule) and the four static pages, and every one
+  // of them would start 404ing while `/healthz` still looked healthy.
+  //
+  // Commented out until someone decides to cut the domain over from the Node
+  // Relay behind the Cloudflare Tunnel. Uncommenting these is the cutover.
+  "routes": [
+    // { "pattern": "reins.novabox.ai/healthz", "zone_name": "novabox.ai" },
+    // { "pattern": "reins.novabox.ai/v1/*", "zone_name": "novabox.ai" }
+  ]
+}

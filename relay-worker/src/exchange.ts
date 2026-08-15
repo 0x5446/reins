@@ -1,0 +1,333 @@
+/**
+ * The one global object: which machines are online, and where.
+ *
+ * The Node Relay keeps this in a `Map` in the process that also holds every
+ * socket, so "look up a machine" and "reach its socket" are the same act. Here
+ * they cannot be: a Bridle's socket lands in a Switchboard object chosen before
+ * anyone knows which machine it belongs to (the device id arrives *after* the
+ * upgrade, docs/protocol.md §6.1), so the two have to be introduced. This is
+ * the introducer — it maps a device id to the Switchboard holding that Bridle,
+ * and nothing else knows that mapping.
+ *
+ * It is also the only place a global count can exist, and `/healthz` promises
+ * one, so the census, the global ceilings, and the per-caller rate limits live
+ * here too rather than in three more objects.
+ *
+ * What it stores is what `registry.ts` stores: a device id, a display name, a
+ * version string, and numbers. No traffic passes through it — a phone's bytes
+ * never touch this object, only its connection does.
+ */
+
+import { DurableObject } from 'cloudflare:workers'
+import type { Env } from './env.ts'
+import {
+  ATTACH_LIMIT,
+  CLAIM_LIMIT,
+  DEFAULT_MAX_CIRCUITS,
+  DEFAULT_MAX_MACHINES,
+  MAX_OFFERS_PER_DEVICE,
+  positiveInt,
+} from './limits.ts'
+
+/** One online machine. */
+interface MachineRow {
+  /** `DurableObjectId.toString()` of the Switchboard holding its socket. */
+  switchboard: string
+  name: string
+  version: string
+  /** Epoch milliseconds the Bridle registered. */
+  since: number
+  /** Phones attached right now, mirrored from the Switchboard for `/healthz`. */
+  circuits: number
+}
+
+/** Running totals, kept incrementally so `/healthz` is never a table scan. */
+interface Counts {
+  machines: number
+  circuits: number
+  offers: number
+}
+
+/** Short codes one machine is currently holding, and when each lapses. */
+type OfferSlots = Record<string, number>
+
+/** One token bucket. */
+interface Bucket {
+  tokens: number
+  updatedAt: number
+}
+
+/** Why an attach was refused, in the close codes docs/protocol.md §8 defines. */
+export interface AttachRefusal {
+  ok: false
+  code: number
+  reason: string
+}
+
+/** Where to send a phone. */
+export interface AttachRoute {
+  ok: true
+  switchboard: string
+}
+
+/** What `/healthz` answers. */
+export interface Health {
+  machines: number
+  circuits: number
+  offers: number
+  uptimeSeconds: number
+}
+
+/** What `GET /v1/machine/:deviceId` answers. */
+export type MachineDescription = { online: false } | { online: true; name: string; version: string }
+
+/** The directory, the census, the ceilings, and the rate limits. */
+export class Exchange extends DurableObject<Env> {
+  private readonly maxMachines: number
+  private readonly maxCircuits: number
+  /**
+   * Rate-limit buckets, in memory on purpose.
+   *
+   * Losing them when this object is evicted is not a hole: eviction only
+   * happens after a stretch with no traffic, and a caller who has stopped
+   * calling is exactly the one whose bucket has refilled anyway. Under an
+   * actual flood the object stays resident and the buckets hold.
+   */
+  private readonly buckets = new Map<string, Bucket>()
+
+  /** @param ctx - the object's own storage and scheduling. @param env - bindings. */
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env)
+    this.maxMachines = positiveInt(env.REINS_MAX_MACHINES, DEFAULT_MAX_MACHINES)
+    this.maxCircuits = positiveInt(env.REINS_MAX_CIRCUITS, DEFAULT_MAX_CIRCUITS)
+  }
+
+  /**
+   * Coarse, non-identifying counters.
+   * @returns the same four numbers the Node Relay's `/healthz` reports.
+   */
+  async health(): Promise<Health> {
+    const counts = await this.counts()
+    const since = await this.startedAt()
+    return { ...counts, uptimeSeconds: Math.round((Date.now() - since) / 1000) }
+  }
+
+  /**
+   * Is that machine online, and what is it called.
+   * @param deviceId - the machine's device id.
+   * @returns its display name and version, or that it is offline.
+   */
+  async describe(deviceId: string): Promise<MachineDescription> {
+    const machine = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
+    return machine === undefined ? { online: false } : { online: true, name: machine.name, version: machine.version }
+  }
+
+  /**
+   * Publish a Switchboard as the place to reach a machine.
+   *
+   * Displacement happens here rather than in the Switchboard because only this
+   * object knows there was an earlier one: a laptop that suspends leaves a
+   * half-dead socket in a Switchboard that has no idea it has been superseded.
+   * @param deviceId - the machine's device id, already proven by signature.
+   * @param name - display name.
+   * @param version - Bridle version string.
+   * @param switchboard - stringified id of the object holding the socket.
+   * @returns accepted, or the capacity reason it was not.
+   */
+  async register(deviceId: string, name: string, version: string, switchboard: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const existing = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
+    // Checked after we know there is an incumbent, so a machine already using
+    // this Relay never trips the ceiling on reconnect — shedding the people
+    // already connected is the wrong half of the population to shed.
+    const counts = await this.counts()
+    if (existing === undefined && counts.machines >= this.maxMachines) {
+      return { ok: false, reason: `this relay is holding its limit of ${String(this.maxMachines)} machines` }
+    }
+    if (existing !== undefined && existing.switchboard !== switchboard) {
+      // The newest registration is by definition the one that can still carry
+      // traffic, so the older socket goes, along with any phones on it.
+      const stale = this.env.SWITCHBOARD.get(this.env.SWITCHBOARD.idFromString(existing.switchboard))
+      this.ctx.waitUntil(stale.displace().catch(() => {
+        // Already gone. That is the outcome we were asking for.
+      }))
+    }
+    await this.ctx.storage.put(`m:${deviceId}`, { switchboard, name, version, since: Date.now(), circuits: 0 } satisfies MachineRow)
+    await this.write({
+      machines: counts.machines + (existing === undefined ? 1 : 0),
+      circuits: counts.circuits - (existing?.circuits ?? 0),
+      offers: counts.offers,
+    })
+    return { ok: true }
+  }
+
+  /**
+   * Drop a machine, but only if the Switchboard given is still the current one.
+   * @param deviceId - the machine to drop.
+   * @param switchboard - the object whose Bridle socket closed.
+   */
+  async unregister(deviceId: string, switchboard: string): Promise<void> {
+    const machine = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
+    if (machine === undefined || machine.switchboard !== switchboard) return
+    await this.ctx.storage.delete(`m:${deviceId}`)
+    const counts = await this.counts()
+    await this.write({
+      machines: Math.max(0, counts.machines - 1),
+      circuits: Math.max(0, counts.circuits - machine.circuits),
+      offers: counts.offers,
+    })
+  }
+
+  /**
+   * Where should this phone go, and may it.
+   *
+   * Order matters and matches the Node Relay: the rate limit is charged before
+   * the lookup, so probing for which device ids exist costs the same as
+   * connecting to one you own.
+   * @param deviceId - the machine the phone asked for.
+   * @param caller - the phone's address, for rate limiting.
+   * @returns the Switchboard to forward the upgrade to, or a refusal.
+   */
+  async locate(deviceId: string, caller: string): Promise<AttachRoute | AttachRefusal> {
+    if (!this.take(caller, ATTACH_LIMIT.capacity, ATTACH_LIMIT.refillPerSecond)) {
+      return { ok: false, code: 4029, reason: 'too many connections; wait a moment' }
+    }
+    const machine = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
+    if (machine === undefined) return { ok: false, code: 4404, reason: 'that machine is offline' }
+    const counts = await this.counts()
+    if (counts.circuits >= this.maxCircuits) {
+      return { ok: false, code: 4008, reason: 'that machine already has the maximum number of devices attached' }
+    }
+    return { ok: true, switchboard: machine.switchboard }
+  }
+
+  /**
+   * Mirror a Switchboard's circuit count into the census.
+   *
+   * The Switchboard is the authority — it can see its own sockets — so this
+   * never decides anything, it only keeps `/healthz` honest.
+   * @param deviceId - the machine whose count changed.
+   * @param switchboard - the reporting object; a stale one is ignored.
+   * @param delta - +1 on attach, -1 on detach.
+   */
+  async circuits(deviceId: string, switchboard: string, delta: number): Promise<void> {
+    const machine = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
+    if (machine === undefined || machine.switchboard !== switchboard) return
+    const next = Math.max(0, machine.circuits + delta)
+    await this.ctx.storage.put(`m:${deviceId}`, { ...machine, circuits: next } satisfies MachineRow)
+    const counts = await this.counts()
+    await this.write({ ...counts, circuits: Math.max(0, counts.circuits + (next - machine.circuits)) })
+  }
+
+  /**
+   * Charge a short-code claim attempt against the caller's bucket.
+   * @param caller - the claimant's address.
+   * @returns whether the claim may proceed.
+   */
+  claimAllowance(caller: string): boolean {
+    return this.take(caller, CLAIM_LIMIT.capacity, CLAIM_LIMIT.refillPerSecond)
+  }
+
+  /**
+   * Take one of a machine's short-code slots.
+   *
+   * The bundle itself lives in the PairCode object the code names; only the
+   * count can live here, because only here is there one place per machine to
+   * count in.
+   * @param deviceId - the machine publishing the offer.
+   * @param code - the normalized short code.
+   * @param expiresAt - when the slot lapses.
+   * @returns whether the machine had a slot free.
+   */
+  async reserveOffer(deviceId: string, code: string, expiresAt: number): Promise<boolean> {
+    const now = Date.now()
+    const slots = this.live(await this.ctx.storage.get<OfferSlots>(`o:${deviceId}`), now)
+    if (Object.keys(slots).length >= MAX_OFFERS_PER_DEVICE && slots[code] === undefined) return false
+    slots[code] = expiresAt
+    await this.setSlots(deviceId, slots)
+    // One alarm for the whole object, always set to the soonest lapse. Without
+    // it the census would only ever count offers upward: nothing tells this
+    // object that a code nobody claimed has gone stale.
+    const alarm = await this.ctx.storage.getAlarm()
+    if (alarm === null || alarm > expiresAt) await this.ctx.storage.setAlarm(expiresAt)
+    return true
+  }
+
+  /**
+   * Give a slot back after a code was claimed.
+   * @param deviceId - the machine that published it.
+   * @param code - the code that was spent.
+   */
+  async releaseOffer(deviceId: string, code: string): Promise<void> {
+    const slots = await this.ctx.storage.get<OfferSlots>(`o:${deviceId}`)
+    if (slots === undefined || slots[code] === undefined) return
+    delete slots[code]
+    await this.setSlots(deviceId, slots)
+  }
+
+  /** Sweep offer slots nobody claimed, so the census stops counting them. */
+  override async alarm(): Promise<void> {
+    const now = Date.now()
+    let next = Infinity
+    const all = await this.ctx.storage.list<OfferSlots>({ prefix: 'o:' })
+    for (const [key, slots] of all) {
+      const kept = this.live(slots, now)
+      for (const expiresAt of Object.values(kept)) next = Math.min(next, expiresAt)
+      if (Object.keys(kept).length === Object.keys(slots).length) continue
+      await this.setSlots(key.slice(2), kept)
+    }
+    if (next !== Infinity) await this.ctx.storage.setAlarm(next)
+  }
+
+  private live(slots: OfferSlots | undefined, now: number): OfferSlots {
+    const kept: OfferSlots = {}
+    for (const [code, expiresAt] of Object.entries(slots ?? {})) {
+      if (expiresAt > now) kept[code] = expiresAt
+    }
+    return kept
+  }
+
+  private async setSlots(deviceId: string, slots: OfferSlots): Promise<void> {
+    const before = Object.keys(await this.ctx.storage.get<OfferSlots>(`o:${deviceId}`) ?? {}).length
+    const after = Object.keys(slots).length
+    if (after === 0) await this.ctx.storage.delete(`o:${deviceId}`)
+    else await this.ctx.storage.put(`o:${deviceId}`, slots)
+    if (after === before) return
+    const counts = await this.counts()
+    await this.write({ ...counts, offers: Math.max(0, counts.offers + (after - before)) })
+  }
+
+  private async counts(): Promise<Counts> {
+    return await this.ctx.storage.get<Counts>('counts') ?? { machines: 0, circuits: 0, offers: 0 }
+  }
+
+  private async write(counts: Counts): Promise<void> {
+    await this.ctx.storage.put('counts', counts)
+  }
+
+  private async startedAt(): Promise<number> {
+    const since = await this.ctx.storage.get<number>('since')
+    if (since !== undefined) return since
+    // Not process uptime — there is no process. This is when the Relay first
+    // answered anything, which is the question `/healthz` was really asking.
+    const now = Date.now()
+    await this.ctx.storage.put('since', now)
+    return now
+  }
+
+  private take(caller: string, capacity: number, refillPerSecond: number): boolean {
+    const now = Date.now()
+    const bucket = this.buckets.get(caller) ?? { tokens: capacity, updatedAt: now }
+    const elapsed = Math.max(0, now - bucket.updatedAt) / 1000
+    bucket.tokens = Math.min(capacity, bucket.tokens + elapsed * refillPerSecond)
+    bucket.updatedAt = now
+    if (bucket.tokens < 1) {
+      this.buckets.set(caller, bucket)
+      return false
+    }
+    bucket.tokens -= 1
+    this.buckets.set(caller, bucket)
+    // A bucket back at capacity carries no information worth remembering.
+    if (bucket.tokens >= capacity) this.buckets.delete(caller)
+    return true
+  }
+}

@@ -1,0 +1,27 @@
+{
+  // Deliberately not extending ../tsconfig.base.json and deliberately not a
+  // workspace of the root package. That config targets Node — `types: ["node"]`,
+  // NodeNext resolution, a `lib/` build — and none of it is true here: this
+  // runs on workerd, imports `cloudflare:workers`, and is bundled by Wrangler
+  // rather than compiled by tsc. Sharing the base would mean bending it around
+  // a second runtime for one directory's sake.
+  //
+  // `worker-configuration.d.ts` is generated: `npx wrangler types`.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}
