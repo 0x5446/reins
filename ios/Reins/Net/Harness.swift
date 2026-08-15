@@ -106,6 +106,26 @@ public struct Harness: Sendable {
         try await tunnel.call("session.cancel", .object(["sessionId": .string(sessionId)]))
     }
 
+    /// Branch a conversation, keeping its history up to now.
+    ///
+    /// - Returns: the new session's id.
+    public func fork(sessionId: String) async throws -> String {
+        let value = try await tunnel.call("session.fork", .object(["sessionId": .string(sessionId)]))
+        guard let id = value["sessionId"]?.stringValue else {
+            throw CallError(code: "internal", message: "The Mac branched the conversation but didn’t say where to.")
+        }
+        return id
+    }
+
+    /// Take a conversation out of the list without destroying it.
+    ///
+    /// A `workspace` method rather than a `session` one, because on this
+    /// machine archiving is a sidebar operation; the session itself is intact
+    /// and the Mac can bring it back.
+    public func archive(sessionId: String) async throws {
+        try await tunnel.call("workspace.archiveSession", .object(["sessionId": .string(sessionId)]))
+    }
+
     /// Change how much the agent is allowed to touch.
     ///
     /// Two calls, because the machine uses optimistic concurrency: read the

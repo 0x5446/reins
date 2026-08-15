@@ -3,10 +3,14 @@
 #   sudo cp deploy/relay.service /etc/systemd/system/reins-relay.service
 #   sudo systemctl daemon-reload && sudo systemctl enable --now reins-relay
 #
-# Deliberately bound to loopback. Nothing on a mainland Chinese host should
-# listen on a public port for a domain that cannot be ICP-filed, and the
-# Cloudflare tunnel reaches it over loopback anyway — so there is no reason to
-# expose it and one clear reason not to.
+# Deliberately bound to loopback. The tunnel reaches it over loopback anyway, so
+# a public port would buy nothing, and on a mainland Chinese host serving a
+# domain that cannot be ICP-filed it costs something: an open 443 is what the
+# filing-enforcement machinery actually looks at.
+#
+# Be precise about what that buys, because the first version of this comment was
+# not: binding loopback does not make the filing requirement inapplicable — see
+# docs/deployment.md §1.5 — it makes the enforcement path miss. Different thing.
 
 [Unit]
 Description=Reins Relay — content-blind switchboard

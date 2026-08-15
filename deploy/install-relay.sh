@@ -7,8 +7,12 @@
 # Idempotent: safe to re-run to upgrade. It installs Node if missing, checks out
 # the repository, builds, creates a service account, and starts the unit. It
 # does **not** open a firewall port — the Relay binds loopback and is reached
-# through a Cloudflare tunnel, which is what makes this work on a mainland
-# Chinese host whose domain cannot be ICP-filed.
+# through a Cloudflare tunnel.
+#
+# On a mainland Chinese host that is load-bearing, and docs/deployment.md §1.5
+# says exactly how much: it keeps the filing-enforcement machinery from seeing
+# the service. It does not make the filing requirement inapplicable. Read that
+# section before deciding this arrangement is fine for your situation.
 
 set -euo pipefail
 
