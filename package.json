@@ -20,7 +20,9 @@
     "test:e2e": "npm run build && node --test --test-concurrency=1 e2e/tests/*.test.js",
     "test:ios": "cd ios && ./run-tests.sh",
     "vectors": "npm run build && node protocol/scripts/emit-vectors.js",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "conformance": "npm run build && node scripts/conformance.mjs",
+    "conformance:deployed": "npm run build && node scripts/conformance.mjs --deployed"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

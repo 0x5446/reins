@@ -74,10 +74,17 @@
   // `/install` (an edge Redirect Rule) and the four static pages, and every one
   // of them would start 404ing while `/healthz` still looked healthy.
   //
-  // Commented out until someone decides to cut the domain over from the Node
-  // Relay behind the Cloudflare Tunnel. Uncommenting these is the cutover.
+  // Live since 2026-08-16. A Worker route is evaluated at the edge before the
+  // origin is contacted, so these take the two relay paths away from the
+  // Cloudflare Tunnel without touching DNS — the tunnel and the Node relay on
+  // the Beijing box stay up and stay unreferenced.
+  //
+  // **This is the switch.** Deleting these two lines and redeploying hands the
+  // paths back to the tunnel; nothing on any phone or Mac changes, because the
+  // hostname in every pairing bundle is the same either way. See
+  // `docs/deployment.md` §1.6.
   "routes": [
-    // { "pattern": "reins.novabox.ai/healthz", "zone_name": "novabox.ai" },
-    // { "pattern": "reins.novabox.ai/v1/*", "zone_name": "novabox.ai" }
+    { "pattern": "reins.novabox.ai/healthz", "zone_name": "novabox.ai" },
+    { "pattern": "reins.novabox.ai/v1/*", "zone_name": "novabox.ai" }
   ]
 }
