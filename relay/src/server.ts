@@ -36,7 +36,7 @@ import {
 } from '@reins/protocol'
 import { OfferStore } from './offers.ts'
 import { RateLimiter } from './rate-limit.ts'
-import { Registry, type Machine } from './registry.ts'
+import { CapacityError, Registry, type Machine } from './registry.ts'
 
 /** Largest tunnel message the Relay will forward; matches the Bridle's own ceiling. */
 const MAX_PAYLOAD = 64 * 1024 * 1024
@@ -301,7 +301,17 @@ export class RelayServer {
     }
     const name = typeof message.name === 'string' && message.name.length > 0 ? message.name.slice(0, 64) : 'a computer'
     const version = typeof message.bridle === 'string' ? message.bridle.slice(0, 32) : 'unknown'
-    return this.registry.register(device, name, version, socket)
+    try {
+      return this.registry.register(device, name, version, socket)
+    } catch (error) {
+      // A full relay is a capacity fact, not a fault of this machine's. Saying
+      // so plainly is what lets the Bridle back off and its owner understand
+      // why, instead of retrying into a wall.
+      const reason = error instanceof CapacityError ? error.message : 'registration failed'
+      this.log(`refused ${device}: ${reason}`)
+      socket.close(4004, reason)
+      return undefined
+    }
   }
 
   private forwardFromBridle(machine: Machine, bytes: Buffer): void {

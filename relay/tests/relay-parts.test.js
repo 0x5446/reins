@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { OfferStore, RateLimiter, Registry, RelayServer } from '../lib/index.js'
+import { CapacityError, OfferStore, RateLimiter, Registry, RelayServer } from '../lib/index.js'
 
 /**
  * @param {string} device - device id the bundle names.
@@ -115,4 +115,33 @@ test('an installer that is not there 404s instead of serving an empty script', a
 
   const response = await fetch(`http://127.0.0.1:${String(port)}/install`)
   assert.equal(response.status, 404)
+})
+
+test('the relay refuses machines past its global ceiling', () => {
+  // Per-machine limits bound nothing an attacker cares about: a machine identity
+  // is a keypair, so anyone can mint as many as they like. Without a global
+  // ceiling the free relay is a general-purpose encrypted forwarder with someone
+  // else paying, and the first symptom is the host out of file descriptors.
+  const registry = new Registry()
+  const sockets = []
+  // 5000 is the constant; register just past it.
+  for (let i = 0; i < 5000; i += 1) {
+    const socket = { close() {} }
+    sockets.push(socket)
+    registry.register(`dev-${String(i)}`, 'A Mac', '0.1.0', socket)
+  }
+  assert.equal(registry.size, 5000)
+  assert.throws(() => registry.register('one-too-many', 'A Mac', '0.1.0', { close() {} }), CapacityError)
+})
+
+test('a machine already known can always reconnect, even at the ceiling', () => {
+  // Checked after displacement on purpose. Shedding the people already using it
+  // is the wrong half of the population to shed, and a laptop that suspends
+  // reconnects constantly.
+  const registry = new Registry()
+  for (let i = 0; i < 5000; i += 1) {
+    registry.register(`dev-${String(i)}`, 'A Mac', '0.1.0', { close() {} })
+  }
+  assert.doesNotThrow(() => registry.register('dev-0', 'A Mac', '0.1.0', { close() {} }))
+  assert.equal(registry.size, 5000, 'reconnecting displaces rather than adds')
 })

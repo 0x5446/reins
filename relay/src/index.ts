@@ -4,6 +4,6 @@
  */
 
 export { RelayServer, type RelayServerOptions, type RelayStats } from './server.ts'
-export { Registry, type Circuit, type Machine } from './registry.ts'
+export { CapacityError, Registry, type Circuit, type Machine } from './registry.ts'
 export { OfferStore } from './offers.ts'
 export { RateLimiter } from './rate-limit.ts'

@@ -35,6 +35,28 @@ export interface Machine {
 /** Circuits one machine may hold at once. */
 const MAX_CIRCUITS_PER_MACHINE = 8
 
+/**
+ * Machines the whole Relay will hold at once.
+ *
+ * Per-machine limits do not bound anything an attacker cares about: a machine
+ * identity is a keypair, so anyone can mint ten thousand of them and hold a
+ * socket for each. Without a global ceiling the free Relay is a general-purpose
+ * encrypted forwarder with someone else paying for it, and the first sign of
+ * trouble is the host running out of file descriptors.
+ *
+ * The number is a placeholder for an operator's real capacity. It is a hard
+ * refusal rather than a soft one on purpose: a Relay that degrades under load
+ * fails everyone at once, where a Relay that refuses the ten-thousand-and-first
+ * machine fails one.
+ */
+const MAX_MACHINES = 5_000
+
+/** Circuits across every machine. Bounds memory when many machines each hold a few. */
+const MAX_TOTAL_CIRCUITS = 20_000
+
+/** Raised when a global budget is exhausted, so the caller can say which. */
+export class CapacityError extends Error {}
+
 /** The set of live machines. */
 export class Registry {
   private readonly machines = new Map<string, Machine>()
@@ -62,7 +84,14 @@ export class Registry {
   register(deviceId: string, name: string, version: string, socket: WebSocket): Machine {
     // A laptop that suspends can leave a half-dead socket behind; the newest
     // registration is by definition the one that can still carry traffic.
-    this.machines.get(deviceId)?.socket.close(4000, 'replaced by a newer connection')
+    const existing = this.machines.get(deviceId)
+    existing?.socket.close(4000, 'replaced by a newer connection')
+    // Checked after the displacement, so reconnecting a machine already known
+    // never trips the ceiling — that would lock out exactly the people already
+    // using it, which is the wrong half of the population to shed.
+    if (existing === undefined && this.machines.size >= MAX_MACHINES) {
+      throw new CapacityError(`this relay is holding its limit of ${String(MAX_MACHINES)} machines`)
+    }
     const machine: Machine = { deviceId, name, version, socket, since: Date.now(), circuits: new Map(), nextCircuit: 1 }
     this.machines.set(deviceId, machine)
     return machine
@@ -97,6 +126,7 @@ export class Registry {
    */
   attach(machine: Machine, socket: WebSocket): Circuit | undefined {
     if (machine.circuits.size >= MAX_CIRCUITS_PER_MACHINE) return undefined
+    if (this.circuitCount >= MAX_TOTAL_CIRCUITS) return undefined
     const id = machine.nextCircuit
     machine.nextCircuit = machine.nextCircuit >= 0xffffffff ? 1 : machine.nextCircuit + 1
     const circuit: Circuit = { id, socket, openedAt: Date.now() }

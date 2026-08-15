@@ -1,0 +1,164 @@
+#!/usr/bin/env node
+/**
+ * Catch the documentation drifting away from the code.
+ *
+ * The docs declare themselves authoritative enough to reimplement a client
+ * from, and they sit at the bottom of the conflict order (`docs/README.md`).
+ * Both of those are only safe if something notices when they stop being true.
+ * Nothing did: the test vectors cover the wire bytes, the unit tests cover the
+ * fold, and neither has an opinion about whether a prose table still lists the
+ * right constants.
+ *
+ * So this checks the handful of facts that are cheap to verify mechanically and
+ * expensive to get wrong — the constants a reimplementer would copy, and the
+ * method and frame lists a reader would trust. It is deliberately not a
+ * spellchecker for prose; it only knows things that have one right answer.
+ *
+ *   node scripts/check-docs.mjs
+ *
+ * Exit 0 when the docs match the source, 1 with a list of mismatches otherwise.
+ */
+
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const read = (path) => readFileSync(join(root, path), 'utf8')
+
+const problems = []
+
+/**
+ * @param {boolean} ok - whether the check passed.
+ * @param {string} message - what is wrong, phrased so it can be acted on.
+ */
+function expect(ok, message) {
+  if (!ok) problems.push(message)
+}
+
+/**
+ * Pull a numeric constant out of a source file.
+ * @param {string} source - file contents.
+ * @param {string} name - the identifier.
+ * @returns {string | undefined} the literal, with underscores stripped.
+ */
+function constant(source, name) {
+  // Accepts `64 * 1024 * 1024` as well as `5_000`. Constants in this codebase
+  // are written the way they are meant to be read, and a checker that only
+  // understood bare literals would silently skip the ones spelled as products —
+  // which is how the first version of this file reported `64` for a 64 MiB cap.
+  const match = new RegExp(`${name}\\s*(?::\\s*[\\w<>\\[\\]]+)?\\s*=\\s*([0-9_ *]+)`).exec(source)
+  const expression = match?.[1]?.replaceAll('_', '').trim()
+  if (expression === undefined) return undefined
+  if (!/^[0-9 *]+$/.test(expression)) return undefined
+  const product = expression.split('*').reduce((total, part) => total * Number(part.trim()), 1)
+  return Number.isFinite(product) ? String(product) : undefined
+}
+
+// --- Constants a reimplementer would copy ------------------------------------
+
+const protocolDoc = read('docs/protocol.md')
+const deployDoc = read('docs/deployment.md')
+const session = read('bridle/src/tunnel/session.ts')
+const eventLog = read('bridle/src/tunnel/event-log.ts')
+const registry = read('relay/src/registry.ts')
+const offers = read('relay/src/offers.ts')
+const relayServer = read('relay/src/server.ts')
+
+/**
+ * Render a number the way the docs might write it, so a match is not defeated
+ * by a thousands separator.
+ * @param {string} value - the raw digits.
+ * @returns {string[]} every spelling worth looking for.
+ */
+function spellings(value) {
+  const grouped = Number(value).toLocaleString('en-US')
+  return grouped === value ? [value] : [value, grouped]
+}
+
+const checks = [
+  ['单帧最大（字节）', constant(relayServer, 'MAX_PAYLOAD'), [protocolDoc, deployDoc], ['64 MiB']],
+  ['在途请求上限', constant(session, 'MAX_INFLIGHT'), [protocolDoc], null],
+  ['心跳间隔（毫秒）', constant(session, 'PING_INTERVAL_MS'), [protocolDoc, deployDoc], ['25 秒', '25s']],
+  ['重放缓冲容量', constant(eventLog, 'DEFAULT_CAPACITY'), [protocolDoc], null],
+  ['每机器线路上限', constant(registry, 'MAX_CIRCUITS_PER_MACHINE'), [deployDoc], null],
+  ['全局机器上限', constant(registry, 'MAX_MACHINES'), [deployDoc], null],
+  ['全局线路上限', constant(registry, 'MAX_TOTAL_CIRCUITS'), [deployDoc], null],
+  ['每设备短码上限', constant(offers, 'MAX_OFFERS_PER_DEVICE'), [deployDoc], null],
+]
+
+for (const [label, value, docs, phrases] of checks) {
+  if (value === undefined) {
+    problems.push(`${label}: 源码里找不到这个常量了，check-docs.mjs 需要更新`)
+    continue
+  }
+  const haystack = docs.join('\n')
+  // `phrases` is for constants the docs state in a derived form — 64 MiB rather
+  // than 67108864, "25 秒" rather than 25000. The derived form still has to be
+  // pinned to the source value, or the check passes no matter what the source
+  // says, which is what the first version of this file did.
+  const wanted = phrases ?? spellings(value)
+  const found = wanted.some(phrase => haystack.includes(phrase))
+  const derived = phrases !== null
+  expect(found, derived
+    ? `${label}: 源码是 ${value}，文档里应当以 ${wanted.join(' 或 ')} 出现，但没找到`
+    : `${label}: 源码是 ${value}，但文档里找不到这个数`)
+  // A derived spelling could drift from the source without the phrase changing,
+  // so pin the arithmetic too where it is knowable.
+  if (label === '单帧最大（字节）') {
+    expect(Number(value) === 64 * 1024 * 1024, `单帧最大: 源码是 ${value}，不再是文档写的 64 MiB`)
+  }
+  if (label === '心跳间隔（毫秒）') {
+    expect(Number(value) === 25_000, `心跳间隔: 源码是 ${value}ms，不再是文档写的 25 秒`)
+  }
+}
+
+// --- The prologue, which is load-bearing and easy to change by accident ------
+
+const frames = read('protocol/src/frames.ts')
+const prologue = /TUNNEL_PROLOGUE.*?Buffer\.from\('([^']+)'/s.exec(frames)?.[1]
+expect(prologue === 'reins-tunnel',
+  `prologue 现在是 ${String(prologue)}；文档 §3.1 说它必须是稳定的、不含版本的 reins-tunnel`)
+expect(protocolDoc.includes('`"reins-tunnel"`'),
+  'protocol.md §3.1 没有写出当前的 prologue 值')
+
+const swiftPrologue = /tunnelPrologue = Data\("([^"]+)"/.exec(read('ios/Reins/Protocol/Frames.swift'))?.[1]
+expect(swiftPrologue === prologue,
+  `两端 prologue 不一致：TypeScript ${String(prologue)}，Swift ${String(swiftPrologue)}`)
+
+// --- Frame kinds the docs enumerate ------------------------------------------
+
+const documentedFrames = new Set(
+  [...protocolDoc.matchAll(/\*\*`(req|res|cancel|respond|resume|ev|resync|status|ping|pong|fault|ready)`\*\*/g)]
+    .map(match => match[1]),
+)
+for (const kind of ['req', 'res', 'cancel', 'respond', 'resume', 'ev', 'resync', 'status', 'ping', 'pong', 'fault', 'ready']) {
+  expect(documentedFrames.has(kind), `protocol.md §4 没有描述 \`${kind}\` 帧`)
+}
+
+// --- Projections the fold doc claims are unfolded ----------------------------
+
+const conversation = read('ios/Reins/Store/Conversation.swift')
+const foldDoc = read('docs/fold.md')
+for (const key of ['title', 'todos', 'contextPressure', 'plan']) {
+  expect(conversation.includes(`case "${key}"`),
+    `fold.md §5.2 说折叠了 ${key}，但 Conversation.swift 里没有这个 case`)
+}
+for (const key of ['permissions', 'sessionStats', 'contextBreakdown']) {
+  // The inverse direction: if one of these gets implemented, the doc listing it
+  // as "not yet folded" becomes a lie, and the person reading it will
+  // reimplement something that already exists.
+  expect(!conversation.includes(`case "${key}"`) || !foldDoc.includes(`\`${key}\``),
+    `${key} 现在已经折叠了，但 fold.md §5.3 还把它列在"尚未折叠"里`)
+}
+
+// --- Report ------------------------------------------------------------------
+
+if (problems.length === 0) {
+  process.stdout.write('docs: 与源码一致\n')
+  process.exit(0)
+}
+process.stdout.write(`docs: ${String(problems.length)} 处与源码不符\n\n`)
+for (const problem of problems) process.stdout.write(`  - ${problem}\n`)
+process.stdout.write('\n改代码时同步改文档，或更新 scripts/check-docs.mjs 里的这项检查。\n')
+process.exit(1)
