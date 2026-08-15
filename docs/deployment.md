@@ -13,9 +13,28 @@
 | 已用子域 | 没有（www / api / app / relay / docs 全空） |
 | 到期 | 2026-10-07 |
 
-`reins.novabox.ai` 是空的，随时能用。
+三样东西要上线：Relay、DNS 记录、iOS app。**前两样已经上线**（2026-08-15），第三样卡在 Apple 那边。
 
-三样东西要上线：Relay、DNS 记录、iOS app。前两样今天就能做，第三样卡在 Apple 那边。
+## 当前生产部署
+
+| 项 | 值 |
+|---|---|
+| 主机 | 阿里云北京，Ubuntu 26.04，2 核 / 1.5 GB |
+| Relay | systemd `reins-relay`，监听 `127.0.0.1:8787`，**不开公网端口** |
+| 源码路径 | `/opt/reins`，`root:root` 只读，服务账号 `reins`（nologin） |
+| 入口 | Cloudflare Tunnel `reins-relay`，systemd `cloudflared` |
+| 隧道配置 | `/etc/cloudflared/config.yml`（本地管理，不是面板管理） |
+| DNS | `reins.novabox.ai` CNAME → `<tunnel-id>.cfargotunnel.com`，橙云开 |
+| `/install` | Cloudflare Redirect Rule → GitHub raw，**不经过 Relay** |
+
+验证方式是 `e2e/tests/deployed.test.js`，它打的是真实公网地址而不是进程内的 Relay：
+
+```sh
+REINS_E2E_RELAY_URL=wss://reins.novabox.ai npm run build && \
+  node --test e2e/tests/deployed.test.js
+```
+
+没有这个环境变量它会跳过。**别把它从 CI 里删掉再指望别的测试能替代它**——其余 e2e 全跑在 loopback 上，隧道拒绝 WebSocket 升级、代理把流缓冲成没用、容量上限设错，这几种它们一个都发现不了。
 
 ---
 
@@ -75,15 +94,18 @@ DNS 在 Cloudflare，所以最省事的两条路：
 
 **A. 有公网机器** —— A 记录 `reins` 指向那台机器，橙云（proxied）打开。Cloudflare 的代理支持 WebSocket，不用额外开关。源站上放 Caddy 或者直接让 Cloudflare 回源到 8787。
 
-**B. 没有公网机器** —— Cloudflare Tunnel：
+**B. Cloudflare Tunnel** —— 现在用的就是这条，而且对这台机器它不是"更省事"，是**唯一可行**：主机在中国大陆，域名对外提供服务需要 ICP 备案，而 `.ai` 不在可备案的顶级域名列表里。隧道让机器不监听任何公网端口，也就不构成"对外提供服务"。
 
 ```sh
-cloudflared tunnel create reins
-cloudflared tunnel route dns reins reins.novabox.ai
-cloudflared tunnel run --url http://127.0.0.1:8787 reins
+cloudflared tunnel login                      # 浏览器授权，写出 ~/.cloudflared/cert.pem
+cloudflared tunnel create reins-relay
+cloudflared tunnel route dns reins-relay reins.novabox.ai
+sudo cloudflared service install              # 读 /etc/cloudflared/config.yml
 ```
 
-不用开端口、不用公网 IP，和 Bridle 自己的思路一样。
+`config.yml` 里配 ingress（`reins.novabox.ai` → `http://127.0.0.1:8787`，兜底 `http_status:404`）。
+
+**为什么用本地管理的隧道而不是面板管理的**：面板管理需要写 `PUT /accounts/*/cfd_tunnel/*/configurations`，而 Cloudflare 的 WAF 会拦掉从 dashboard 会话发出的程序化写请求（403 + "Attention Required" 页面），Zero Trust 那套 UI 又要先走 onboarding。`cloudflared tunnel login` 拿到的 `cert.pem` 直接带 DNS 写权限，一条命令建记录，绕开这两处。配置在 `/etc/cloudflared/config.yml` 里也更容易和仓库对上。
 
 两条路都要注意的：
 
@@ -157,20 +179,22 @@ Relay 看不到明文、看不到你的 dsh 地址、看不到会话内容。它
 
 ## 2. DNS
 
-Cloudflare 面板里加一条：
+已经加好了，`cloudflared tunnel route dns` 建的：
 
 | 类型 | 名称 | 内容 | 代理 |
 |---|---|---|---|
-| `A`（或 `CNAME`） | `reins` | 你的 Relay 源站 | 橙云开 |
+| `CNAME` | `reins` | `a553d87c-715d-4045-9e2d-012ee543c96c.cfargotunnel.com` | 橙云开 |
 
-走 Cloudflare Tunnel 的话 `cloudflared tunnel route dns` 会替你加，不用手动建。
+自己重建的话不用手动填，跑 `cloudflared tunnel route dns <隧道名> reins.novabox.ai`。
 
-加完验一下：
+验证：
 
 ```sh
 dig +short reins.novabox.ai
 curl -fsSL https://reins.novabox.ai/healthz
 ```
+
+`dig` 出来了但 `curl` 说解析不了，是本机解析器缓存了刚才那次 NXDOMAIN（SOA 的 negative TTL 是 1800 秒）。macOS 上 `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`。
 
 ### 安装脚本挂哪
 
@@ -180,7 +204,7 @@ curl -fsSL https://reins.novabox.ai/healthz
 curl -fsSL https://raw.githubusercontent.com/0x5446/reins/main/install.sh | sh
 ```
 
-想要一个短一点的地址，就在 Cloudflare 加一条 **Redirect Rule**（不是 Worker，不用写代码）：
+短地址已经配好了，是一条 Cloudflare **Redirect Rule**（不是 Worker，不用写代码）：
 
 ```
 reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/reins/main/install.sh
@@ -188,11 +212,16 @@ reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/rei
 
 这样 app 里那行 `curl -fsSL https://reins.novabox.ai/install | sh` 仍然成立，但中继被攻破**不会**污染安装链路——两者是不同的信任域。
 
+重定向本身现在就生效，但跟过去是 404：仓库还是私有的。**仓库转公开的那一刻它自己就通了**，不需要再动 Cloudflare。
+
+指向 `main` 而不是某个 tag，是有意的：这一层是引导脚本，永远取最新；`install.sh` 内部再用 `REINS_REF` 把真正 checkout 的源码钉到发布 tag 上。两层分开，改发布版本不用动 Cloudflare 规则。
+
 ### 转公开之前必须做完的
 
 仓库一旦公开，提交历史收不回来。这几条是不可绕过的：
 
 - [ ] **全历史秘密扫描**（`gitleaks detect --no-git` 与 `--log-opts=--all` 各一遍）
+- [ ] **打 tag**：`install.sh` 默认 checkout `REINS_REF`（现在是 `v0.1.0`）。这个 tag 不存在的话，安装脚本会在 `git clone --branch` 那步失败——私有期间没人跑得到，公开的第一分钟就有人跑得到
 - [x] LICENSE 就位（MIT）
 - [x] 包元数据不再是 `UNLICENSED` / `private`
 - [ ] 依赖许可证核对（`npm ls --all` 里没有 GPL 传染项）
@@ -243,8 +272,8 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 | # | 事项 | 门槛（做完的判据） | 阻塞于 |
 |---|---|---|---|
 | 1 | 版本协商落地 | 新旧双向互通测试通过 | — ✅ 已完成 |
-| 2 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED | 人工确认 |
-| 3 | 部署 Relay | `/healthz` 与 `/install` 从公网可达 | 一台机器或 CF Tunnel |
+| 2 | 部署 Relay | `deployed.test.js` 打公网地址全绿 | — ✅ 已完成 |
+| 3 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 人工确认 |
 | 4 | 写 `/help` 与 `/privacy` | 隐私页说清 Relay 能观测到什么 | — |
 | 5 | 购买 Developer Program | 账号可签发 APNs key | **$99** |
 | 6 | TestFlight 外测 | 一个非自己的设备装上并完成一次配对 | 5 |

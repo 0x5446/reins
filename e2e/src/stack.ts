@@ -37,6 +37,15 @@ export interface StackOptions {
   /** Frames the Bridle retains for replay; small values make resync easy to test. */
   eventCapacity?: number
   /**
+   * Dial a Relay that is already running somewhere else instead of starting one.
+   *
+   * The in-process Relay proves the protocol; it does not prove the deployment.
+   * A tunnel that drops WebSocket upgrades, a proxy that buffers, a capacity
+   * limit set too low — none of that shows up until the traffic crosses a real
+   * one. Pointing a test at the deployed Relay is the only way to catch it.
+   */
+  relayUrl?: string
+  /**
    * Stand in for the harness.
    *
    * The seam `docs/architecture.md` §4.1 claims exists. Injecting here lets a
@@ -50,7 +59,8 @@ export interface StackOptions {
 
 /** A running stack and the handles a test needs. */
 export interface Stack {
-  relay: RelayServer
+  /** Absent when the test was pointed at a Relay it does not own. */
+  relay: RelayServer | undefined
   relayUrl: string
   core: BridleCore
   relayClient: RelayClient
@@ -79,9 +89,12 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     throw new Error('no DeepSeek Harness found; set REINS_E2E_DSH_URL to a running web server')
   }
 
-  const relay = new RelayServer({ port: 0, host: '127.0.0.1' })
-  const relayPort = await relay.listen()
-  const relayUrl = `http://127.0.0.1:${String(relayPort)}`
+  let relay: RelayServer | undefined
+  let relayUrl = options.relayUrl
+  if (relayUrl === undefined) {
+    relay = new RelayServer({ port: 0, host: '127.0.0.1' })
+    relayUrl = `http://127.0.0.1:${String(await relay.listen())}`
+  }
 
   const home = mkdtempSync(join(tmpdir(), 'reins-e2e-'))
   const previousHome = process.env['REINS_HOME']
@@ -121,7 +134,8 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       relayClient.stop()
       direct?.close()
       core.stop()
-      await relay.close()
+      // Only close a Relay this stack started. A deployed one outlives the test.
+      await relay?.close()
       if (previousHome === undefined) delete process.env['REINS_HOME']
       else process.env['REINS_HOME'] = previousHome
       rmSync(home, { recursive: true, force: true })
