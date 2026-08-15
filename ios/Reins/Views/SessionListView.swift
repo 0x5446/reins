@@ -108,11 +108,22 @@ struct SessionListView: View {
             Placeholder(icon: "ellipsis", title: "Loading conversations…")
         } else if !query.isEmpty {
             Placeholder(icon: "magnifyingglass", title: "Nothing matched", detail: "Try a word from the conversation itself.")
+        } else if !session.isOnline {
+            // Not reachable at all. Saying anything about dsh here would be
+            // stating something the app cannot know: with no tunnel there is no
+            // information about what is running on the far side, and the last
+            // time this claimed "dsh isn't running" the truth was that dsh was
+            // fine and the Bridle had stopped.
+            Placeholder(
+                icon: "antenna.radiowaves.left.and.right.slash",
+                title: "Can’t reach \(session.machine.name)",
+                detail: "The Mac is asleep, off your network, or Bridle isn’t running on it."
+            )
         } else if !session.harnessReachable {
             Placeholder(
                 icon: "bolt.horizontal.circle",
                 title: "dsh isn’t running",
-                detail: "Start the agent on \(session.machine.name) and this fills in by itself."
+                detail: session.harnessDetail ?? "Start the agent on \(session.machine.name) and this fills in by itself."
             )
         } else {
             Placeholder(

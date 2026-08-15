@@ -27,13 +27,23 @@ command -v xcodegen >/dev/null 2>&1 || fail "xcodegen is not installed. brew ins
 # --- A machine to talk to ---------------------------------------------------
 
 started_bridle=""
+bridle_pid=""
 if ! pgrep -f "bridle/lib/cli.js" >/dev/null 2>&1; then
   say "Starting a Bridle"
-  ( cd "$root" && node bridle/lib/cli.js --direct-port 61000 >/tmp/reins-uitest-bridle.log 2>&1 & )
+  ( cd "$root" && exec node bridle/lib/cli.js --direct-port 61000 >/tmp/reins-uitest-bridle.log 2>&1 ) &
+  bridle_pid=$!
   started_bridle="yes"
   sleep 8
 fi
-trap '[ -n "$started_bridle" ] && pkill -f "bridle/lib/cli.js" || true' EXIT
+# Only clean up a Bridle this script started, and only that one. `pkill` by
+# pattern would take down a Bridle the developer is using for something else —
+# which is exactly what happened once, silently, mid-session.
+cleanup() {
+  [ -n "$started_bridle" ] || return 0
+  [ -n "$bridle_pid" ] || return 0
+  kill "$bridle_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 link=$(cd "$root" && node bridle/lib/cli.js pair --link 2>/dev/null | sed -n 's/^link: *//p')
 [ -n "$link" ] || fail "Could not mint a pairing link. Check /tmp/reins-uitest-bridle.log"

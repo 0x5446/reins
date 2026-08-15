@@ -52,13 +52,32 @@ struct SettingsView: View {
 
                 Section {
                     ForEach(model.machines) { machine in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(machine.name)
-                                .font(.system(size: 15, weight: .medium))
-                            Text(machine.fingerprint)
-                                .font(.code(11))
-                                .foregroundStyle(.tertiary)
+                        Button {
+                            unpairing = machine
+                        } label: {
+                            HStack(spacing: Metrics.gap) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(machine.name)
+                                        .font(.system(size: 15, weight: .medium))
+                                    Text(machine.fingerprint)
+                                        .font(.code(11))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer(minLength: Metrics.tight)
+                                if machine.id == model.active?.machine.id {
+                                    Text("Connected")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
+                        .foregroundStyle(.primary)
+                        // The same action by swipe, for people who expect it.
+                        // A swipe alone would not do: it is invisible, and the
+                        // only way to discover it is to already know.
                         .swipeActions {
                             Button(role: .destructive) {
                                 unpairing = machine
@@ -70,7 +89,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Paired Macs")
                 } footer: {
-                    Text("Forgetting a Mac here removes it from this iPhone. To stop that Mac trusting this iPhone, run `bridle revoke` on it.")
+                    Text("Tap a Mac to forget it on this iPhone. To stop that Mac trusting this iPhone, run `bridle revoke` there — this end cannot do it for you.")
                 }
 
                 Section {
@@ -84,9 +103,9 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Button("Reset Reins", role: .destructive) { confirmingReset = true }
+                    Button("Start over as a new device", role: .destructive) { confirmingReset = true }
                 } footer: {
-                    Text("Throws away this iPhone’s key and every pairing. Nothing on your Macs changes.")
+                    Text("Throws away this iPhone’s key, so every Mac stops recognising it and you pair again from scratch. Only useful if the key itself is the problem — to remove one Mac, tap it above.")
                 }
             }
             .navigationTitle("Settings")
@@ -101,23 +120,25 @@ struct SettingsView: View {
                     DefaultModelPicker(session: session)
                 }
             }
-            .confirmationDialog("Reset Reins?", isPresented: $confirmingReset, titleVisibility: .visible) {
-                Button("Reset", role: .destructive) {
+            .confirmationDialog("Start over as a new device?", isPresented: $confirmingReset, titleVisibility: .visible) {
+                Button("Start over", role: .destructive) {
                     model.resetEverything()
                     dismiss()
                 }
             } message: {
-                Text("You’ll need to pair your Macs again.")
+                Text("This iPhone gets a new key. Every Mac will treat it as one it has never seen, and each will still list the old one until you run `bridle revoke` there.")
             }
             .confirmationDialog(
                 unpairing.map { "Forget \($0.name)?" } ?? "",
                 isPresented: Binding(get: { unpairing != nil }, set: { if !$0 { unpairing = nil } }),
                 titleVisibility: .visible
             ) {
-                Button("Forget", role: .destructive) {
+                Button("Forget this Mac", role: .destructive) {
                     if let target = unpairing { model.unpair(target.id) }
                     unpairing = nil
                 }
+            } message: {
+                Text("It disappears from this iPhone. That Mac still trusts this iPhone until you run `bridle revoke` on it.")
             }
         }
     }
