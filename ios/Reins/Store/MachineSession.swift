@@ -34,6 +34,15 @@ public final class MachineSession {
     public private(set) var status: TunnelStatus = .idle
     /// Every conversation on the machine, newest first, subagents excluded.
     public private(set) var sessions: [SessionSummary] = []
+    /// The machine's sidebar groups, empty when it has none or cannot say.
+    ///
+    /// Empty is not an error state and is never treated as one — see
+    /// `refreshWorkspaces` — because the list screen has to work identically on
+    /// a machine that has never made a workspace and on one whose dsh is too
+    /// old to have the call.
+    public private(set) var workspaces: [Workspace] = []
+    /// Which of those groups are folded shut, remembered between launches.
+    public let folds: GroupFolds
     /// What the machine says about itself.
     public private(set) var machineInfo: MachineDescription?
     /// Set when the harness itself is down even though the tunnel is up. The
@@ -50,6 +59,10 @@ public final class MachineSession {
     public var problem: String?
     /// True while the session list is being fetched.
     public private(set) var listing = false
+    /// True while the workspace list is being fetched.
+    private var listingWorkspaces = false
+    /// Set when a host frame arrived while that fetch was in flight.
+    private var workspacesStale = false
 
     /// What a new conversation starts on, when the person has stated one.
     ///
@@ -70,6 +83,7 @@ public final class MachineSession {
         self.machine = machine
         self.notifier = notifier
         self.defaults = defaults
+        folds = GroupFolds(machineId: machine.id, defaults: defaults)
         if let data = defaults.data(forKey: MachineSession.defaultModelKey(machine.id)) {
             defaultModel = try? JSONDecoder().decode(ModelOption.self, from: data)
         }
@@ -245,6 +259,25 @@ public final class MachineSession {
             let message = payload["message"]?.stringValue ?? "The agent failed."
             existing(sessionId)?.note(message, kind: .failure)
             if conversations[sessionId] == nil { problem = message }
+        case "host/workspace-changed":
+            // The frame says a workspace moved, not what it now holds, and
+            // membership is the only part of it this app draws. Re-reading the
+            // whole list is three items on the wire and cannot drift; patching
+            // from a payload whose shape is not pinned down anywhere could.
+            Task { await self.refreshWorkspaces() }
+        case "host/workspace-removed":
+            // Locally first so the section goes on the same frame, then a
+            // re-read, because the local half depends on guessing the id field
+            // right and the re-read does not.
+            if let removed = payload["workspaceId"]?.stringValue {
+                workspaces.removeAll { $0.id == removed }
+            }
+            Task { await self.refreshWorkspaces() }
+        case "host/workspace-order-changed":
+            // Nothing, on purpose. The sidebar order is a filing decision made
+            // at the keyboard; this app sorts its sections by what was touched
+            // most recently instead, so there is nothing here to apply.
+            break
         case "stream/error":
             problem = payload.path("error", "message")?.stringValue
         default:
@@ -340,6 +373,11 @@ public final class MachineSession {
         guard !listing else { return }
         listing = true
         defer { listing = false }
+        // Alongside the session list rather than after it. Two round trips on
+        // one tunnel cost about what one does, and the alternative is a list
+        // that draws flat and then rearranges itself into sections a beat
+        // later, which on the home screen reads as a glitch.
+        async let grouping: Void = refreshWorkspaces()
         do {
             let items = try await harness.listSessions()
             sessions = items.filter { !$0.isSubagent }.sorted { $0.updatedAt > $1.updatedAt }
@@ -351,6 +389,40 @@ public final class MachineSession {
         } catch {
             problem = (error as? LocalizedError)?.errorDescription ?? "Could not read the conversation list."
         }
+        await grouping
+    }
+
+    /// Fetch the sidebar groups. Best effort, always.
+    ///
+    /// Three ways this can fail and none of them is worth a word on screen: dsh
+    /// predates `workspace.list` and answers `method-not-found`, the tunnel
+    /// dropped between the two calls, or the machine simply has no workspaces.
+    /// All three mean the same thing to the person holding the phone — there is
+    /// nothing to group by — and the list falls back to the flat one it has
+    /// always drawn. A banner here would report a missing convenience as a
+    /// broken conversation list.
+    ///
+    /// A failure keeps whatever was last known rather than clearing it, so one
+    /// dropped call on a machine that *does* group cannot flatten the screen
+    /// and un-flatten it a second later.
+    public func refreshWorkspaces() async {
+        guard !listingWorkspaces else {
+            // A frame that lands mid-fetch describes a state the in-flight call
+            // may have been too early to see, so it books another round rather
+            // than being dropped. Dragging a conversation between workspaces on
+            // the Mac emits a burst of these; this collapses the burst into two
+            // calls instead of one per frame — and, unlike a plain guard, not
+            // into one that settles on the state from before the drag.
+            workspacesStale = true
+            return
+        }
+        listingWorkspaces = true
+        defer { listingWorkspaces = false }
+        repeat {
+            workspacesStale = false
+            guard let items = try? await harness.listWorkspaces() else { return }
+            workspaces = items
+        } while workspacesStale
     }
 
     /// Load a conversation's tail page, or reload it after a resync.
@@ -539,5 +611,55 @@ public final class MachineSession {
             questions[question.sessionId] = question
             problem = (error as? LocalizedError)?.errorDescription ?? "That answer didn’t reach the Mac."
         }
+    }
+}
+
+/// Which sections of the conversation list are folded shut.
+///
+/// Remembered, because a fold that resets every launch is not a fold — someone
+/// who collapsed the workspace holding 40 finished conversations did so to stop
+/// scrolling past them, and doing it again tomorrow morning is the app failing
+/// to listen.
+///
+/// Three states per section, not two. "Never said" has to be distinguishable
+/// from "said open", or the default — open the most recent one — would silently
+/// re-close a section the person deliberately opened as soon as something else
+/// became more recent.
+///
+/// Kept out of `MachineSession` so it can be tested without a tunnel, and given
+/// its own `UserDefaults` so a test can hand it a throwaway suite.
+@MainActor
+@Observable
+public final class GroupFolds {
+    private let machineId: String
+    private let defaults: UserDefaults
+    private var remembered: [String: Bool]
+
+    public init(machineId: String, defaults: UserDefaults = .standard) {
+        self.machineId = machineId
+        self.defaults = defaults
+        let stored = defaults.dictionary(forKey: GroupFolds.key(machineId)) ?? [:]
+        remembered = stored.compactMapValues { $0 as? Bool }
+    }
+
+    /// Whether a section is open, falling back to the arrangement's suggestion
+    /// when nobody has expressed a view.
+    public func isOpen(_ groupId: String, unlessRemembered fallback: Bool) -> Bool {
+        remembered[groupId] ?? fallback
+    }
+
+    public func set(_ groupId: String, open: Bool) {
+        remembered[groupId] = open
+        defaults.set(remembered, forKey: GroupFolds.key(machineId))
+    }
+
+    /// Scoped per machine: workspace ids are the machine's, and two Macs paired
+    /// with the same phone share nothing but the phone.
+    ///
+    /// One key holding a dictionary rather than a key per workspace, so that
+    /// removing a machine's memory is one call and so that a workspace deleted
+    /// on the Mac leaves one dead entry rather than one dead default.
+    private static func key(_ machineId: String) -> String {
+        "reins.groupFolds.\(machineId)"
     }
 }

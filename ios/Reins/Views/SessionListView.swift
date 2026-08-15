@@ -69,33 +69,26 @@ struct SessionListView: View {
             if rows.isEmpty {
                 empty
             } else {
+                let arrangement = board
                 List {
-                    ForEach(rows) { row in
-                        Button {
-                            path.append(row.summary.id)
-                        } label: {
-                            SessionRow(
-                                summary: row.summary,
-                                snippet: row.snippet,
-                                needsYou: session.approvals[row.summary.id] != nil || session.questions[row.summary.id] != nil,
-                                home: session.machineInfo?.cwd
-                            )
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: Metrics.gutter, bottom: 6, trailing: Metrics.gutter))
-                        .listRowBackground(Palette.paper)
-                        .listRowSeparator(.hidden)
-                        .swipeActions(edge: .trailing) {
-                            Button {
-                                renameText = row.summary.title ?? ""
-                                renaming = row.summary
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-                            .tint(Palette.accent)
-                        }
+                    // Flat while searching, on purpose. A search is already a
+                    // way of crossing the folders, and putting three results
+                    // behind three headers would hide them behind the very
+                    // structure the person just chose to ignore.
+                    //
+                    // Flat, too, when there is nothing to divide by: one
+                    // workspace, none at all, or a dsh too old to have
+                    // `workspace.list`. That is the same list this screen drew
+                    // before grouping existed, which is what makes the failure
+                    // path unremarkable rather than a special case.
+                    if query.isEmpty, arrangement.grouped {
+                        sections(arrangement)
+                    } else {
+                        ForEach(rows) { row($0) }
                     }
                 }
                 .listStyle(.plain)
+                .listSectionSpacing(Metrics.tight)
                 .scrollContentBackground(.hidden)
                 .background(Palette.paper)
                 .accessibilityIdentifier("sessions.list")
@@ -167,12 +160,86 @@ struct SessionListView: View {
         }
     }
 
+    // MARK: - Sections
+
+    /// The list arranged into workspaces, with whatever is stuck lifted clear.
+    ///
+    /// Recomputed per render rather than cached: it is a couple of dictionary
+    /// passes over a few dozen rows, and a cache would need invalidating on
+    /// every event that touches a session, an approval, or a workspace — three
+    /// chances to show something stale in exchange for microseconds.
+    private var board: SessionBoard {
+        SessionBoard(
+            sessions: session.sessions,
+            workspaces: session.workspaces,
+            waitingOn: Set(session.approvals.keys).union(session.questions.keys)
+        )
+    }
+
+    @ViewBuilder
+    private func sections(_ arrangement: SessionBoard) -> some View {
+        // Above everything and outside every fold. This is the one thing on the
+        // screen that is not filing — a tool waiting on a tap does not care
+        // which folder it is in, and burying it under a collapsed header would
+        // defeat the entire reason for carrying this app around.
+        if !arrangement.waiting.isEmpty {
+            Section {
+                ForEach(arrangement.waiting) { row(Row(summary: $0, snippet: nil)) }
+            } header: {
+                GroupHeader(title: "Needs you", count: arrangement.waiting.count, open: nil, tint: Palette.warn) {}
+            }
+        }
+        ForEach(arrangement.groups) { group in
+            let open = session.folds.isOpen(group.id, unlessRemembered: group.id == arrangement.openByDefault)
+            Section {
+                if open {
+                    ForEach(group.sessions) { row(Row(summary: $0, snippet: nil)) }
+                }
+            } header: {
+                GroupHeader(title: group.title, count: group.sessions.count, open: open) {
+                    // Short and unspringy. A fold near the top of the list
+                    // moves everything under it, and a bouncy curve turns that
+                    // into the whole screen lurching.
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        session.folds.set(group.id, open: !open)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Rows
 
     private struct Row: Identifiable {
         var id: String { summary.id }
         var summary: SessionSummary
         var snippet: String?
+    }
+
+    @ViewBuilder
+    private func row(_ item: Row) -> some View {
+        Button {
+            path.append(item.summary.id)
+        } label: {
+            SessionRow(
+                summary: item.summary,
+                snippet: item.snippet,
+                needsYou: session.approvals[item.summary.id] != nil || session.questions[item.summary.id] != nil,
+                home: session.machineInfo?.cwd
+            )
+        }
+        .listRowInsets(EdgeInsets(top: 6, leading: Metrics.gutter, bottom: 6, trailing: Metrics.gutter))
+        .listRowBackground(Palette.paper)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing) {
+            Button {
+                renameText = item.summary.title ?? ""
+                renaming = item.summary
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            .tint(Palette.accent)
+        }
     }
 
     /// Search results, when there is a query, joined against the list this screen
@@ -221,6 +288,59 @@ struct SessionListView: View {
             searchUnavailable = (error as? LocalizedError)?.errorDescription
                 ?? "This Mac has full-text search turned off."
         }
+    }
+}
+
+/// A section head: what the group is, how much is in it, and whether it is open.
+///
+/// The count is not decoration. Folded, this row is the only thing standing for
+/// forty conversations, and a header with no number says "empty" as readily as
+/// it says "collapsed".
+private struct GroupHeader: View {
+    let title: String
+    let count: Int
+    /// nil for a section that cannot fold — the one holding whatever is waiting
+    /// on an answer, which has no business being hidden.
+    let open: Bool?
+    var tint: Color = .secondary
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Image(systemName: open == nil ? "hand.raised.fill" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(open == true ? 90 : 0))
+                    .foregroundStyle(open == nil ? AnyShapeStyle(tint) : AnyShapeStyle(.tertiary))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(tint)
+            // Section headers are uppercased by some list styles. These are
+            // folder names someone typed, and shouting them back changes what
+            // they say.
+            .textCase(nil)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(open == nil)
+        // Only ever used as a section header, so it carries its own row metrics
+        // rather than making both call sites restate them. The paper
+        // background matters: a plain list pins headers as you scroll, and the
+        // default backing would show as a grey band over the cards.
+        .listRowInsets(EdgeInsets(top: 2, leading: Metrics.gutter, bottom: 2, trailing: Metrics.gutter))
+        .listRowBackground(Palette.paper)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(count) conversations")
+        .accessibilityHint(open == nil ? "" : (open == true ? "Collapses this group" : "Expands this group"))
     }
 }
 

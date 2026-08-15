@@ -54,6 +54,19 @@ public struct Harness: Sendable {
         return (value["items"]?.arrayValue ?? []).compactMap(SessionSummary.init)
     }
 
+    /// The machine's sidebar groups, and which conversations are in each.
+    ///
+    /// A second call rather than a field on the session rows, because that is
+    /// how the machine holds it: membership belongs to the workspace. The list
+    /// screen joins the two.
+    ///
+    /// Throws `method-not-found` on a dsh that predates workspaces, which the
+    /// caller treats as "this machine does not group" rather than as a fault.
+    public func listWorkspaces() async throws -> [Workspace] {
+        let value = try await tunnel.call("workspace.list")
+        return (value["items"]?.arrayValue ?? []).compactMap(Workspace.init)
+    }
+
     /// One page of a session's event log. Omit `beforeSeq` for the tail.
     public func history(sessionId: String, beforeSeq: Int? = nil, maxMessages: Int? = nil) async throws -> JSONValue {
         try await tunnel.call("session.history", .object(dropping: [

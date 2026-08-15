@@ -82,6 +82,178 @@ public struct SessionSummary: Identifiable, Equatable, Sendable {
     }
 }
 
+// MARK: - Workspaces
+
+/// One of the machine's sidebar groups.
+///
+/// dsh's own filing system, arranged by whoever sits at the keyboard. The app
+/// reads it and never writes it: rearranging folders is a desk job, and the
+/// phone's job is to find the conversation someone left running.
+///
+/// Membership is a list of session ids held by the workspace rather than a
+/// field on the session, which is why grouping is a join done here and not
+/// something `session.list` could answer by itself.
+public struct Workspace: Identifiable, Equatable, Sendable {
+    public var id: String
+    /// The folder the workspace stands for, when it stands for one.
+    public var path: String?
+    /// The name someone gave it, which is often absent.
+    public var title: String?
+    /// Members, in the order the machine keeps them.
+    public var sessionIds: [String]
+    public var createdAt: Date
+
+    /// What to call it in a header.
+    public var displayTitle: String {
+        if let title, !title.isEmpty { return title }
+        if let path, !path.isEmpty { return (path as NSString).lastPathComponent }
+        return "Workspace"
+    }
+
+    /// Parse one `workspace.list` row.
+    public init?(_ value: JSONValue) {
+        guard let id = value["workspaceId"]?.stringValue else { return nil }
+        self.id = id
+        path = value["path"]?.stringValue
+        title = value["title"]?.stringValue
+        sessionIds = (value["sessionIds"]?.arrayValue ?? []).compactMap { $0.stringValue }
+        createdAt = Date(timeIntervalSince1970: (value["createdAt"]?.doubleValue ?? 0) / 1000)
+    }
+
+    public init(id: String, path: String? = nil, title: String? = nil, sessionIds: [String], createdAt: Date = Date(timeIntervalSince1970: 0)) {
+        self.id = id
+        self.path = path
+        self.title = title
+        self.sessionIds = sessionIds
+        self.createdAt = createdAt
+    }
+}
+
+/// One section of the conversation list.
+public struct SessionGroup: Identifiable, Equatable, Sendable {
+    /// The id of the catch-all section.
+    ///
+    /// A sentinel rather than an optional id, because this id is also the key
+    /// the fold state is remembered under and an optional would need a second
+    /// spelling there. dsh mints workspace ids, so a real one cannot collide
+    /// with a dotted name in this app's own namespace.
+    public static let ungroupedId = "reins.ungrouped"
+
+    public var id: String
+    public var title: String
+    public var sessions: [SessionSummary]
+    /// The newest thing in this group, which is what the sections are ordered
+    /// by and what decides which one opens on a cold launch.
+    public var lastActivity: Date
+
+    public var isUngrouped: Bool { id == SessionGroup.ungroupedId }
+}
+
+/// The conversation list, arranged the way the home screen draws it.
+///
+/// Pure, and deliberately so: this is the part with rules worth stating — what
+/// happens to a session no workspace claims, to a workspace that names a
+/// session the machine no longer has, to a conversation that is holding
+/// everything up — and rules buried in a `body` cannot be tested.
+///
+/// Two decisions are worth reading twice.
+///
+/// **Sections are ordered by activity, not by the order on the Mac.** dsh keeps
+/// a hand-arranged sidebar order and sends `host/workspace-order-changed` when
+/// it moves. That order is a filing decision made at a desk; a phone is opened
+/// to carry on with something, so the thing touched most recently belongs at
+/// the top. The cost is real: someone who deliberately dragged a workspace to
+/// the top of their sidebar will not see that reflected here.
+///
+/// **Anything waiting on the person is lifted out of its group entirely.** A
+/// tool asking for permission inside a folded section is the worst thing this
+/// screen could do — the whole reason the app exists is being interrupted away
+/// from the keyboard. Lifting rather than copying keeps every conversation on
+/// screen exactly once; the price is that answering the prompt drops the row
+/// back into its group, and that a group holding nothing but a waiting
+/// conversation disappears until it is answered.
+public struct SessionBoard: Equatable {
+    /// Conversations that cannot go on without an answer. Above every section
+    /// and outside every fold.
+    public var waiting: [SessionSummary]
+    public var groups: [SessionGroup]
+    /// Which section to open when nobody has said otherwise, or nil when there
+    /// is nothing to fold.
+    ///
+    /// One, not all: 44 conversations fully expanded is a scroll, and the point
+    /// of the sections is to make the shape visible in a screen. The most
+    /// recently touched one is the safe guess, because opening the app almost
+    /// always means carrying on with what was already happening.
+    public var openByDefault: String?
+
+    /// False when there is nothing to divide — no workspaces, one workspace, or
+    /// a machine too old to have the call. The screen then draws the plain list
+    /// it drew before any of this existed.
+    public var grouped: Bool { groups.count > 1 }
+
+    public init(sessions: [SessionSummary], workspaces: [Workspace], waitingOn: Set<String> = []) {
+        let ordered = sessions.sorted(by: SessionBoard.newestFirst)
+        waiting = ordered.filter { waitingOn.contains($0.id) }
+
+        let rest = ordered.filter { !waitingOn.contains($0.id) }
+        // `uniquingKeysWith` rather than the unique-keys initialiser: a machine
+        // that ever answered with the same session twice would take the home
+        // screen down with a trap, and a duplicated row is the lesser failure.
+        let byId = Dictionary(rest.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        var claimed: Set<String> = []
+        var made: [SessionGroup] = []
+        for workspace in workspaces {
+            var members: [SessionSummary] = []
+            for id in workspace.sessionIds {
+                // A workspace can name a session that `session.list` does not
+                // return — archived, deleted, or a subagent the list hides — and
+                // the only honest thing to do with a name that resolves to
+                // nothing is skip it. First claim wins if two workspaces name
+                // the same session, so no conversation appears twice.
+                guard !claimed.contains(id), let summary = byId[id] else { continue }
+                claimed.insert(id)
+                members.append(summary)
+            }
+            // An empty workspace is a header with nothing under it, which reads
+            // as a bug rather than as information.
+            guard !members.isEmpty else { continue }
+            members.sort(by: SessionBoard.newestFirst)
+            made.append(SessionGroup(
+                id: workspace.id,
+                title: workspace.displayTitle,
+                sessions: members,
+                lastActivity: members[0].updatedAt
+            ))
+        }
+        // Ties broken by id, so two workspaces last touched in the same second
+        // cannot swap places between one render and the next.
+        made.sort { ($0.lastActivity, $0.id) > ($1.lastActivity, $1.id) }
+
+        let loose = rest.filter { !claimed.contains($0.id) }
+        if !loose.isEmpty {
+            // Last, whatever its timestamps say. It is not a place someone put
+            // anything; it is what is left over, and leftovers do not outrank
+            // the folders somebody made on purpose.
+            made.append(SessionGroup(
+                id: SessionGroup.ungroupedId,
+                title: "Ungrouped",
+                sessions: loose,
+                lastActivity: loose[0].updatedAt
+            ))
+        }
+        groups = made
+        // Chosen across all sections including the leftovers, unlike the
+        // ordering: where the newest conversation *sits* should not change
+        // whether it is reachable without a tap.
+        openByDefault = made.count > 1 ? made.max { $0.lastActivity < $1.lastActivity }?.id : nil
+    }
+
+    private static func newestFirst(_ left: SessionSummary, _ right: SessionSummary) -> Bool {
+        (left.updatedAt, left.id) > (right.updatedAt, right.id)
+    }
+}
+
 /// One rendered item in a conversation, in log order.
 public enum ConversationItem: Identifiable, Equatable {
     case user(UserTurn)
