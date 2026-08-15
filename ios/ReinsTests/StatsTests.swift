@@ -190,76 +190,156 @@ final class CommandPrefixTests: XCTestCase {
 }
 
 /// The trace's job is to turn a transcript into something scannable, so what is
-/// worth testing is what it drops and how it flattens.
+/// worth testing is what it drops, how it splits, and how it flattens.
 @MainActor
 final class TraceEntryTests: XCTestCase {
-    func testInjectedContextIsNotAStep() {
-        // The harness pushes context in as a user message. It is not something a
-        // person did, and it is not what anyone is scanning a trace for.
-        let entry = TraceEntry(.user(UserTurn(
-            id: "u1", text: "<system-reminder>…</system-reminder>", images: [],
-            synthetic: true, at: Date()
-        )))
-        XCTAssertNil(entry)
+    private func only(_ item: ConversationItem) -> TraceEntry? {
+        TraceEntry.entries(for: item).first
     }
 
-    func testARealMessageIsAStep() {
-        let entry = TraceEntry(.user(UserTurn(
+    private func assistant(text: String, reasoning: String, complete: Bool = true) -> ConversationItem {
+        .assistant(AssistantTurn(
+            id: "a1", turn: 2, step: 3, text: text, reasoning: reasoning,
+            complete: complete, at: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+    }
+
+    // MARK: - Splitting model output
+
+    func testReasoningAndReplyAreTwoSteps() {
+        // dsh draws these as a collapsed `Think` and the reply under it. Folding
+        // them into one row loses the reasoning whenever there is also text.
+        let made = TraceEntry.entries(for: assistant(text: "Here is the fix", reasoning: "The build fails in auth.ts"))
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[0].kind, .thinking)
+        XCTAssertEqual(made[0].detail, "The build fails in auth.ts")
+        XCTAssertEqual(made[1].kind, .reply)
+        XCTAssertEqual(made[1].detail, "Here is the fix")
+    }
+
+    func testReasoningWithNoReplyIsNotLabelledAReply() {
+        let made = TraceEntry.entries(for: assistant(text: "", reasoning: "Still looking"))
+        XCTAssertEqual(made.map(\.kind), [.thinking])
+        XCTAssertEqual(made[0].label, "Thinking")
+    }
+
+    func testAStepThatOnlyCalledAToolProducesNoModelRow() {
+        // There is nothing to say about it; the tool row carries the step.
+        XCTAssertTrue(TraceEntry.entries(for: assistant(text: "", reasoning: "")).isEmpty)
+    }
+
+    func testOnlyTheTailOfAStepIsRunning() {
+        let made = TraceEntry.entries(for: assistant(text: "partial", reasoning: "done thinking", complete: false))
+        XCTAssertEqual(made[0].running, false, "reasoning finished once text started")
+        XCTAssertEqual(made[1].running, true)
+    }
+
+    func testReasoningJumpsToTheSharedBubble() {
+        // Both halves live in one bubble on the transcript, so the synthetic id
+        // has to come back off before scrolling to it.
+        let made = TraceEntry.entries(for: assistant(text: "hi", reasoning: "hm"))
+        XCTAssertEqual(made[0].id, "a1#think")
+        XCTAssertEqual(made[0].transcriptId, "a1")
+        XCTAssertEqual(made[1].transcriptId, "a1")
+    }
+
+    // MARK: - Other kinds
+
+    func testInjectedContextIsItsOwnKind() {
+        // Not dropped: it is a large part of where the context window went, and
+        // the fold already carries dsh's short label for it.
+        let entry = only(.user(UserTurn(
+            id: "u1", text: "skill-catalog", images: [], synthetic: true, at: Date()
+        )))
+        XCTAssertEqual(entry?.kind, .context)
+        XCTAssertEqual(entry?.label, "Context")
+    }
+
+    func testATypedMessageIsAUserStep() {
+        let entry = only(.user(UserTurn(
             id: "u2", text: "fix the build", images: [], synthetic: false, at: Date()
         )))
         XCTAssertEqual(entry?.kind, .user)
         XCTAssertEqual(entry?.detail, "fix the build")
     }
 
-    func testAnEmptyStreamingBubbleIsNotAStep() {
-        // It is already on screen as "thinking"; a blank row here is noise.
-        let entry = TraceEntry(.assistant(AssistantTurn(
-            id: "a1", turn: 1, step: 1, text: "", reasoning: "", complete: false, at: Date()
-        )))
-        XCTAssertNil(entry)
-    }
-
-    func testReasoningStandsInBeforeAnyTextArrives() {
-        let entry = TraceEntry(.assistant(AssistantTurn(
-            id: "a2", turn: 1, step: 1, text: "", reasoning: "Let me look at the build log",
-            complete: false, at: Date()
-        )))
-        XCTAssertEqual(entry?.detail, "Let me look at the build log")
-        XCTAssertEqual(entry?.running, true)
-    }
-
     func testAFailedToolIsMarked() {
-        let entry = TraceEntry(.tool(ToolCard(
+        let entry = only(.tool(ToolCard(
             id: "t1", name: "Bash", arguments: "{}",
             presentation: .terminal(command: "npm test", cwd: nil, output: nil, exitCode: 1),
-            resultText: nil, failed: true, running: false, at: Date()
+            resultText: nil, failed: true, running: false,
+            at: Date(timeIntervalSince1970: 1_700_000_000), finishedAt: nil
         )))
         XCTAssertEqual(entry?.failed, true)
         XCTAssertEqual(entry?.label, "Bash")
         XCTAssertEqual(entry?.detail, "npm test")
     }
 
+    // MARK: - Timing
+
+    func testAToolsDurationIsMeasuredNotInferred() {
+        // Tools have both a call and a result timestamp, which is the only place
+        // a real duration comes from — the events carry no duration field.
+        let entry = only(.tool(ToolCard(
+            id: "t2", name: "Bash", arguments: "{}",
+            presentation: .terminal(command: "sleep 40", cwd: nil, output: nil, exitCode: 0),
+            resultText: nil, failed: false, running: false,
+            at: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_040)
+        )))
+        XCTAssertEqual(entry?.took ?? 0, 40, accuracy: 0.01)
+    }
+
+    func testOtherKindsAreTimedByTheGapToTheNextStep() {
+        let entries = TraceEntry.timed([
+            TraceEntry(id: "a", kind: .reply, icon: "", label: "Reply", detail: "one",
+                       at: Date(timeIntervalSince1970: 100), failed: false, running: false, step: nil, took: nil),
+            TraceEntry(id: "b", kind: .reply, icon: "", label: "Reply", detail: "two",
+                       at: Date(timeIntervalSince1970: 112), failed: false, running: false, step: nil, took: nil),
+        ])
+        XCTAssertEqual(entries[0].took ?? 0, 12, accuracy: 0.01)
+        XCTAssertNil(entries[1].took, "the last step has no next one to measure against")
+    }
+
+    func testARunningStepIsNotGivenAnInventedEnd() {
+        let entries = TraceEntry.timed([
+            TraceEntry(id: "a", kind: .reply, icon: "", label: "Reply", detail: "one",
+                       at: Date(timeIntervalSince1970: 100), failed: false, running: true, step: nil, took: nil),
+            TraceEntry(id: "b", kind: .reply, icon: "", label: "Reply", detail: "two",
+                       at: Date(timeIntervalSince1970: 130), failed: false, running: false, step: nil, took: nil),
+        ])
+        XCTAssertNil(entries[0].took)
+    }
+
+    func testSubSecondGapsAreNotShown() {
+        // Noise on a phone row, and a wall of "0.2s" hides the one that says 40s.
+        let entries = TraceEntry.timed([
+            TraceEntry(id: "a", kind: .reply, icon: "", label: "Reply", detail: "one",
+                       at: Date(timeIntervalSince1970: 100), failed: false, running: false, step: nil, took: nil),
+            TraceEntry(id: "b", kind: .reply, icon: "", label: "Reply", detail: "two",
+                       at: Date(timeIntervalSince1970: 100.3), failed: false, running: false, step: nil, took: nil),
+        ])
+        XCTAssertNil(entries[0].took)
+    }
+
+    // MARK: - Flattening
+
     func testMultilineOutputCollapsesToOneLine() {
-        // A row is one line tall. Command output with newlines in it would
-        // otherwise make the list ragged and unscannable.
-        let flattened = TraceEntry.oneLine("first\n\nsecond   third\nfourth")
-        XCTAssertEqual(flattened, "first second third fourth")
+        XCTAssertEqual(TraceEntry.oneLine("first\n\nsecond   third\nfourth"), "first second third fourth")
     }
 
     func testAVeryLongLineIsTruncated() {
-        let long = String(repeating: "x", count: 500)
-        let flattened = TraceEntry.oneLine(long)
+        let flattened = TraceEntry.oneLine(String(repeating: "x", count: 500))
         XCTAssertEqual(flattened.count, 201, "200 characters plus the ellipsis")
         XCTAssertTrue(flattened.hasSuffix("…"))
     }
 
     func testSearchMatchesTheArgumentAsWellAsTheTool() {
-        // Someone hunting for a command remembers the path more often than they
-        // remember which tool ran it.
-        let entry = TraceEntry(.tool(ToolCard(
-            id: "t2", name: "Read", arguments: "{}",
+        let entry = only(.tool(ToolCard(
+            id: "t3", name: "Read", arguments: "{}",
             presentation: .read(path: "/src/auth.ts", lines: [], totalLines: 0),
-            resultText: nil, failed: false, running: false, at: Date()
+            resultText: nil, failed: false, running: false, at: Date(), finishedAt: nil
         )))
         XCTAssertTrue(entry?.searchText.contains("auth.ts") == true)
         XCTAssertTrue(entry?.searchText.contains("Read") == true)

@@ -210,7 +210,7 @@ public final class Conversation {
         case "tool/call":
             openToolCard(data, view: view, at: at)
         case "tool/result":
-            closeToolCard(data, view: view)
+            closeToolCard(data, view: view, at: at)
         case "todo/write":
             todos = (data["todos"]?.arrayValue ?? []).compactMap { item in
                 guard let content = item["content"]?.stringValue,
@@ -345,12 +345,13 @@ public final class Conversation {
         items.append(.tool(card))
     }
 
-    private func closeToolCard(_ data: JSONValue, view: JSONValue?) {
+    private func closeToolCard(_ data: JSONValue, view: JSONValue?, at: Date) {
         let block = data.path("message", "content")?.arrayValue?.first
         let callId = data.path("message", "source", "callId")?.stringValue
             ?? block?["toolCallId"]?.stringValue
         guard let callId, let index = toolIndex[callId], case .tool(var card) = items[index] else { return }
         card.running = false
+        card.finishedAt = at
         card.failed = data["error"] != nil && data["error"]?.isNull == false
             || block?["isError"]?.boolValue == true
         card.resultText = Conversation.plainText(block?["content"]?.arrayValue ?? [])

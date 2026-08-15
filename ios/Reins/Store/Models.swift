@@ -168,6 +168,15 @@ public struct ToolCard: Identifiable, Equatable {
     public var failed: Bool
     public var running: Bool
     public var at: Date
+    /// When `tool/result` arrived. The events carry no duration field, so this
+    /// is the only place a *measured* one comes from — everything else in the
+    /// log can only be timed by the gap to whatever happened next.
+    public var finishedAt: Date?
+
+    /// How long the tool ran, once it has stopped.
+    public var duration: TimeInterval? {
+        finishedAt.map { $0.timeIntervalSince(at) }
+    }
 
     /// A short line for the collapsed row.
     public var headline: String {
