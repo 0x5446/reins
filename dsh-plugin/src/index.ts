@@ -24,9 +24,14 @@ import {
   BridleCore,
   DirectServer,
   RelayClient,
+  clearRuntime,
   loadState,
+  writeRuntime,
   type BridleState,
 } from '@reins/bridle'
+
+/** How often to refresh the snapshot `bridle status` reads. */
+const HEARTBEAT_MS = 5_000
 
 /** Shown in dsh's plugin list and in diagnostics. */
 export const name = 'reins-bridle'
@@ -63,8 +68,35 @@ export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void
   if (config.dsh !== undefined && config.dsh.length > 0) state.dshUrl = config.dsh
 
   const core = new BridleCore(state)
+  const startedAt = Date.now()
   let direct: DirectServer | undefined
   let relay: RelayClient | undefined
+
+  // The same snapshot the standalone daemon publishes, for the same reason.
+  //
+  // `bridle status`, `bridle doctor` and `bridle pair` are typed in a second
+  // terminal and read this file to find the Bridle that is already running.
+  // Without it they conclude there is no Bridle at all — which, once the plugin
+  // is the recommended way to install, means the three commands the help page
+  // sends people to when something is broken all lie about the one thing they
+  // exist to report. The file is keyed by pid, and this pid is dsh's, so a
+  // stale file is still detected the same way.
+  function publish(relayState: 'offline' | 'connecting' | 'online' = relay?.connectionState ?? 'offline'): void {
+    writeRuntime({
+      pid: process.pid,
+      version: VERSION,
+      startedAt,
+      relayUrl: state.relayUrl,
+      relayState,
+      dshUrl: state.dshUrl,
+      dshReachable: core.dshStatus.reachable,
+      direct: direct?.addresses ?? [],
+      attached: relay?.attachedCircuits ?? 0,
+    })
+  }
+
+  const heartbeat = setInterval(() => { publish() }, HEARTBEAT_MS)
+  heartbeat.unref()
 
   // Nothing here awaits: Cordis mounts plugins concurrently and a plugin that
   // blocks its apply() holds up the harness it is meant to be a guest in.
@@ -77,17 +109,23 @@ export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void
     }
 
     if (state.relayUrl.length > 0) {
-      relay = new RelayClient(core, { version: VERSION, log: () => {} })
+      relay = new RelayClient(core, { version: VERSION, log: () => {}, onState: (next) => { publish(next) } })
       relay.start()
     }
+    publish()
   })()
 
   ctx.on('dispose', () => {
     // Reverse order, and every step tolerant: a plugin that throws on unload
     // takes the reload with it.
+    clearInterval(heartbeat)
     try { relay?.stop() } catch { /* already down */ }
     try { direct?.close() } catch { /* already down */ }
     try { core.stop() } catch { /* already down */ }
+    // Removed on unload, so a `bridle status` after `dsh plugin remove` says
+    // nothing is running rather than pointing at a live dsh that no longer
+    // has a Bridle in it.
+    try { clearRuntime() } catch { /* already gone */ }
   })
 }
 

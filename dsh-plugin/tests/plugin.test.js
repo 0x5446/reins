@@ -12,6 +12,7 @@ import test from 'node:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readRuntime } from '@reins/bridle'
 import { apply, name } from '../lib/index.js'
 
 /** A stand-in for the Cordis context, capturing the dispose hook. */
@@ -74,4 +75,26 @@ test('disposing twice is not an error', async (t) => {
   await new Promise(resolve => setTimeout(resolve, 200))
   ctx.dispose()
   assert.doesNotThrow(() => { ctx.dispose() }, 'a second unload must be a no-op, not a crash')
+})
+
+test('a Bridle inside dsh still answers "bridle status"', async (t) => {
+  const previous = isolateHome()
+  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+
+  // The gap this closes was found by installing the plugin and then running the
+  // command the help page tells people to run when something is broken. It said
+  // "bridle not running" while a Bridle was serving a phone, because the
+  // snapshot those commands read was only ever written by the standalone
+  // daemon. Three commands — status, doctor, pair — read it.
+  const ctx = fakeContext()
+  apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', directPort: 0 })
+  await new Promise(resolve => setTimeout(resolve, 400))
+
+  const live = readRuntime()
+  assert.ok(live, 'nothing published, so `bridle status` would report no Bridle at all')
+  assert.equal(live.pid, process.pid, 'the pid must be the host process, since that is the liveness check')
+  assert.equal(live.dshUrl, 'http://127.0.0.1:9')
+
+  ctx.dispose()
+  assert.equal(readRuntime(), undefined, 'unloading left a snapshot claiming a Bridle that is gone')
 })
