@@ -136,6 +136,12 @@ struct AssistantBlock: View {
     /// Reasoning, collapsed. It is worth having — it is often where the answer to
     /// "why did it do that" lives — and it is never worth showing by default,
     /// because it is longer than the answer and less useful.
+    ///
+    /// While it is still arriving there is a third state between "hidden" and
+    /// "expanded": one line of the newest text, updating in place. A model that
+    /// thinks for two minutes behind the word "Thinking…" looks identical to one
+    /// that has hung, and the live line is the cheapest possible answer to
+    /// "is it still going, and roughly where is it".
     private var reasoning: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -155,6 +161,25 @@ struct AssistantBlock: View {
             }
             .buttonStyle(.plain)
 
+            // Only while it runs, and only while collapsed. Once the turn is
+            // done the fragment is frozen mid-sentence and says nothing — worse
+            // than nothing, because a stray half-thought sitting under a reply
+            // reads as part of it.
+            if !turn.complete, !showReasoning {
+                Text(AssistantBlock.tail(of: turn.reasoning))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    // The newest words are the point, so overflow eats the
+                    // start of the line rather than the end.
+                    .truncationMode(.head)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // No transition. Deltas land several times a second and
+                    // anything that animates between them is a blur.
+                    .animation(nil, value: turn.reasoning)
+                    .accessibilityHidden(true)
+            }
+
             if showReasoning {
                 Text(turn.reasoning)
                     .font(.system(size: 13))
@@ -165,6 +190,22 @@ struct AssistantBlock: View {
                     .background(Palette.well, in: RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous))
             }
         }
+    }
+
+    /// The newest line of a stream of reasoning, for the live one-liner.
+    ///
+    /// The last *non-empty* line, not the last N characters: reasoning arrives
+    /// as prose with paragraph breaks, and a delta that lands just after a
+    /// newline would otherwise blank the row for a moment and make it flicker.
+    ///
+    /// - Parameter reasoning: everything folded so far.
+    /// - Returns: one line, whitespace trimmed, empty when there is nothing yet.
+    static func tail(of reasoning: String) -> String {
+        for line in reasoning.split(whereSeparator: \.isNewline).reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return ""
     }
 }
 

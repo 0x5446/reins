@@ -374,3 +374,31 @@ final class TokenBreakdownTests: XCTestCase {
         XCTAssertEqual(t?.cacheHitRate ?? 0, 0.6, accuracy: 0.001)
     }
 }
+
+/// The live line under "Thinking…".
+final class ReasoningTailTests: XCTestCase {
+    func testTheNewestLineWins() {
+        XCTAssertEqual(
+            AssistantBlock.tail(of: "First I check the build.\nThen the auth module."),
+            "Then the auth module."
+        )
+    }
+
+    func testATrailingNewlineDoesNotBlankTheRow() {
+        // Deltas land mid-prose, and one arriving just after a paragraph break
+        // would leave an empty last line — the row would flicker off and back
+        // several times a second.
+        XCTAssertEqual(AssistantBlock.tail(of: "Looking at auth.ts\n\n"), "Looking at auth.ts")
+        XCTAssertEqual(AssistantBlock.tail(of: "Looking at auth.ts\n   \n"), "Looking at auth.ts")
+    }
+
+    func testNothingYetIsEmptyRatherThanWhitespace() {
+        XCTAssertEqual(AssistantBlock.tail(of: ""), "")
+        XCTAssertEqual(AssistantBlock.tail(of: "\n \n"), "")
+    }
+
+    func testASingleUnbrokenLineIsItself() {
+        // The common case early in a turn: no newline has arrived yet.
+        XCTAssertEqual(AssistantBlock.tail(of: "The user is asking about"), "The user is asking about")
+    }
+}
