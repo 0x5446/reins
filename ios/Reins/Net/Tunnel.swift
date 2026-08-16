@@ -138,6 +138,17 @@ private let silenceLimit: TimeInterval = 40
 /// How often to check for that silence.
 private let livenessCheckInterval: TimeInterval = 5
 
+/// A direct connection that dies this soon after being adopted was not worth
+/// adopting. Long enough to cover a handshake that succeeds onto Wi-Fi the phone
+/// is about to fall off, short enough that an ordinary evening's disconnection
+/// is not mistaken for one.
+private let flapWindow: TimeInterval = 20
+
+/// How long to leave a flapping address alone. Long enough that walking out of
+/// range does not produce a switch every time the signal returns; short enough
+/// that a router which was rebooting is forgiven within the same sitting.
+private let flapPenalty: TimeInterval = 300
+
 public actor Tunnel {
     private let bundle: PairingBundle
     private let identity: StaticKeyPair
@@ -158,6 +169,20 @@ public actor Tunnel {
     /// When the last frame of any kind arrived, including the Bridle's pings.
     private var lastFrameAt = Date()
     private var watchdog: Task<Void, Never>?
+    private var watcher: PathWatcher?
+    private var upgrade: Task<Void, Never>?
+    /// Bumped on every adopted carrier, so `pump` can tell a socket it is still
+    /// reading from apart from one that was retired under it.
+    private var carrierGeneration = 0
+    /// Which direct address is live, and since when — the two facts needed to
+    /// know whether a drop counts as flapping.
+    private var adoptedLabel: String?
+    private var adoptedAt: Date?
+    /// Direct addresses not to try again before this moment.
+    private var lanPenalty: [String: Date] = [:]
+    /// Whether the phone currently has Wi-Fi. Set by the first path update,
+    /// which `NWPathMonitor` delivers as soon as it is started.
+    private var onWiFi = false
 
     private var continuation: AsyncStream<TunnelSignal>.Continuation?
     private(set) public var status: TunnelStatus = .idle {
@@ -210,6 +235,9 @@ public actor Tunnel {
     /// Start connecting, and keep reconnecting until `stop()`.
     public func start() {
         guard loop == nil else { return }
+        watcher = PathWatcher { [weak self] onWiFi in
+            Task { await self?.networkChanged(onWiFi: onWiFi) }
+        }
         loop = Task { await self.run() }
     }
 
@@ -218,6 +246,9 @@ public actor Tunnel {
         loop?.cancel()
         loop = nil
         sleeper?.cancel()
+        upgrade?.cancel()
+        upgrade = nil
+        watcher = nil
         teardown(reason: "closed by the app")
         status = .idle
     }
@@ -232,6 +263,9 @@ public actor Tunnel {
     public func poke() {
         sleeper?.cancel()
         checkLiveness()
+        // Coming back is also the likeliest moment to have walked in the door
+        // while the app was asleep, still holding a relayed connection.
+        considerUpgrade()
     }
 
     // MARK: - Calls
@@ -366,6 +400,35 @@ public actor Tunnel {
         guard !plan.isEmpty else {
             throw CarrierError(reason: "No way to reach that Mac.", closeCode: nil)
         }
+        let (winner, failures, refusal) = await dial(plan, remoteStatic: remoteStatic)
+
+        // A refusal outranks a win. It means the machine has an opinion about
+        // this device — unpaired, or a protocol it cannot speak — and adopting
+        // some other carrier's success would hide an answer that no amount of
+        // retrying changes.
+        if let refusal {
+            winner?.socket.close("refused")
+            throw refusal
+        }
+        guard let winner else {
+            if Task.isCancelled { throw CancellationError() }
+            throw CarrierError(reason: dialFailure(failures), closeCode: nil)
+        }
+
+        note(.ok, "Connected over \(winner.label) in \(elapsed(winner.took))")
+        adopt(winner)
+    }
+
+    /// Race a set of candidates and return the first handshake that completed.
+    ///
+    /// Shared by the opening dial and by the upgrade to Wi-Fi, which are the
+    /// same operation asked at different moments — and which must stay the same
+    /// operation, because the second one exists to hand over to a connection
+    /// indistinguishable from one the first would have made.
+    private func dial(
+        _ plan: [Candidate],
+        remoteStatic: Data
+    ) async -> (winner: Attempt?, failures: [String], refusal: RefusalReason?) {
         let request = HandshakeRequest(name: deviceName, client: clientVersion, token: pairingToken)
         for candidate in plan { note(.attempt, "Dialling \(candidate.label)") }
 
@@ -403,22 +466,7 @@ public actor Tunnel {
                 }
             }
         }
-
-        // A refusal outranks a win. It means the machine has an opinion about
-        // this device — unpaired, or a protocol it cannot speak — and adopting
-        // some other carrier's success would hide an answer that no amount of
-        // retrying changes.
-        if let refusal {
-            winner?.socket.close("refused")
-            throw refusal
-        }
-        guard let winner else {
-            if Task.isCancelled { throw CancellationError() }
-            throw CarrierError(reason: dialFailure(failures), closeCode: nil)
-        }
-
-        note(.ok, "Connected over \(winner.label) in \(elapsed(winner.took))")
-        adopt(winner)
+        return (winner, failures, refusal)
     }
 
     /// Turn what each path did wrong into one sentence a person can act on.
@@ -462,19 +510,152 @@ public actor Tunnel {
         socket.close("silent for \(Int(silence))s")
     }
 
+    // MARK: - Upgrading to the local network
+
+    /// Move a relayed connection onto the local network when one appears.
+    ///
+    /// A phone that walks in the door is still talking through Cloudflare, and
+    /// will be until something makes it reconnect — which, since the relay is
+    /// working, is nothing. That costs latency on every keystroke, spends the
+    /// Worker's request budget on traffic that never needed to leave the flat,
+    /// and tells the relay a session is happening when the two machines are a
+    /// metre apart.
+    ///
+    /// Three rules, and each one is there because the naive version is worse
+    /// than not doing it:
+    ///
+    /// - **Triggered, never polled.** Only a path change or a return to the
+    ///   foreground starts this. A timer would wake the radio to ask a question
+    ///   whose answer is almost always "no".
+    /// - **Built before adopted.** The relay carrier is not touched until the
+    ///   local handshake has completed. A failed upgrade is invisible; there is
+    ///   no window in which neither is live.
+    /// - **Penalised if it flaps.** Wi-Fi at the edge of range connects and
+    ///   dies, and a switch that keeps happening is worse than never switching
+    ///   at all. An address that drops within {@link flapWindow} of being
+    ///   adopted is left alone for {@link flapPenalty}.
+    private func considerUpgrade() {
+        // Without Wi-Fi there is no local address to reach, and trying anyway
+        // costs two eight-second timeouts with the radio awake for both — on
+        // every return to the foreground, for a phone that is out of the house
+        // and cannot possibly succeed.
+        guard onWiFi else { return }
+        guard case .online(.relay, _, _) = status else { return }
+        guard upgrade == nil else { return }
+        // Only while nothing is outstanding. A call already sent to the relay
+        // would be answered on a socket about to be retired, and while the
+        // event stream survives a swap by sequence number, a reply does not:
+        // it has nowhere to be replayed from.
+        guard pending.isEmpty else { return }
+        let targets = directCandidates()
+        guard !targets.isEmpty else { return }
+        upgrade = Task { await self.attemptUpgrade(targets) }
+    }
+
+    private func attemptUpgrade(_ targets: [Candidate]) async {
+        defer { upgrade = nil }
+        guard let remoteStatic = bundle.staticKey else { return }
+        note(.attempt, "On the relay with Wi-Fi available — trying to go direct")
+        let (winner, _, refusal) = await dial(targets, remoteStatic: remoteStatic)
+        // A refusal here is not the refusal it would be during a dial. The
+        // relay connection is up and working, and whatever the Mac thinks of
+        // this device over the local address, taking down a live tunnel to act
+        // on it would replace a working app with a broken one.
+        if let refusal { note(.fail, "The Mac refused the direct connection: \(refusal)") }
+        guard let winner else {
+            note(.attempt, "Staying on the relay")
+            return
+        }
+
+        // Everything checked before the dial has had a whole handshake to stop
+        // being true: the relay may have dropped, a call may have gone out, the
+        // person may have backgrounded the app. Adopting on stale premises is
+        // how a "seamless" switch loses a reply.
+        guard case .online(.relay, _, _) = status, pending.isEmpty else {
+            winner.socket.close("no longer needed")
+            return
+        }
+        let retiring = carrier
+        adopt(winner)
+        adoptedAt = Date()
+        adoptedLabel = winner.label
+        // Retired only after the new one is in place, and its in-flight bytes
+        // are dropped rather than decrypted: `pump` compares generations, and
+        // anything it discards is replayed by `resume` because nothing that was
+        // dropped ever advanced `highestSeq`.
+        retiring?.close("upgraded to the local network")
+        note(.ok, "Moved off the relay onto \(winner.label) in \(elapsed(winner.took))")
+    }
+
+    /// Local addresses worth trying, minus any that have just proved flaky.
+    private func directCandidates() -> [Candidate] {
+        let now = Date()
+        return candidates().filter { candidate in
+            guard candidate.carrier == .lan else { return false }
+            guard let until = lanPenalty[candidate.label] else { return true }
+            return now >= until
+        }
+    }
+
+    /// Record that a direct connection did not last, so the next chance to take
+    /// it is not taken immediately.
+    private func penaliseIfItFlapped() {
+        guard let label = adoptedLabel, let at = adoptedAt else { return }
+        adoptedLabel = nil
+        adoptedAt = nil
+        guard Date().timeIntervalSince(at) < flapWindow else { return }
+        lanPenalty[label] = Date().addingTimeInterval(flapPenalty)
+        note(.fail, "\(label) dropped after \(elapsed(Date().timeIntervalSince(at))) — leaving it alone for a while")
+    }
+
+    /// The phone's network changed under the connection.
+    private func networkChanged(onWiFi: Bool) {
+        self.onWiFi = onWiFi
+        note(.attempt, onWiFi ? "Joined a Wi-Fi network" : "Left Wi-Fi")
+        // Retry now rather than sitting out a backoff that was set for a
+        // network that no longer exists.
+        sleeper?.cancel()
+        if onWiFi {
+            considerUpgrade()
+        } else if case .online(.lan, _, _) = status {
+            // A local address is not merely slow without Wi-Fi, it is
+            // unreachable, so there is nothing to wait forty seconds to learn.
+            note(.fail, "Wi-Fi went away while connected directly — reconnecting")
+            carrier?.close("left the network")
+        }
+    }
+
     /// Move a finished handshake into place as the live tunnel.
     private func adopt(_ attempt: Attempt) {
         carrier = attempt.socket
         channel = attempt.channel
+        carrierGeneration += 1
         lastFrameAt = Date()
         startWatchdog()
         pairingToken = nil
         confirmation = Pairing.confirmationNumber(handshakeHash: attempt.channel.handshakeHash)
+        // Whether dsh is up is a fact about the Mac, not about the wire, so it
+        // survives a change of wire. Resetting it would flash "dsh isn't
+        // running" across the screen during an upgrade in which nothing about
+        // dsh happened; on a first connection there is nothing to carry and
+        // `ready` fills it in a moment later either way.
+        var harnessUp = false
+        if case .online(_, _, let known) = status { harnessUp = known }
         status = .online(
             carrier: attempt.carrier,
             machine: attempt.reply.machine ?? bundle.name,
-            harnessUp: false
+            harnessUp: harnessUp
         )
+        // Tracked for any adopted direct carrier, not just an upgraded one: an
+        // address that drops connections does it whether the opening race or
+        // the upgrade was what picked it.
+        if attempt.carrier == .lan {
+            adoptedLabel = attempt.label
+            adoptedAt = Date()
+        } else {
+            adoptedLabel = nil
+            adoptedAt = nil
+        }
     }
 
     /// One address worth trying.
@@ -508,9 +689,16 @@ public actor Tunnel {
 
     private func candidates() -> [Candidate] {
         var found: [Candidate] = []
+        let now = Date()
         for address in bundle.direct ?? [] {
             guard let url = URL(string: "\(address)/v1/tunnel") else { continue }
-            found.append(Candidate(url: url, carrier: .lan, label: "Wi-Fi \(Tunnel.place(url))", delay: 0))
+            let label = "Wi-Fi \(Tunnel.place(url))"
+            // A penalised address is skipped by the opening dial too, not just
+            // by the upgrade. Racing an address that has just proved it drops
+            // connections is how a flap becomes a loop: it wins the race
+            // precisely because it is local, then dies, then wins again.
+            if let until = lanPenalty[label], now < until { continue }
+            found.append(Candidate(url: url, carrier: .lan, label: label, delay: 0))
         }
         if var components = URLComponents(string: bundle.relay) {
             components.scheme = components.scheme == "https" || components.scheme == "wss" ? "wss" : "ws"
@@ -589,10 +777,29 @@ public actor Tunnel {
     }
 
     /// Read frames until the socket dies or the task is cancelled.
+    ///
+    /// Re-reads `carrier` every pass rather than holding the one it started
+    /// with, because an upgrade to Wi-Fi replaces it mid-loop. The generation
+    /// counter is what makes that safe: bytes that arrive on a socket already
+    /// retired belong to a cipher state that no longer exists, and its failure
+    /// belongs to a connection nobody is using — neither should be allowed to
+    /// tear down the connection that took its place. Discarding them loses
+    /// nothing, because nothing discarded advanced `highestSeq`, and the new
+    /// carrier's `resume` asks for everything past it.
     private func pump() async throws {
-        guard let socket = carrier, let channel else { throw CallError(code: "disconnected", message: "Not connected.") }
         while !Task.isCancelled {
-            let bytes = try await socket.receive()
+            guard let socket = carrier, let channel else {
+                throw CallError(code: "disconnected", message: "Not connected.")
+            }
+            let generation = carrierGeneration
+            let bytes: Data
+            do {
+                bytes = try await socket.receive()
+            } catch {
+                if carrierGeneration != generation { continue }
+                throw error
+            }
+            guard carrierGeneration == generation else { continue }
             lastFrameAt = Date()
             let plaintext: Data
             do {
@@ -656,6 +863,7 @@ public actor Tunnel {
     private func teardown(reason: String) {
         watchdog?.cancel()
         watchdog = nil
+        penaliseIfItFlapped()
         carrier?.close(reason)
         carrier = nil
         channel = nil
