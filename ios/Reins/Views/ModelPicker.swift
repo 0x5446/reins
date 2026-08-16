@@ -147,14 +147,16 @@ struct ModelPicker: View {
         // level the previous one happened to be on — "Max" on a small model and
         // "Max" on a large one are not the same amount of money.
         let level = chosen ?? catalog?.defaultEffort(for: option)
-        do {
-            try await session.harness.selectModel(sessionId: sessionId, option: option, reasoningEffort: level)
-            catalog?.current = option
-            catalog?.currentEffort = level
-            effort = level
-            if !keepOpen { dismiss() }
-        } catch {
-            problem = (error as? LocalizedError)?.errorDescription ?? "That model couldn’t be selected."
+        // Through the session, not the harness. The header reads the
+        // conversation, so a write that only touched this sheet's copy left the
+        // two disagreeing until the next turn.
+        if let failure = await session.selectModel(sessionId: sessionId, option: option, effort: level) {
+            problem = failure
+            return
         }
+        catalog?.current = option
+        catalog?.currentEffort = level
+        effort = level
+        if !keepOpen { dismiss() }
     }
 }

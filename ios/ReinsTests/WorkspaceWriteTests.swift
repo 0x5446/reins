@@ -439,3 +439,85 @@ final class WorkspaceWriteTests: XCTestCase {
         XCTAssertEqual(session.problem, "session \"s1\" not found")
     }
 }
+
+/// Choosing a model, and the header agreeing that you did.
+///
+/// The write used to live in the picker sheet, which updated its own copy of
+/// the catalogue and nothing else. `modelName` is otherwise set only from a
+/// `request/header` event — which arrives when a turn *runs* — so the header
+/// went on naming the previous model until the next message was sent. Reported
+/// from a device: picked Flash, header still said Pro.
+@MainActor
+final class ModelSelectionTests: XCTestCase {
+    private var suite: UserDefaults!
+    private var suiteName: String!
+    private var stub: StubTransport!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "reins.model.tests.\(UUID().uuidString)"
+        suite = UserDefaults(suiteName: suiteName)
+        stub = StubTransport()
+    }
+
+    override func tearDown() {
+        suite.removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    private func session() -> MachineSession {
+        let bundle = PairingBundle(
+            relay: "https://relay.invalid", device: "device-1", key: "", token: "", name: "Test Mac"
+        )
+        return MachineSession(
+            machine: PairedMachine(bundle: bundle),
+            identity: .generate(),
+            deviceName: "Test iPhone",
+            clientVersion: "reins-tests/1",
+            pairingToken: nil,
+            notifier: Notifier(center: nil),
+            defaults: suite,
+            transport: stub
+        )
+    }
+
+    private let flash = ModelOption(
+        provider: "deepseek", providerName: "DeepSeek",
+        model: "deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", description: nil
+    )
+
+    func testTheHeaderFollowsTheChoiceWithoutWaitingForATurn() async {
+        let machine = session()
+        let conversation = machine.conversation("s1")
+        conversation.setModel("DeepSeek V4 Pro (latest)")
+
+        let failure = await machine.selectModel(sessionId: "s1", option: flash, effort: "high")
+
+        XCTAssertNil(failure)
+        XCTAssertEqual(conversation.modelName, "DeepSeek V4 Flash (latest)")
+    }
+
+    func testTheEffortRidesAlongWithTheModel() async {
+        let machine = session()
+        _ = await machine.selectModel(sessionId: "s1", option: flash, effort: "max")
+
+        let sent = await stub.payloads("session.selectModel").last
+        XCTAssertEqual(sent?["model"]?.stringValue, "deepseek-v4-flash")
+        XCTAssertEqual(sent?["reasoningEffort"]?.stringValue, "max")
+    }
+
+    func testARefusedChoiceLeavesTheHeaderAlone() async {
+        // The opposite failure to the one being fixed, and the reason the
+        // update is applied on success rather than optimistically: a header
+        // naming a model the machine rejected would be worse than a stale one.
+        let machine = session()
+        let conversation = machine.conversation("s1")
+        conversation.setModel("DeepSeek V4 Pro (latest)")
+        await stub.fail("session.selectModel", code: "model-unavailable", message: "No key for that provider.")
+
+        let failure = await machine.selectModel(sessionId: "s1", option: flash, effort: nil)
+
+        XCTAssertEqual(failure, "No key for that provider.")
+        XCTAssertEqual(conversation.modelName, "DeepSeek V4 Pro (latest)")
+    }
+}

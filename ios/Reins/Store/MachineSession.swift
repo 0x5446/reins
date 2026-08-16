@@ -494,6 +494,29 @@ public final class MachineSession {
     ///
     /// Failure is silent. The header falls back to offering the picker, which is
     /// the same thing this call would have enabled.
+    /// Switch a conversation's model, and show it straight away.
+    ///
+    /// The write lived in the picker, which updated its own copy of the catalog
+    /// and nothing else — so the header went on naming the previous model until
+    /// the *next turn ran*, because `modelName` is only otherwise set from a
+    /// `request/header` event. Choosing a model and being told you had not is
+    /// the kind of thing that gets a person to choose it twice.
+    ///
+    /// Applied locally on success rather than waited for: the machine accepted
+    /// the call, and the next `request/header` will confirm it. Nothing is
+    /// assumed on failure.
+    ///
+    /// - Returns: nil on success, otherwise what to tell the person.
+    public func selectModel(sessionId: String, option: ModelOption, effort: String?) async -> String? {
+        do {
+            try await harness.selectModel(sessionId: sessionId, option: option, reasoningEffort: effort)
+            conversation(sessionId).setModel(option.name)
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "That model couldn’t be selected."
+        }
+    }
+
     private func loadModel(_ conversation: Conversation) async {
         guard let catalog = try? await harness.models(sessionId: conversation.sessionId) else { return }
         conversation.setModel(catalog.current?.name)
