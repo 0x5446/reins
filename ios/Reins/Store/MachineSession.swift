@@ -620,6 +620,26 @@ public final class MachineSession {
     ///   a turn straight away, which was worth checking rather than assuming.
     public func send(sessionId: String, text: String, images: [PromptImage] = [], steer: Bool = false) async {
         let conversation = conversation(sessionId)
+        // Where the optimistic copy goes depends on where the message is
+        // actually going. A steer, or a send to an idle session, is claimed
+        // immediately — the transcript is the truth about it. A queued send to
+        // a *running* session is not said to the model at all yet, and showing
+        // it as a bubble puts two contradictory claims on one screen: the
+        // transcript reading "delivered" while the queue strip below offers to
+        // promote or withdraw the very same words. It waits where it actually
+        // is — at the bottom, in the strip — and enters the transcript when
+        // the machine's own `user/message` says it was heard.
+        if !steer && conversation.running {
+            let queuedId = "queued-\(UUID().uuidString)"
+            conversation.showQueued(text: text, id: queuedId)
+            do {
+                try await harness.prompt(sessionId: sessionId, text: text, images: images, steer: false)
+            } catch {
+                conversation.dropQueued(id: queuedId)
+                problem = (error as? LocalizedError)?.errorDescription ?? "That message didn’t send."
+            }
+            return
+        }
         let pendingId = "pending-\(UUID().uuidString)"
         conversation.showPending(text: text, id: pendingId)
         do {

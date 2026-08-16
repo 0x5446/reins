@@ -30,6 +30,48 @@ final class ConversationFoldTests: XCTestCase {
 
     // MARK: - Messages
 
+    /// A queued message that the machine has spoken must leave the strip.
+    ///
+    /// dsh clears the queue with an empty `session/queue` snapshot when it
+    /// claims a message, but that snapshot is transient — no call re-asks for
+    /// it — and one missed reconnect window left the strip offering to
+    /// promote a message whose answer was already on screen above it. The
+    /// `user/message` fold is the claim, so it retires the strip copy itself.
+    func testAClaimedMessageLeavesTheQueueStrip() {
+        let held = conversation()
+        held.applyQueue([.object([
+            "id": .string("q1"),
+            "placement": .string("queued"),
+            "message": .object(["content": text("能搜索个美股信息看看不")]),
+        ])])
+        XCTAssertEqual(held.queue.count, 1)
+
+        held.apply(event: event("user/message", seq: 5, data: .object([
+            "id": .string("m5"),
+            "content": text("能搜索个美股信息看看不"),
+            "source": .object(["kind": .string("user")]),
+        ])), view: nil)
+
+        XCTAssertEqual(held.queue.count, 0, "the transcript says it was heard; the strip may not keep offering it")
+        XCTAssertEqual(held.items.count, 1)
+    }
+
+    /// And one claim retires one entry, not every copy of the same words.
+    func testAClaimRetiresOnlyOneQueueEntry() {
+        let held = conversation()
+        held.applyQueue([
+            .object(["id": .string("q1"), "placement": .string("queued"), "message": .object(["content": text("再试一次")])]),
+            .object(["id": .string("q2"), "placement": .string("queued"), "message": .object(["content": text("再试一次")])]),
+        ])
+        held.apply(event: event("user/message", seq: 5, data: .object([
+            "id": .string("m5"),
+            "content": text("再试一次"),
+            "source": .object(["kind": .string("user")]),
+        ])), view: nil)
+        XCTAssertEqual(held.queue.map(\.id), ["q2"])
+    }
+
+
     func testUserAndAssistantMessagesRender() {
         let held = conversation()
         held.apply(event: event("user/message", seq: 1, data: .object([

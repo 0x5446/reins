@@ -272,6 +272,18 @@ public final class Conversation {
         // outstanding send with the same body is the right one, since a person
         // cannot send two messages out of order.
         clearPending(matching: text)
+        // And reconcile the queue strip the same way. dsh does send an empty
+        // `session/queue` snapshot when it claims a message, but that snapshot
+        // is a transient — it rides the live stream, there is no call to
+        // re-ask, and one missed reconnect window leaves the strip offering to
+        // promote a message the transcript shows already answered. The
+        // machine speaking the message *is* the claim, so hearing it fold in
+        // is enough to retire the strip's copy. One entry, oldest first, for
+        // the same reason `clearPending` matches that way.
+        let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let claimed = queue.firstIndex(where: { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == spoken }) {
+            queue.remove(at: claimed)
+        }
         let id = message["id"]?.stringValue ?? "u\(seq)"
         append(.user(UserTurn(id: id, text: text, images: images, synthetic: false, at: at)))
     }
@@ -437,6 +449,22 @@ public final class Conversation {
     public func setRunning(_ value: Bool) {
         running = value
         if !value { completeStreaming() }
+    }
+
+    /// Show a message in the queue strip before the machine has confirmed it.
+    ///
+    /// The next `session/queue` snapshot replaces the whole array, so this
+    /// provisional entry is swapped for the machine's own the moment it
+    /// answers — same shape as `showPending`, aimed at the other place.
+    public func showQueued(text: String, id: String) {
+        queue.append(QueuedMessage(id: id, text: text.trimmingCharacters(in: .whitespacesAndNewlines), placement: "queued"))
+    }
+
+    /// Take back a provisional queue entry whose send failed. A no-op when a
+    /// real snapshot has already replaced it, which is the correct outcome:
+    /// the machine's word beats the guess.
+    public func dropQueued(id: String) {
+        queue.removeAll { $0.id == id }
     }
 
     /// Show a message optimistically, before the machine has logged it. The real

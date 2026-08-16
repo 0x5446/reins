@@ -231,13 +231,15 @@ struct StatusLine: View {
         case .idle:
             return nil
         case .connecting:
-            // Silent on a cold start. The list underneath is already drawing
-            // rows-shaped grey, which says "coming" without a second voice
-            // saying it in a warning colour — and at 300ms a banner is not
-            // information, it is a flinch. Once there is a list on screen the
-            // same state means something different: what you are reading is
-            // from before, and that is worth a line.
-            return session.sessions.isEmpty ? nil : "Reconnecting to \(session.machine.name)…"
+            // Grey words, not silence and not a warning. The first version of
+            // this banner was amber, which painted every launch as a problem;
+            // the second was silent on a cold start, leaving the skeleton to
+            // speak alone — and a person watching it asked, reasonably, what
+            // the app was actually doing. Saying so in the calm colour is the
+            // middle both versions missed.
+            return session.sessions.isEmpty
+                ? "Connecting to \(session.machine.name)…"
+                : "Reconnecting to \(session.machine.name)…"
         case .waiting(let detail, let retryIn):
             let seconds = max(1, Int(retryIn.rounded()))
             return "\(detail) Trying again in \(seconds)s."
