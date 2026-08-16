@@ -27,13 +27,33 @@ public struct CarrierError: Error, LocalizedError, Equatable {
     }
 }
 
+/// A duplex pipe of opaque frames, and the only thing `Tunnel` needs a socket
+/// to be.
+///
+/// Extracted so the interesting failures can be provoked. Everything that made
+/// this connection unreliable in practice is a *timing* fault — a socket that
+/// stops delivering without closing, a carrier retired underneath a read in
+/// flight — and none of that can be arranged against a real WebSocket. A test
+/// needs to be able to say "now go quiet" and have it mean exactly that.
+public protocol Carrying: AnyObject, Sendable {
+    /// Send one binary frame.
+    func send(_ bytes: Data) async throws
+    /// Await the next binary frame.
+    func receive() async throws -> Data
+    /// Close, releasing whatever is underneath.
+    func close(_ reason: String)
+}
+
+/// How a tunnel obtains a carrier. The default dials a real WebSocket.
+public typealias CarrierOpener = @Sendable (URL, TimeInterval) -> any Carrying
+
 /// One open WebSocket, with the message loop exposed as an async sequence.
 ///
 /// `URLSessionWebSocketTask` buffers what arrives before you ask for it, so the
 /// handshake reply cannot be lost between `send` and the first `receive`. The
 /// Node reference client has to attach its listener before sending to get the
 /// same property; the ordering here is the same on purpose.
-public final class WebSocketCarrier: @unchecked Sendable {
+public final class WebSocketCarrier: Carrying, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
     private let session: URLSession
 

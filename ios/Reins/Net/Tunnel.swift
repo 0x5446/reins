@@ -98,65 +98,81 @@ public struct ConnectionNote: Identifiable, Sendable, Equatable {
     public let text: String
 }
 
-/// How long a single harness call may take before the app gives up on it.
-private let callTimeout: TimeInterval = 120
-
-/// How long to wait for a carrier to answer the handshake before trying the next.
-private let handshakeTimeout: TimeInterval = 8
-
-/// Backoff ceiling. Past this the phone is probably not on a network at all, and
-/// `poke()` from the foreground observer will get there faster than any timer.
-private let maximumBackoff: TimeInterval = 30
-
-/// How long the Relay waits before joining a dial the LAN has already started.
+/// Every deadline the tunnel keeps, in one place.
 ///
-/// Long enough that a local handshake — tens of milliseconds on the same Wi-Fi —
-/// always finishes first, so a phone at home never touches the Relay. Short
-/// enough that a phone on cellular, where the LAN attempts will only ever time
-/// out, pays this and nothing more.
-private let relayHeadStart: TimeInterval = 0.4
-
-/// How long the app will sit on a silent carrier before deciding it is dead.
+/// Gathered into a value rather than left as file constants so a test can run
+/// them in milliseconds. The failures worth testing here are all defined by
+/// time — a carrier that has been quiet *too long*, an address that died *too
+/// soon* after being adopted — and a suite that has to wait forty real seconds
+/// to ask about the first one is a suite nobody runs.
 ///
-/// The Bridle pings every 25 seconds whether or not anything is happening, so
-/// silence longer than that is not a quiet conversation — it is a socket nobody
-/// has been told about. That is the ordinary end of a cellular connection: the
-/// radio hands over, the old flow is never delivered again, and nothing
-/// anywhere reports an error.
-///
-/// Left alone this costs minutes. `URLSessionWebSocketTask.receive()` waits on
-/// a dead TCP connection until the stack gives up, and for the whole of that
-/// wait the app says it is connected, shows a conversation that has moved on
-/// without it, and answers every tap with a two-minute call timeout. That is
-/// the failure this file's own header promises not to have.
-///
-/// Reconnecting costs nothing to be wrong about: the handshake is fast and
-/// `resume` replays the gap by sequence number, so a false positive is a blink
-/// and a missed detection is minutes of lying.
-private let silenceLimit: TimeInterval = 40
+/// The defaults are the shipping values, and each is explained where it is used.
+public struct TunnelTimings: Sendable {
+    /// How long a single harness call may take before the app gives up on it.
+    public var call: TimeInterval = 120
+    /// How long to wait for a carrier to answer the handshake.
+    public var handshake: TimeInterval = 8
 
-/// How often to check for that silence.
-private let livenessCheckInterval: TimeInterval = 5
+    /// Backoff ceiling. Past this the phone is probably not on a network at
+    /// all, and `poke()` from the foreground observer will get there faster
+    /// than any timer.
+    public var maximumBackoff: TimeInterval = 30
 
-/// A direct connection that dies this soon after being adopted was not worth
-/// adopting. Long enough to cover a handshake that succeeds onto Wi-Fi the phone
-/// is about to fall off, short enough that an ordinary evening's disconnection
-/// is not mistaken for one.
-private let flapWindow: TimeInterval = 20
+    /// How long the Relay waits before joining a dial the LAN has started.
+    ///
+    /// Long enough that a local handshake — tens of milliseconds on the same
+    /// Wi-Fi — always finishes first, so a phone at home never touches the
+    /// Relay. Short enough that a phone on cellular, where the LAN attempts
+    /// will only ever time out, pays this and nothing more.
+    public var relayHeadStart: TimeInterval = 0.4
 
-/// How long to leave a flapping address alone. Long enough that walking out of
-/// range does not produce a switch every time the signal returns; short enough
-/// that a router which was rebooting is forgiven within the same sitting.
-private let flapPenalty: TimeInterval = 300
+    /// How long the app will sit on a silent carrier before deciding it is dead.
+    ///
+    /// The Bridle pings every 25 seconds whether or not anything is happening,
+    /// so silence longer than that is not a quiet conversation — it is a socket
+    /// nobody has been told about. That is the ordinary end of a cellular
+    /// connection: the radio hands over, the old flow is never delivered again,
+    /// and nothing anywhere reports an error.
+    ///
+    /// Left alone this costs minutes. `URLSessionWebSocketTask.receive()` waits
+    /// on dead TCP until the stack gives up, and for the whole of that wait the
+    /// app says it is connected, shows a conversation that has moved on without
+    /// it, and answers every tap with a call timeout. That is the failure this
+    /// file's own header promises not to have.
+    ///
+    /// Reconnecting costs nothing to be wrong about: the handshake is fast and
+    /// `resume` replays the gap by sequence number, so a false positive is a
+    /// blink and a missed detection is minutes of lying.
+    public var silenceLimit: TimeInterval = 40
+
+    /// How often to check for that silence.
+    public var livenessCheck: TimeInterval = 5
+
+    /// A direct connection that dies this soon after being adopted was not
+    /// worth adopting. Long enough to cover a handshake that succeeds onto
+    /// Wi-Fi the phone is about to fall off, short enough that an ordinary
+    /// evening's disconnection is not mistaken for one.
+    public var flapWindow: TimeInterval = 20
+
+    /// How long to leave a flapping address alone. Long enough that walking out
+    /// of range does not produce a switch every time the signal returns; short
+    /// enough that a router which was rebooting is forgiven within the sitting.
+    public var flapPenalty: TimeInterval = 300
+
+    public init() {}
+}
 
 public actor Tunnel {
     private let bundle: PairingBundle
     private let identity: StaticKeyPair
     private let clientVersion: String
+    private let open: CarrierOpener
+    private let timings: TunnelTimings
+    private let watchNetwork: Bool
     private var deviceName: String
     private var pairingToken: String?
 
-    private var carrier: WebSocketCarrier?
+    private var carrier: (any Carrying)?
     private var channel: SecureChannel?
     private var loop: Task<Void, Never>?
     private var sleeper: Task<Void, Never>?
@@ -199,18 +215,31 @@ public actor Tunnel {
     ///   - deviceName: what the machine should call this device.
     ///   - clientVersion: app build string, shown in `bridle status`.
     ///   - pairingToken: present only until the first successful handshake.
+    ///   - open: how to obtain a carrier. Tests pass a pair of in-memory pipes
+    ///     so that a socket can be made to go quiet, or to be retired mid-read,
+    ///     on demand — the two failures that made this file worth testing and
+    ///     that a real WebSocket cannot be asked to perform.
+    ///   - watchNetwork: whether to observe the system's network path. Off in
+    ///     tests, where a real `NWPathMonitor` would fire on the machine running
+    ///     them and start upgrades nobody asked for.
     public init(
         bundle: PairingBundle,
         identity: StaticKeyPair,
         deviceName: String,
         clientVersion: String,
-        pairingToken: String?
+        pairingToken: String?,
+        open: @escaping CarrierOpener = { WebSocketCarrier.open(url: $0, timeout: $1) },
+        watchNetwork: Bool = true,
+        timings: TunnelTimings = TunnelTimings()
     ) {
         self.bundle = bundle
         self.identity = identity
         self.deviceName = deviceName
         self.clientVersion = clientVersion
         self.pairingToken = pairingToken
+        self.open = open
+        self.watchNetwork = watchNetwork
+        self.timings = timings
     }
 
     /// The signal stream. Call once; the second caller gets an empty stream.
@@ -235,8 +264,10 @@ public actor Tunnel {
     /// Start connecting, and keep reconnecting until `stop()`.
     public func start() {
         guard loop == nil else { return }
-        watcher = PathWatcher { [weak self] onWiFi in
-            Task { await self?.networkChanged(onWiFi: onWiFi) }
+        if watchNetwork {
+            watcher = PathWatcher { [weak self] onWiFi in
+                Task { await self?.networkChanged(onWiFi: onWiFi) }
+            }
         }
         loop = Task { await self.run() }
     }
@@ -300,8 +331,9 @@ public actor Tunnel {
     }
 
     private func withRequest(id: String, _ send: @escaping () throws -> Void) async throws -> JSONValue {
+        let limit = timings.call
         let deadline = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(callTimeout * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
             guard !Task.isCancelled else { return }
             await self?.settle(id, .failure(CallError(code: "timeout", message: "The Mac did not answer in time.")))
         }
@@ -364,7 +396,7 @@ public actor Tunnel {
                 note(.fail, "\(detail) Retrying in \(elapsed(backoff))")
                 status = .waiting(detail: detail, retryIn: backoff)
                 await sleep(backoff)
-                backoff = min(backoff * 2, maximumBackoff)
+                backoff = min(backoff * 2, timings.maximumBackoff)
                 continue
             }
             // `pump` returned without throwing only if it was cancelled.
@@ -439,7 +471,7 @@ public actor Tunnel {
         await withTaskGroup(of: Outcome.self) { group in
             for candidate in plan {
                 group.addTask {
-                    await Tunnel.race(candidate, identity: self.identity, remoteStatic: remoteStatic, request: request)
+                    await Tunnel.race(candidate, identity: self.identity, remoteStatic: remoteStatic, request: request, open: self.open, timeout: self.timings.handshake)
                 }
             }
             for await outcome in group {
@@ -488,9 +520,10 @@ public actor Tunnel {
     /// has this read been waiting".
     private func startWatchdog() {
         watchdog?.cancel()
+        let interval = timings.livenessCheck
         watchdog = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(livenessCheckInterval * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 if Task.isCancelled { return }
                 await self?.checkLiveness()
             }
@@ -501,7 +534,7 @@ public actor Tunnel {
     private func checkLiveness() {
         guard let socket = carrier else { return }
         let silence = Date().timeIntervalSince(lastFrameAt)
-        guard silence > silenceLimit else { return }
+        guard silence > timings.silenceLimit else { return }
         note(.fail, "Nothing heard for \(elapsed(silence)) — treating the connection as dead")
         // Closing is the whole action. It makes the blocked `receive()` throw,
         // which throws out of `pump`, which the reconnect loop already knows
@@ -603,8 +636,8 @@ public actor Tunnel {
         guard let label = adoptedLabel, let at = adoptedAt else { return }
         adoptedLabel = nil
         adoptedAt = nil
-        guard Date().timeIntervalSince(at) < flapWindow else { return }
-        lanPenalty[label] = Date().addingTimeInterval(flapPenalty)
+        guard Date().timeIntervalSince(at) < timings.flapWindow else { return }
+        lanPenalty[label] = Date().addingTimeInterval(timings.flapPenalty)
         note(.fail, "\(label) dropped after \(elapsed(Date().timeIntervalSince(at))) — leaving it alone for a while")
     }
 
@@ -672,7 +705,7 @@ public actor Tunnel {
 
     /// A handshake that completed, before anyone has adopted it.
     private struct Attempt: @unchecked Sendable {
-        let socket: WebSocketCarrier
+        let socket: any Carrying
         let channel: SecureChannel
         let reply: HandshakeReply
         let carrier: Carrier
@@ -710,7 +743,7 @@ public actor Tunnel {
                     carrier: .relay,
                     label: "Relay \(Tunnel.place(url))",
                     // No LAN address to lose to means nothing to wait for.
-                    delay: found.isEmpty ? 0 : relayHeadStart
+                    delay: found.isEmpty ? 0 : timings.relayHeadStart
                 ))
             }
         }
@@ -734,18 +767,20 @@ public actor Tunnel {
         _ candidate: Candidate,
         identity: StaticKeyPair,
         remoteStatic: Data,
-        request: HandshakeRequest
+        request: HandshakeRequest,
+        open: CarrierOpener,
+        timeout: TimeInterval
     ) async -> Outcome {
         if candidate.delay > 0 {
             try? await Task.sleep(nanoseconds: UInt64(candidate.delay * 1_000_000_000))
             if Task.isCancelled { return .cancelled }
         }
         let started = Date()
-        let socket = WebSocketCarrier.open(url: candidate.url, timeout: handshakeTimeout)
+        let socket = open(candidate.url, timeout)
         do {
             let initiator = try NoiseInitiator(staticKeys: identity, remoteStatic: remoteStatic, prologue: tunnelPrologue)
             try await socket.send(initiator.writeMessage(try request.encoded()))
-            let reply = try await withTimeout(handshakeTimeout) { try await socket.receive() }
+            let reply = try await withTimeout(timeout) { try await socket.receive() }
             let opened = try initiator.readMessage(reply)
             let answer = try JSONDecoder().decode(HandshakeReply.self, from: opened.payload)
             guard answer.ok else {
@@ -912,5 +947,19 @@ extension RefusalReason: Error, LocalizedError {
         case .version: return "The Reins app and that Mac’s Bridle are different versions."
         case .machineError(let detail): return detail
         }
+    }
+}
+
+// MARK: - Test seam
+
+extension Tunnel {
+    /// Pretend the system reported a network change.
+    ///
+    /// The real signal comes from `NWPathMonitor`, which cannot be asked to
+    /// produce one — and the behaviour worth testing is entirely what happens
+    /// *after* the signal: whether the connection moves off the relay, and
+    /// whether it declines to try when there is no Wi-Fi to move onto.
+    func networkChangedForTesting(onWiFi: Bool) {
+        networkChanged(onWiFi: onWiFi)
     }
 }
