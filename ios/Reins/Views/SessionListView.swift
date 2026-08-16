@@ -158,10 +158,30 @@ struct SessionListView: View {
         }
     }
 
+    /// Whether the list has simply not arrived yet.
+    ///
+    /// Three states used to be one. Dialling, fetching, and failing all ended
+    /// up at "Can't reach this Mac", because the only question asked was
+    /// `!isOnline` — and for the first second of every launch that is true for
+    /// the most ordinary reason there is. Failure is `waiting` or `refused`,
+    /// and those keep their loud screens; this covers the two that are just
+    /// work in progress.
+    private var starting: Bool {
+        guard query.isEmpty, session.sessions.isEmpty else { return false }
+        if case .connecting = session.status { return true }
+        if case .idle = session.status { return true }
+        return session.listing
+    }
+
     @ViewBuilder
     private var empty: some View {
-        if session.listing && session.sessions.isEmpty {
-            Placeholder(icon: "ellipsis", title: "Loading conversations…")
+        if starting {
+            // Not a placeholder, and not "Can't reach" either. A cold start
+            // spends its first second dialling, and both of those read as a
+            // verdict: one says there is nothing here, the other says something
+            // is broken, and at 300ms neither is known. Rows-shaped grey says
+            // the only true thing — the list is on its way.
+            SessionSkeleton()
         } else if !query.isEmpty, searchUnavailable != nil {
             // Not "nothing matched" — the machine never ran the search, so no
             // claim about matches is warranted. And the remedy is four lines of
@@ -593,5 +613,55 @@ struct ProblemBanner: View {
                     session.problem = nil
                 }
         }
+    }
+}
+
+/// The list before the list arrives.
+///
+/// A cold start has a real gap in it — dial the Mac, then ask it for its
+/// conversations — and the app used to fill that gap with the words "Can't
+/// reach", which is both alarming and, for the ordinary case, false. What is
+/// actually true at that moment is that rows are coming, and rows-shaped grey
+/// is the only way to say that without making a claim.
+///
+/// Not animated into existence: it appears at launch, and something fading in
+/// over the top of nothing reads as a second delay rather than a first one.
+private struct SessionSkeleton: View {
+    /// Enough to fill a phone, and varied so it reads as content rather than a
+    /// progress bar someone drew badly.
+    private static let widths: [CGFloat] = [0.72, 0.46, 0.85, 0.58, 0.66, 0.40, 0.78]
+
+    @State private var dim = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(SessionSkeleton.widths.enumerated()), id: \.offset) { _, width in
+                HStack(spacing: Metrics.gap) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        bar(width: width, height: 13)
+                        bar(width: width * 0.55, height: 10)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.vertical, 13)
+            }
+            Spacer(minLength: 0)
+        }
+        .opacity(dim ? 0.55 : 1)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
+        .onAppear { dim = true }
+        .accessibilityElement()
+        .accessibilityLabel("Loading conversations")
+        .accessibilityIdentifier("sessions.skeleton")
+    }
+
+    private func bar(width: CGFloat, height: CGFloat) -> some View {
+        GeometryReader { geometry in
+            Capsule()
+                .fill(Palette.well)
+                .frame(width: geometry.size.width * width, height: height)
+        }
+        .frame(height: height)
     }
 }

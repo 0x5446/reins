@@ -188,7 +188,9 @@ struct StatusDot: View {
     private var colour: Color {
         switch status {
         case .online(_, _, let harnessUp): return harnessUp ? Palette.good : Palette.warn
-        case .connecting: return Palette.warn
+        // The dot pulses while connecting, which already reads as activity.
+        // Colouring it amber on top of that turns every launch into a warning.
+        case .connecting: return .secondary
         case .waiting: return Palette.warn
         case .refused: return Palette.bad
         case .idle: return .secondary
@@ -229,7 +231,13 @@ struct StatusLine: View {
         case .idle:
             return nil
         case .connecting:
-            return "Reaching \(session.machine.name)…"
+            // Silent on a cold start. The list underneath is already drawing
+            // rows-shaped grey, which says "coming" without a second voice
+            // saying it in a warning colour — and at 300ms a banner is not
+            // information, it is a flinch. Once there is a list on screen the
+            // same state means something different: what you are reading is
+            // from before, and that is worth a line.
+            return session.sessions.isEmpty ? nil : "Reconnecting to \(session.machine.name)…"
         case .waiting(let detail, let retryIn):
             let seconds = max(1, Int(retryIn.rounded()))
             return "\(detail) Trying again in \(seconds)s."
@@ -263,7 +271,12 @@ struct StatusLine: View {
     private var tint: Color {
         switch session.status {
         case .refused: return Palette.bad
-        case .online: return Palette.warn
+        // Amber is a claim that something is wrong, and reconnecting is not:
+        // it is the normal end of every phone's every network. Grey says "hold
+        // on" — which is what is happening — and keeps amber meaning something,
+        // so that `waiting`, which really is a failure with a reason attached,
+        // is not competing with the routine for the same colour.
+        case .connecting: return .secondary
         default: return Palette.warn
         }
     }
