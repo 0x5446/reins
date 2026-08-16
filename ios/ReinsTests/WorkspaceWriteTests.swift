@@ -521,3 +521,107 @@ final class ModelSelectionTests: XCTestCase {
         XCTAssertEqual(conversation.modelName, "DeepSeek V4 Pro (latest)")
     }
 }
+
+/// The access mode, which is a machine setting wearing a per-session badge.
+///
+/// It was drawn as a three-way picker inside the session panel and reported as
+/// a dead control. It was worse than dead: the only write available is the
+/// machine's `defaultPreset`, and an existing session keeps whatever it was
+/// created with — measured by changing the default and running another turn,
+/// after which the session's projection had not moved. So the picker offered to
+/// change something unchangeable, and the reason it looked broken is that the
+/// checkmark honestly followed a projection that never changes.
+@MainActor
+final class AccessDefaultTests: XCTestCase {
+    private var suite: UserDefaults!
+    private var suiteName: String!
+    private var stub: StubTransport!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "reins.access.tests.\(UUID().uuidString)"
+        suite = UserDefaults(suiteName: suiteName)
+        stub = StubTransport()
+    }
+
+    override func tearDown() {
+        suite.removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    private func settingsAnswer(_ preset: String, revision: Int = 3) -> JSONValue {
+        .object(["namespaces": .array([
+            .object([
+                "ns": .string("permission"),
+                "revision": .number(Double(revision)),
+                "value": .object(["defaultPreset": .string(preset)]),
+            ]),
+        ])])
+    }
+
+    private func session() -> MachineSession {
+        let bundle = PairingBundle(
+            relay: "https://relay.invalid", device: "device-1", key: "", token: "", name: "Test Mac"
+        )
+        return MachineSession(
+            machine: PairedMachine(bundle: bundle),
+            identity: .generate(),
+            deviceName: "Test iPhone",
+            clientVersion: "reins-tests/1",
+            pairingToken: nil,
+            notifier: Notifier(center: nil),
+            defaults: suite,
+            transport: stub
+        )
+    }
+
+    func testTheDefaultComesFromTheSettingNotASession() async {
+        await stub.answer("settings.describe", settingsAnswer("read-only"))
+        let machine = session()
+
+        await machine.refreshAccessDefault()
+
+        XCTAssertEqual(machine.accessDefault?.current, "read-only")
+        XCTAssertEqual(machine.accessDefault?.options.count, 3)
+    }
+
+    func testChangingItSendsTheRevisionItRead() async {
+        await stub.answer("settings.describe", settingsAnswer("workspace-write", revision: 7))
+        let machine = session()
+        await machine.refreshAccessDefault()
+
+        _ = await machine.setPermission("danger-full-access")
+
+        let sent = await stub.payloads("settings.update").last
+        XCTAssertEqual(sent?.path("patch", "defaultPreset")?.stringValue, "danger-full-access")
+        // Optimistic concurrency: a stale revision means somebody at the
+        // keyboard changed it in between, and losing their change silently is
+        // the worse outcome.
+        XCTAssertEqual(sent?["expectedRevision"]?.intValue, 7)
+    }
+
+    func testTheChoiceShowsWithoutWaitingForAProjection() async {
+        // The whole bug in one assertion. Nothing else updates this: the
+        // per-session projection does not move for a settings change, so a UI
+        // that waited for one would sit there looking broken.
+        await stub.answer("settings.describe", settingsAnswer("workspace-write"))
+        let machine = session()
+        await machine.refreshAccessDefault()
+
+        _ = await machine.setPermission("read-only")
+
+        XCTAssertEqual(machine.accessDefault?.current, "read-only")
+    }
+
+    func testARefusalLeavesTheOldValueShowing() async {
+        await stub.answer("settings.describe", settingsAnswer("workspace-write"))
+        let machine = session()
+        await machine.refreshAccessDefault()
+        await stub.fail("settings.update", message: "Someone changed it first.")
+
+        let failure = await machine.setPermission("danger-full-access")
+
+        XCTAssertEqual(failure, "Someone changed it first.")
+        XCTAssertEqual(machine.accessDefault?.current, "workspace-write")
+    }
+}

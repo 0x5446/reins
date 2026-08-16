@@ -591,6 +591,14 @@ public final class MachineSession {
         }
     }
 
+    /// What new conversations on this machine start as. Nil until read.
+    public private(set) var accessDefault: PermissionChoice?
+
+    /// Read the machine's access default.
+    public func refreshAccessDefault() async {
+        accessDefault = (try? await harness.permissionDefault()) ?? accessDefault
+    }
+
     /// Change how much the agent may touch, machine-wide.
     ///
     /// Returns the failure to show inline rather than setting `problem`: this is
@@ -604,6 +612,15 @@ public final class MachineSession {
     public func setPermission(_ preset: String) async -> String? {
         do {
             try await harness.setPermission(preset)
+            // The machine accepted the write, so reflect it. Nothing else will:
+            // the per-session projection does not move for a settings change,
+            // which is exactly what made the old control look dead.
+            accessDefault = PermissionChoice(.object([
+                "currentValue": .string(preset),
+                "options": .array((accessDefault?.options ?? []).map {
+                    .object(["value": .string($0.value), "name": .string($0.name)])
+                }),
+            ])) ?? accessDefault
             return nil
         } catch {
             return (error as? LocalizedError)?.errorDescription ?? "The Mac would not change the access mode."

@@ -266,6 +266,28 @@ public struct Harness: Sendable {
         try await transport.call("workspace.archiveSession", .object(["sessionId": .string(sessionId)]))
     }
 
+    /// What new conversations on this machine will start as, and the choices.
+    ///
+    /// Read from the setting rather than from a session's `permissions`
+    /// projection: that projection reports what *that* conversation is running
+    /// under, which is fixed at its creation and so answers a different
+    /// question. This one is about conversations that do not exist yet.
+    public func permissionDefault() async throws -> PermissionChoice? {
+        let described = try await transport.call("settings.describe", .emptyObject)
+        let namespace = (described["namespaces"]?.arrayValue ?? [])
+            .first { $0["ns"]?.stringValue == "permission" }
+        guard let current = namespace?.path("value", "defaultPreset")?.stringValue else { return nil }
+        // The setting carries the value; the schema carries the choices, and
+        // reading them out of a compiled schema is not worth it. These three
+        // are the union dsh declares and it has no per-machine variation.
+        return PermissionChoice(.object([
+            "currentValue": .string(current),
+            "options": .array(["read-only", "workspace-write", "danger-full-access"].map {
+                .object(["value": .string($0), "name": .string($0)])
+            }),
+        ]))
+    }
+
     /// Change how much the agent is allowed to touch.
     ///
     /// Two calls, because the machine uses optimistic concurrency: read the

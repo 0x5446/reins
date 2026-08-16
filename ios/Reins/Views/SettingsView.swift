@@ -17,6 +17,9 @@ struct SettingsView: View {
     @State private var confirmingReset = false
     @State private var choosingDefaultModel = false
     @State private var unpairing: PairedMachine?
+    /// Shown while the machine has not confirmed, and rolled back if it refuses.
+    @State private var pendingAccess: String?
+    @State private var accessError: String?
 
     var body: some View {
         @Bindable var model = model
@@ -37,8 +40,42 @@ struct SettingsView: View {
                             }
                         }
                         .foregroundStyle(.primary)
+
+                        // Beside the default model because it is the same kind
+                        // of thing and was in the wrong place: it used to sit in
+                        // the session panel looking like a switch for *that*
+                        // conversation. A session's access mode is fixed when it
+                        // is created — measured, not assumed — so the only
+                        // truthful place for this control is next to the other
+                        // choice that only applies to conversations not started
+                        // yet.
+                        if let permissions = session.accessDefault {
+                            Picker("New conversations can", selection: Binding(
+                                get: { pendingAccess ?? permissions.current },
+                                set: { chosen in
+                                    pendingAccess = chosen
+                                    Task {
+                                        if let failure = await session.setPermission(chosen) {
+                                            pendingAccess = nil
+                                            accessError = failure
+                                        }
+                                    }
+                                }
+                            )) {
+                                ForEach(permissions.options) { option in
+                                    Text(PermissionChoice.label(for: option.value)).tag(option.value)
+                                }
+                            }
+                        }
+                        if let accessError {
+                            Text(accessError)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.warn)
+                        }
+                    } header: {
+                        Text("New conversations")
                     } footer: {
-                        Text("dsh routes a new conversation to whichever provider is configured first. Naming one here means it starts on the model you meant.")
+                        Text("dsh routes a new conversation to whichever provider is configured first, so naming one here means it starts on the model you meant. Access works the same way — it is chosen when a conversation begins and cannot be changed afterwards, so this sets it for the next one, on this Mac, for every client.")
                     }
                 }
 
@@ -128,6 +165,7 @@ struct SettingsView: View {
                     Text("Throws away this iPhone’s key, so every Mac stops recognising it and you pair again from scratch. Only useful if the key itself is the problem — to remove one Mac, tap it above.")
                 }
             }
+            .task { await model.active?.refreshAccessDefault() }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

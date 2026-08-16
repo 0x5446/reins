@@ -23,9 +23,6 @@ struct SessionInfoView: View {
     @Environment(\.dismiss) private var dismiss
     let sessionId: String
 
-    @State private var changingAccess = false
-    @State private var accessError: String?
-
     // `conversation(_:)` rather than a dictionary read: the sheet can be
     // opened on a session whose history has not been fetched, and this is
     // the accessor that starts that fetch.
@@ -142,40 +139,45 @@ struct SessionInfoView: View {
 
     // MARK: - Access
 
+    /// What this conversation is allowed to touch. **Read-only, and that is the
+    /// finding rather than a shortcut.**
+    ///
+    /// This was a three-way picker, and it did not work: tapping an option
+    /// changed nothing on screen and the person reported it as a dead control.
+    /// It was worse than dead. The only write available is
+    /// `settings.update {ns: permission, patch: {defaultPreset}}` — the clue is
+    /// in the field name — and measuring it settles what that means: after
+    /// changing the machine default to `read-only` and running another turn, an
+    /// existing session's `permissions` projection still read `workspace-write`.
+    /// **A session's access mode is fixed when the session is created.**
+    ///
+    /// So the picker was offering to change something that cannot be changed,
+    /// and the reason it looked broken is that it was honest by accident: the
+    /// checkmark follows the projection, and the projection never moved. Had it
+    /// updated locally the way the model picker used to, it would have shown a
+    /// mode this conversation was not running under — which is the worse
+    /// failure, because this particular lie is about what the agent may do to
+    /// someone's files.
+    ///
+    /// The control moved to Settings, where it is labelled as what it is: the
+    /// mode new conversations start in.
     @ViewBuilder
     private var access: some View {
         if let permissions = conversation?.permissions {
             Section {
-                ForEach(permissions.options) { option in
-                    Button {
-                        change(to: option.value)
-                    } label: {
-                        HStack(alignment: .top, spacing: Metrics.tight) {
-                            Image(systemName: option.value == permissions.current ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 16))
-                                .foregroundStyle(option.value == permissions.current ? AnyShapeStyle(Palette.accent) : AnyShapeStyle(.tertiary))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(PermissionChoice.label(for: option.value))
-                                    .font(.system(size: 15, weight: option.value == permissions.current ? .semibold : .regular))
-                                Text(PermissionChoice.detail(for: option.value))
-                                    .font(.system(size: 12.5))
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                    .disabled(changingAccess)
-                }
-                if let accessError {
-                    Text(accessError)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(PermissionChoice.label(for: permissions.current))
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(PermissionChoice.detail(for: permissions.current))
                         .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.vertical, 2)
             } header: {
                 Text("Access")
             } footer: {
-                Text("This is a setting on the Mac, not on this conversation. Changing it here changes it for everything running there.")
+                Text("Fixed when this conversation started and cannot be changed now — the Mac only lets the mode be chosen for new ones. Settings ▸ New conversations sets that. To run this work under a different mode, start a conversation.")
             }
         }
     }
@@ -196,18 +198,6 @@ struct SessionInfoView: View {
         // changing near the front of the prompt, which invalidates everything
         // after it.
         return "A low hit rate this far in usually means something near the start of the prompt keeps changing, which throws away the cache behind it."
-    }
-
-    private func change(to value: String) {
-        guard !changingAccess else { return }
-        changingAccess = true
-        accessError = nil
-        Task {
-            defer { changingAccess = false }
-            if let failure = await session.setPermission(value) {
-                accessError = failure
-            }
-        }
     }
 }
 
