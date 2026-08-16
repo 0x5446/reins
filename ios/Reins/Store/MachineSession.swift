@@ -683,9 +683,28 @@ public final class MachineSession {
         "reins.defaultModel.\(machineId)"
     }
 
-    public func createSession(cwd: String?) async -> String? {
+    /// The ways this machine can start a conversation, fetched once per run.
+    ///
+    /// Empty until asked and empty on an older dsh, and the picker treats both
+    /// the same way: no choice to offer, so no control drawn. The default the
+    /// machine would use anyway is not worth a menu of one.
+    public private(set) var presets: [AgentPreset] = []
+
+    public func loadPresets() async {
+        guard presets.isEmpty else { return }
+        presets = (try? await harness.presets()) ?? []
+    }
+
+    /// Everything mounted in the machine's dsh. Fetched fresh each time — the
+    /// list changes when the person edits their profile, and staleness here
+    /// would misreport exactly the thing someone opens this to check.
+    public func plugins() async -> [PluginEntry]? {
+        try? await harness.pluginInventory()
+    }
+
+    public func createSession(cwd: String?, preset: String? = nil) async -> String? {
         do {
-            let id = try await harness.createSession(cwd: cwd)
+            let id = try await harness.createSession(cwd: cwd, agentPreset: preset)
             if let defaultModel {
                 // Best effort. A model that has since been removed from the
                 // machine should not stop the conversation from opening; the

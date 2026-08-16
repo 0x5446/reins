@@ -27,6 +27,7 @@ struct SessionInfoView: View {
     // opened on a session whose history has not been fetched, and this is
     // the accessor that starts that fetch.
     private var conversation: Conversation? { session.conversation(sessionId) }
+    private var summary: SessionSummary? { session.sessions.first { $0.id == sessionId } }
 
     var body: some View {
         NavigationStack {
@@ -36,6 +37,7 @@ struct SessionInfoView: View {
                 spend
                 access
             }
+            .task { await session.loadPresets() }
             .navigationTitle("Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -93,6 +95,11 @@ struct SessionInfoView: View {
     private var work: some View {
         if let stats = conversation?.stats {
             Section("Work") {
+                // Which agent this conversation runs as — fixed at creation,
+                // like the access mode, so it is stated rather than offered.
+                if let preset = summary?.agentPreset {
+                    Row("Agent", session.presets.first { $0.id == preset }?.name ?? preset)
+                }
                 Row("Turns", "\(stats.turns)")
                 Row("Steps", "\(stats.steps)")
                 Row("Thinking", Format.duration(ms: stats.llmMs))

@@ -19,7 +19,8 @@ import SwiftUI
 
 struct DirectoryPicker: View {
     let session: MachineSession
-    let onPick: (String?) -> Void
+    /// The folder, and the agent preset id — nil for the machine's default.
+    let onPick: (String?, String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var listing: DirectoryListing?
@@ -38,6 +39,10 @@ struct DirectoryPicker: View {
     @State private var browsingOff = false
     /// A path typed by hand, for that case.
     @State private var typed = ""
+    /// The agent preset the conversation will start as. nil is the machine's
+    /// default, which is also what an older dsh gets — the field is simply
+    /// omitted from `session.create`.
+    @State private var preset: String?
 
     /// Folders a conversation has already been started in, most used first.
     private var recents: [String] {
@@ -81,7 +86,10 @@ struct DirectoryPicker: View {
                 }
             }
         }
-        .task { await load(nil) }
+        .task {
+            await session.loadPresets()
+            await load(nil)
+        }
     }
 
     private func browser(_ listing: DirectoryListing) -> some View {
@@ -152,6 +160,7 @@ struct DirectoryPicker: View {
         .listStyle(.insetGrouped)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Metrics.tight) {
+                presetRow
                 placementNote(listing.path)
                 Button("Start here") { pick(listing.path) }
                     .buttonStyle(PrimaryButtonStyle())
@@ -282,6 +291,7 @@ struct DirectoryPicker: View {
                     .font(.code(13))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                presetRow
                 Button("Start here") { pick(typed.trimmingCharacters(in: .whitespaces)) }
                     .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
             } header: {
@@ -357,6 +367,60 @@ struct DirectoryPicker: View {
 
     private func pick(_ path: String?) {
         dismiss()
-        onPick(path)
+        onPick(path, preset)
+    }
+
+    /// The agent the conversation starts as, when the machine offers a choice.
+    ///
+    /// One row, menu on the right, silent otherwise: a machine that reports no
+    /// presets — or only one — has nothing to choose, and dsh's own default is
+    /// the right answer for almost every conversation. The description rides
+    /// along in the menu because the names alone ("PTC 模式") assume knowledge
+    /// the person picking may not have.
+    @ViewBuilder
+    private var presetRow: some View {
+        if session.presets.count > 1 {
+            HStack(spacing: 6) {
+                Image(systemName: "person.text.rectangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("Agent")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: Metrics.tight)
+                Menu {
+                    Picker("Agent", selection: $preset) {
+                        ForEach(session.presets) { option in
+                            // The machine's default is expressed as nil so the
+                            // create call can omit the field entirely, which is
+                            // also what keeps an older dsh working.
+                            VStack(alignment: .leading) {
+                                Text(option.name)
+                                if !option.detail.isEmpty {
+                                    Text(option.detail)
+                                }
+                            }
+                            .tag(option.isDefault ? String?.none : option.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(chosenPresetName)
+                            .font(.system(size: 13, weight: .medium))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(Palette.accent)
+                }
+            }
+            .padding(.top, Metrics.tight)
+        }
+    }
+
+    private var chosenPresetName: String {
+        if let preset, let match = session.presets.first(where: { $0.id == preset }) {
+            return match.name
+        }
+        return session.presets.first(where: \.isDefault)?.name ?? "Default"
     }
 }

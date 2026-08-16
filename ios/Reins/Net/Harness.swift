@@ -203,6 +203,40 @@ public struct Harness: Sendable {
         ]))
     }
 
+    /// The agent presets this machine can start a conversation as.
+    public func presets() async throws -> [AgentPreset] {
+        let value = try await transport.call("agentPreset.list", .emptyObject)
+        return (value["presets"]?.arrayValue ?? []).compactMap { entry in
+            guard let id = entry["id"]?.stringValue else { return nil }
+            return AgentPreset(
+                id: id,
+                name: entry["name"]?.stringValue ?? id,
+                detail: entry["description"]?.stringValue ?? "",
+                isDefault: entry["isDefault"]?.boolValue ?? false
+            )
+        }
+    }
+
+    /// Every plugin mounted in the machine's dsh, running or not.
+    ///
+    /// The payload envelope differs from every other method here: this is a
+    /// cordis remote event rather than a typert method, and that transport
+    /// wants its arguments wrapped in exactly one `args` object. Measured — a
+    /// bare `{}` is answered with "Remote payload must contain exactly one
+    /// plain-object args field".
+    public func pluginInventory() async throws -> [PluginEntry] {
+        let value = try await transport.call("pluginInventory/list", .object(["args": .emptyObject]))
+        return (value["entries"]?.arrayValue ?? []).compactMap { entry in
+            guard let id = entry["entryId"]?.stringValue else { return nil }
+            return PluginEntry(
+                id: id,
+                module: entry["moduleName"]?.stringValue ?? id,
+                enabled: entry["enabled"]?.boolValue ?? false,
+                phase: entry["fiberPhase"]?.stringValue
+            )
+        }
+    }
+
     /// Start a conversation in a folder.
     public func createSession(cwd: String?, agentPreset: String? = nil) async throws -> String {
         let value = try await transport.call("session.create", .object(dropping: [
@@ -490,6 +524,26 @@ public struct Harness: Sendable {
 }
 
 /// What to do with a message the agent has not claimed yet.
+/// One way this machine can behave when a conversation starts.
+public struct AgentPreset: Identifiable, Equatable, Sendable {
+    public let id: String
+    /// Display name, in whatever language the machine speaks.
+    public let name: String
+    public let detail: String
+    /// What a conversation gets when nobody chooses.
+    public let isDefault: Bool
+}
+
+/// One plugin mounted in the machine's dsh.
+public struct PluginEntry: Identifiable, Equatable, Sendable {
+    public let id: String
+    /// Package name, the most recognisable thing about it.
+    public let module: String
+    public let enabled: Bool
+    /// Lifecycle state when enabled — `active`, `pending`, or absent.
+    public let phase: String?
+}
+
 public enum QueueAction: Equatable, Sendable {
     case edit(String)
     case remove

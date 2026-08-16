@@ -46,9 +46,9 @@ struct SessionListView: View {
         .task(id: query) { await runSearch() }
         .refreshable { await session.refreshSessions() }
         .sheet(isPresented: $picking) {
-            DirectoryPicker(session: session) { cwd in
+            DirectoryPicker(session: session) { cwd, preset in
                 Task {
-                    if let id = await session.createSession(cwd: cwd) {
+                    if let id = await session.createSession(cwd: cwd, preset: preset) {
                         path.append(id)
                     }
                 }

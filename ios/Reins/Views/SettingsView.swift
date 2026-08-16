@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var choosingDefaultModel = false
     @State private var unpairing: PairedMachine?
     @State private var showingDiagnostics = false
+    @State private var showingPlugins = false
     /// Shown while the machine has not confirmed, and rolled back if it refuses.
     @State private var pendingAccess: String?
     @State private var accessError: String?
@@ -184,6 +185,11 @@ struct SettingsView: View {
                     DiagnosticsView(session: session)
                 }
             }
+            .sheet(isPresented: $showingPlugins) {
+                if let session = model.active {
+                    PluginsView(session: session)
+                }
+            }
             .confirmationDialog("Start over as a new device?", isPresented: $confirmingReset, titleVisibility: .visible) {
                 Button("Start over", role: .destructive) {
                     // Irreversible from here, and it takes every pairing with
@@ -235,6 +241,16 @@ struct SettingsView: View {
                 LabeledContent("What it's been doing") {
                     Text(session.notes.isEmpty ? "—" : "\(session.notes.count) lines")
                         .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.primary)
+            Button {
+                showingPlugins = true
+            } label: {
+                LabeledContent("Plugins") {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
             .foregroundStyle(.primary)
