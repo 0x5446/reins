@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var confirmingReset = false
     @State private var choosingDefaultModel = false
     @State private var unpairing: PairedMachine?
+    @State private var showingDiagnostics = false
     /// Shown while the machine has not confirmed, and rolled back if it refuses.
     @State private var pendingAccess: String?
     @State private var accessError: String?
@@ -178,6 +179,11 @@ struct SettingsView: View {
                     DefaultModelPicker(session: session)
                 }
             }
+            .sheet(isPresented: $showingDiagnostics) {
+                if let session = model.active {
+                    DiagnosticsView(session: session)
+                }
+            }
             .confirmationDialog("Start over as a new device?", isPresented: $confirmingReset, titleVisibility: .visible) {
                 Button("Start over", role: .destructive) {
                     // Irreversible from here, and it takes every pairing with
@@ -223,6 +229,15 @@ struct SettingsView: View {
                 Row(label: "Folder", value: Format.path(info.cwd, home: info.cwd), mono: true)
             }
             Row(label: "Its fingerprint", value: session.machine.fingerprint, mono: true)
+            Button {
+                showingDiagnostics = true
+            } label: {
+                LabeledContent("What it's been doing") {
+                    Text(session.notes.isEmpty ? "—" : "\(session.notes.count) lines")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.primary)
             if let confirmation = session.confirmation {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Confirmation number")

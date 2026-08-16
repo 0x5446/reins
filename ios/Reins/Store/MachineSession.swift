@@ -24,6 +24,15 @@ import Observation
 /// yet, and because 25 messages already overfills a phone screen several times.
 private let historyPageSize = 25
 
+/// How many connection log lines to keep.
+///
+/// Memory only, never written to disk: the log exists so a failure can be read
+/// off the phone that had it, not so it can be studied later, and a file would
+/// turn a diagnostic aid into something the privacy page has to account for.
+/// A hundred lines is several reconnect cycles, which is as far back as any of
+/// this is useful.
+private let connectionLogLimit = 100
+
 @MainActor
 @Observable
 public final class MachineSession {
@@ -32,6 +41,8 @@ public final class MachineSession {
     public let harness: Harness
 
     public private(set) var status: TunnelStatus = .idle
+    /// What the connection has been doing, oldest first. See `ConnectionNote`.
+    public private(set) var notes: [ConnectionNote] = []
     /// Every conversation on the machine, newest first, subagents excluded.
     public private(set) var sessions: [SessionSummary] = []
     /// The machine's sidebar groups, empty when it has none or cannot say.
@@ -204,6 +215,11 @@ public final class MachineSession {
             confirmation = number.isEmpty ? nil : number
             if let host, let described = MachineDescription(host) {
                 machineInfo = described
+            }
+        case .note(let entry):
+            notes.append(entry)
+            if notes.count > connectionLogLimit {
+                notes.removeFirst(notes.count - connectionLogLimit)
             }
         }
     }

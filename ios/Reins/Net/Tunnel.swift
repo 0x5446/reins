@@ -65,6 +65,37 @@ public enum TunnelSignal: Sendable {
     case harness(reachable: Bool, detail: String?)
     /// A fresh handshake completed; `confirmation` is the six-digit number.
     case handshake(confirmation: String, host: JSONValue?)
+    /// One line about what the connection is doing, for the diagnostics screen.
+    case note(ConnectionNote)
+}
+
+/// One line in the connection log.
+///
+/// This exists because of a bug that took forty minutes to find and would have
+/// taken ten seconds to read: the app had shipped pointing at a relay hostname
+/// that had moved, and every screen it could show said "Reaching…". There was
+/// no way, from the phone, to learn which address it was dialling or what came
+/// back — and the phone is the only place the failing network exists. A Mac
+/// cannot reproduce a carrier's route to Cloudflare.
+///
+/// **Never contains a key, a token, a path, or anything from a conversation.**
+/// Host and port, a verdict, and a duration. That bound is what lets this be
+/// always-on and screenshot-safe rather than a debug mode someone has to have
+/// enabled *before* the thing they need to diagnose.
+public struct ConnectionNote: Identifiable, Sendable, Equatable {
+    public enum Level: Sendable, Equatable {
+        /// Starting something.
+        case attempt
+        /// It worked.
+        case ok
+        /// It did not.
+        case fail
+    }
+
+    public let id: Int
+    public let at: Date
+    public let level: Level
+    public let text: String
 }
 
 /// How long a single harness call may take before the app gives up on it.
@@ -76,6 +107,36 @@ private let handshakeTimeout: TimeInterval = 8
 /// Backoff ceiling. Past this the phone is probably not on a network at all, and
 /// `poke()` from the foreground observer will get there faster than any timer.
 private let maximumBackoff: TimeInterval = 30
+
+/// How long the Relay waits before joining a dial the LAN has already started.
+///
+/// Long enough that a local handshake — tens of milliseconds on the same Wi-Fi —
+/// always finishes first, so a phone at home never touches the Relay. Short
+/// enough that a phone on cellular, where the LAN attempts will only ever time
+/// out, pays this and nothing more.
+private let relayHeadStart: TimeInterval = 0.4
+
+/// How long the app will sit on a silent carrier before deciding it is dead.
+///
+/// The Bridle pings every 25 seconds whether or not anything is happening, so
+/// silence longer than that is not a quiet conversation — it is a socket nobody
+/// has been told about. That is the ordinary end of a cellular connection: the
+/// radio hands over, the old flow is never delivered again, and nothing
+/// anywhere reports an error.
+///
+/// Left alone this costs minutes. `URLSessionWebSocketTask.receive()` waits on
+/// a dead TCP connection until the stack gives up, and for the whole of that
+/// wait the app says it is connected, shows a conversation that has moved on
+/// without it, and answers every tap with a two-minute call timeout. That is
+/// the failure this file's own header promises not to have.
+///
+/// Reconnecting costs nothing to be wrong about: the handshake is fast and
+/// `resume` replays the gap by sequence number, so a false positive is a blink
+/// and a missed detection is minutes of lying.
+private let silenceLimit: TimeInterval = 40
+
+/// How often to check for that silence.
+private let livenessCheckInterval: TimeInterval = 5
 
 public actor Tunnel {
     private let bundle: PairingBundle
@@ -93,6 +154,10 @@ public actor Tunnel {
     private var counter = 0
     private var highestSeq = 0
     private var everConnected = false
+    private var noteCounter = 0
+    /// When the last frame of any kind arrived, including the Bridle's pings.
+    private var lastFrameAt = Date()
+    private var watchdog: Task<Void, Never>?
 
     private var continuation: AsyncStream<TunnelSignal>.Continuation?
     private(set) public var status: TunnelStatus = .idle {
@@ -136,6 +201,12 @@ public actor Tunnel {
         deviceName = name
     }
 
+    /// Add one line to the connection log.
+    private func note(_ level: ConnectionNote.Level, _ text: String) {
+        noteCounter += 1
+        continuation?.yield(.note(ConnectionNote(id: noteCounter, at: Date(), level: level, text: text)))
+    }
+
     /// Start connecting, and keep reconnecting until `stop()`.
     public func start() {
         guard loop == nil else { return }
@@ -153,8 +224,14 @@ public actor Tunnel {
 
     /// Retry now instead of waiting out the backoff. Called when the app comes
     /// to the foreground or the network path changes.
+    ///
+    /// Also the moment to distrust a connection that looks fine. Coming back to
+    /// the app is exactly when the socket is most likely to have died unheard —
+    /// iOS suspended the process, the radio moved on without it — so this
+    /// checks rather than waiting out the watchdog's next tick.
     public func poke() {
         sleeper?.cancel()
+        checkLiveness()
     }
 
     // MARK: - Calls
@@ -242,6 +319,7 @@ public actor Tunnel {
                 backoff = 0.5
                 try await pump()
             } catch let refusal as RefusalReason {
+                note(.fail, "Refused by the Mac")
                 status = .refused(reason: refusal)
                 teardown(reason: "refused")
                 return
@@ -249,6 +327,7 @@ public actor Tunnel {
                 teardown(reason: "\(error.localizedDescription)")
                 if Task.isCancelled { return }
                 let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                note(.fail, "\(detail) Retrying in \(elapsed(backoff))")
                 status = .waiting(detail: detail, retryIn: backoff)
                 await sleep(backoff)
                 backoff = min(backoff * 2, maximumBackoff)
@@ -259,74 +338,254 @@ public actor Tunnel {
         }
     }
 
-    /// Dial the carriers in order and complete one handshake.
+    /// Dial every way of reaching the machine at once and adopt the first that
+    /// answers.
     ///
-    /// LAN first: when the phone is on the same Wi-Fi this costs one local round
-    /// trip instead of a trip through the Relay, and the Relay never even sees
-    /// that the session happened. When the phone is elsewhere, it costs one
-    /// failed connect with a short timeout.
+    /// This used to try the LAN addresses and then the Relay, one after the
+    /// other, and that ordering was a bug wearing the clothes of an
+    /// optimisation. A LAN address is unroutable from a phone on cellular, and
+    /// an unroutable address does not fail — it times out. Two of them cost
+    /// sixteen seconds before the Relay was dialled at all, on the one network
+    /// where the Relay is the only path that can work.
     ///
-    /// A pairing token is one-time, but attempting LAN first cannot waste it: the
-    /// Bridle records this device's static key the moment it accepts the
-    /// handshake, so a later attempt from the same device is recognised without
-    /// a token at all.
+    /// So they race. The Relay starts {@link relayHeadStart} late, which is the
+    /// whole of the old preference expressed as a number: on Wi-Fi the local
+    /// round trip finishes in tens of milliseconds and wins outright, so the
+    /// Relay is not dialled at all and never learns the session happened. Off
+    /// Wi-Fi the head start is the entire cost of trying, and the LAN attempts
+    /// simply time out unheard alongside a connection that is already up.
+    ///
+    /// A pairing token is one-time, and racing cannot waste it: the Bridle
+    /// records this device's static key the moment it accepts a handshake, so
+    /// any later attempt from the same device is recognised without a token.
     private func connectOnce() async throws {
-        var lastError: Error = CarrierError(reason: "No way to reach that Mac.", closeCode: nil)
-        for candidate in candidates() {
-            if Task.isCancelled { throw CancellationError() }
-            let socket = WebSocketCarrier.open(url: candidate.url, timeout: handshakeTimeout)
-            do {
-                try await handshake(over: socket, carrier: candidate.carrier)
-                return
-            } catch let refusal as RefusalReason {
-                socket.close("refused")
-                throw refusal
-            } catch {
-                socket.close("handshake failed")
-                lastError = error
+        let plan = candidates()
+        guard let remoteStatic = bundle.staticKey else {
+            throw RefusalReason.machineError("That pairing code has no machine key.")
+        }
+        guard !plan.isEmpty else {
+            throw CarrierError(reason: "No way to reach that Mac.", closeCode: nil)
+        }
+        let request = HandshakeRequest(name: deviceName, client: clientVersion, token: pairingToken)
+        for candidate in plan { note(.attempt, "Dialling \(candidate.label)") }
+
+        var winner: Attempt?
+        var failures: [String] = []
+        var refusal: RefusalReason?
+
+        await withTaskGroup(of: Outcome.self) { group in
+            for candidate in plan {
+                group.addTask {
+                    await Tunnel.race(candidate, identity: self.identity, remoteStatic: remoteStatic, request: request)
+                }
+            }
+            for await outcome in group {
+                switch outcome {
+                case .won(let attempt):
+                    // A second winner is possible: cancellation is cooperative
+                    // and a racer already past its last checkpoint runs to
+                    // completion. Closing the loser here is what stops the
+                    // Bridle holding a socket nobody reads.
+                    if winner == nil {
+                        winner = attempt
+                        group.cancelAll()
+                    } else {
+                        attempt.socket.close("lost the race")
+                    }
+                case .failed(let label, let reason, let took):
+                    failures.append("\(label): \(reason)")
+                    note(.fail, "\(label) failed after \(elapsed(took)) — \(reason)")
+                case .refused(let reason):
+                    refusal = reason
+                    group.cancelAll()
+                case .cancelled:
+                    break
+                }
             }
         }
-        throw lastError
+
+        // A refusal outranks a win. It means the machine has an opinion about
+        // this device — unpaired, or a protocol it cannot speak — and adopting
+        // some other carrier's success would hide an answer that no amount of
+        // retrying changes.
+        if let refusal {
+            winner?.socket.close("refused")
+            throw refusal
+        }
+        guard let winner else {
+            if Task.isCancelled { throw CancellationError() }
+            throw CarrierError(reason: dialFailure(failures), closeCode: nil)
+        }
+
+        note(.ok, "Connected over \(winner.label) in \(elapsed(winner.took))")
+        adopt(winner)
     }
 
-    private func candidates() -> [(url: URL, carrier: Carrier)] {
-        var found: [(URL, Carrier)] = []
+    /// Turn what each path did wrong into one sentence a person can act on.
+    ///
+    /// Every path, not just the last one. "Could not reach that address" is a
+    /// different problem depending on whether it came from the Wi-Fi attempt or
+    /// the Relay, and the old code kept only whichever failed last.
+    private func dialFailure(_ failures: [String]) -> String {
+        guard !failures.isEmpty else { return "Could not reach that Mac." }
+        return failures.joined(separator: " · ") + "."
+    }
+
+    /// Watch for a carrier that has stopped delivering.
+    ///
+    /// Deliberately not a timeout on `receive()`: a tunnel is idle most of the
+    /// time and an idle tunnel is healthy. What distinguishes the two is the
+    /// Bridle's ping, which arrives whether or not anyone is talking, so the
+    /// question worth asking is "when did anything last arrive", not "how long
+    /// has this read been waiting".
+    private func startWatchdog() {
+        watchdog?.cancel()
+        watchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(livenessCheckInterval * 1_000_000_000))
+                if Task.isCancelled { return }
+                await self?.checkLiveness()
+            }
+        }
+    }
+
+    /// Drop a carrier that has gone quiet for longer than the Bridle's ping.
+    private func checkLiveness() {
+        guard let socket = carrier else { return }
+        let silence = Date().timeIntervalSince(lastFrameAt)
+        guard silence > silenceLimit else { return }
+        note(.fail, "Nothing heard for \(elapsed(silence)) — treating the connection as dead")
+        // Closing is the whole action. It makes the blocked `receive()` throw,
+        // which throws out of `pump`, which the reconnect loop already knows
+        // how to handle — including failing the calls that were waiting on a
+        // socket that was never going to answer.
+        socket.close("silent for \(Int(silence))s")
+    }
+
+    /// Move a finished handshake into place as the live tunnel.
+    private func adopt(_ attempt: Attempt) {
+        carrier = attempt.socket
+        channel = attempt.channel
+        lastFrameAt = Date()
+        startWatchdog()
+        pairingToken = nil
+        confirmation = Pairing.confirmationNumber(handshakeHash: attempt.channel.handshakeHash)
+        status = .online(
+            carrier: attempt.carrier,
+            machine: attempt.reply.machine ?? bundle.name,
+            harnessUp: false
+        )
+    }
+
+    /// One address worth trying.
+    private struct Candidate: Sendable {
+        let url: URL
+        let carrier: Carrier
+        /// What to call it on screen and in the log. Host and port only — never
+        /// a key, a token, or anything from a conversation.
+        let label: String
+        /// How long to wait before starting, so a preference can be expressed
+        /// without giving up the parallelism.
+        let delay: TimeInterval
+    }
+
+    /// A handshake that completed, before anyone has adopted it.
+    private struct Attempt: @unchecked Sendable {
+        let socket: WebSocketCarrier
+        let channel: SecureChannel
+        let reply: HandshakeReply
+        let carrier: Carrier
+        let label: String
+        let took: TimeInterval
+    }
+
+    private enum Outcome: @unchecked Sendable {
+        case won(Attempt)
+        case failed(label: String, reason: String, took: TimeInterval)
+        case refused(RefusalReason)
+        case cancelled
+    }
+
+    private func candidates() -> [Candidate] {
+        var found: [Candidate] = []
         for address in bundle.direct ?? [] {
-            if let url = URL(string: "\(address)/v1/tunnel") { found.append((url, .lan)) }
+            guard let url = URL(string: "\(address)/v1/tunnel") else { continue }
+            found.append(Candidate(url: url, carrier: .lan, label: "Wi-Fi \(Tunnel.place(url))", delay: 0))
         }
         if var components = URLComponents(string: bundle.relay) {
             components.scheme = components.scheme == "https" || components.scheme == "wss" ? "wss" : "ws"
             components.path = "/v1/app"
             components.queryItems = [URLQueryItem(name: "device", value: bundle.device)]
-            if let url = components.url { found.append((url, .relay)) }
+            if let url = components.url {
+                found.append(Candidate(
+                    url: url,
+                    carrier: .relay,
+                    label: "Relay \(Tunnel.place(url))",
+                    // No LAN address to lose to means nothing to wait for.
+                    delay: found.isEmpty ? 0 : relayHeadStart
+                ))
+            }
         }
         return found
     }
 
-    private func handshake(over socket: WebSocketCarrier, carrier kind: Carrier) async throws {
-        guard let remoteStatic = bundle.staticKey else {
-            throw RefusalReason.machineError("That pairing code has no machine key.")
-        }
-        let initiator = try NoiseInitiator(staticKeys: identity, remoteStatic: remoteStatic, prologue: tunnelPrologue)
-        let request = HandshakeRequest(name: deviceName, client: clientVersion, token: pairingToken)
-        try await socket.send(initiator.writeMessage(try request.encoded()))
+    /// Host and port, which is all of a URL that is safe to show and all of it
+    /// that helps: the path is a constant and the query carries the device id.
+    private nonisolated static func place(_ url: URL) -> String {
+        let host = url.host ?? "?"
+        guard let port = url.port else { return host }
+        return "\(host):\(port)"
+    }
 
-        let reply = try await withTimeout(handshakeTimeout) { try await socket.receive() }
-        let opened = try initiator.readMessage(reply)
-        let answer = try JSONDecoder().decode(HandshakeReply.self, from: opened.payload)
-        guard answer.ok else {
-            switch answer.reason {
-            case "unpaired": throw RefusalReason.unpaired
-            case "version": throw RefusalReason.version(appIsOlder: answer.weAreTheOldEnd)
-            default: throw RefusalReason.machineError(answer.reason ?? "unknown")
+    /// Run one candidate to a verdict, touching nothing shared.
+    ///
+    /// Deliberately not a method on the actor: a racer that hops onto the
+    /// actor's executor to do its waiting is not racing, it is queueing, and
+    /// the whole point here is that the attempts overlap.
+    private nonisolated static func race(
+        _ candidate: Candidate,
+        identity: StaticKeyPair,
+        remoteStatic: Data,
+        request: HandshakeRequest
+    ) async -> Outcome {
+        if candidate.delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(candidate.delay * 1_000_000_000))
+            if Task.isCancelled { return .cancelled }
+        }
+        let started = Date()
+        let socket = WebSocketCarrier.open(url: candidate.url, timeout: handshakeTimeout)
+        do {
+            let initiator = try NoiseInitiator(staticKeys: identity, remoteStatic: remoteStatic, prologue: tunnelPrologue)
+            try await socket.send(initiator.writeMessage(try request.encoded()))
+            let reply = try await withTimeout(handshakeTimeout) { try await socket.receive() }
+            let opened = try initiator.readMessage(reply)
+            let answer = try JSONDecoder().decode(HandshakeReply.self, from: opened.payload)
+            guard answer.ok else {
+                socket.close("refused")
+                switch answer.reason {
+                case "unpaired": return .refused(.unpaired)
+                case "version": return .refused(.version(appIsOlder: answer.weAreTheOldEnd))
+                default: return .refused(.machineError(answer.reason ?? "unknown"))
+                }
             }
+            if Task.isCancelled {
+                socket.close("lost the race")
+                return .cancelled
+            }
+            return .won(Attempt(
+                socket: socket,
+                channel: opened.channel,
+                reply: answer,
+                carrier: candidate.carrier,
+                label: candidate.label,
+                took: Date().timeIntervalSince(started)
+            ))
+        } catch {
+            socket.close("handshake failed")
+            if Task.isCancelled { return .cancelled }
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return .failed(label: candidate.label, reason: reason, took: Date().timeIntervalSince(started))
         }
-
-        carrier = socket
-        channel = opened.channel
-        pairingToken = nil
-        confirmation = Pairing.confirmationNumber(handshakeHash: opened.channel.handshakeHash)
-        status = .online(carrier: kind, machine: answer.machine ?? bundle.name, harnessUp: false)
     }
 
     /// Read frames until the socket dies or the task is cancelled.
@@ -334,6 +593,7 @@ public actor Tunnel {
         guard let socket = carrier, let channel else { throw CallError(code: "disconnected", message: "Not connected.") }
         while !Task.isCancelled {
             let bytes = try await socket.receive()
+            lastFrameAt = Date()
             let plaintext: Data
             do {
                 plaintext = try channel.decrypt(bytes)
@@ -394,6 +654,8 @@ public actor Tunnel {
     }
 
     private func teardown(reason: String) {
+        watchdog?.cancel()
+        watchdog = nil
         carrier?.close(reason)
         carrier = nil
         channel = nil
@@ -412,6 +674,11 @@ public actor Tunnel {
         await task.value
         sleeper = nil
     }
+}
+
+/// A duration, short enough to read at a glance in a log line.
+private func elapsed(_ seconds: TimeInterval) -> String {
+    seconds < 1 ? "\(Int((seconds * 1000).rounded()))ms" : String(format: "%.1fs", seconds)
 }
 
 /// Race an operation against a deadline.
