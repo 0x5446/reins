@@ -151,6 +151,15 @@ export interface ReadyFrame {
   dshReachable: boolean
   /** dsh `host.describe` value when reachable. */
   host?: unknown
+  /**
+   * Where this machine can be dialled directly right now, best first.
+   *
+   * The pairing bundle's copy is frozen at pairing time; this one is current.
+   * Absent from Bridles that predate it — a client must then keep whatever
+   * addresses it has. Present-but-empty means the direct listener is off,
+   * which is a reason to *drop* stored addresses, not keep them.
+   */
+  direct?: string[]
   /** Highest event sequence the Bridle has produced. */
   seq: number
 }

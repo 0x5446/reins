@@ -89,6 +89,22 @@ public final class MachineSession {
     public var problem: String?
     /// True while the session list is being fetched.
     public private(set) var listing = false
+    /// Whether `session.list` has ever completed this run, success or not.
+    ///
+    /// What separates "the list is still on its way" from "the list is empty".
+    /// Without it the moment between coming online and the first page landing
+    /// renders as a verdict — "no conversations yet" or worse — for a machine
+    /// that has sixty.
+    public private(set) var everListed = false
+    /// Whether the machine has said anything about dsh yet.
+    ///
+    /// The status arrives with the `ready` frame, milliseconds after the
+    /// handshake — but a render can land in those milliseconds, and until it
+    /// does the app has no claim to make about dsh either way.
+    public private(set) var harnessKnown = false
+    /// Called when the machine reports where it can be dialled directly now,
+    /// so the owner can persist the addresses for the next cold start.
+    public var learnedDirect: (([String]) -> Void)?
     /// True while the workspace list is being fetched.
     private var listingWorkspaces = false
     /// Set when a host frame arrived while that fetch was in flight.
@@ -210,12 +226,14 @@ public final class MachineSession {
                 }
             }
         case .harness(let reachable, let detail):
+            harnessKnown = true
             harnessDetail = reachable ? nil : (detail ?? "dsh isn’t running on that Mac.")
-        case .handshake(let number, let host):
+        case .handshake(let number, let host, let direct):
             confirmation = number.isEmpty ? nil : number
             if let host, let described = MachineDescription(host) {
                 machineInfo = described
             }
+            if let direct { learnedDirect?(direct) }
         case .note(let entry):
             notes.append(entry)
             if notes.count > connectionLogLimit {
@@ -435,7 +453,10 @@ public final class MachineSession {
     public func refreshSessions() async {
         guard !listing else { return }
         listing = true
-        defer { listing = false }
+        defer {
+            listing = false
+            everListed = true
+        }
         // Alongside the session list rather than after it. Two round trips on
         // one tunnel cost about what one does, and the alternative is a list
         // that draws flat and then rearranges itself into sections a beat

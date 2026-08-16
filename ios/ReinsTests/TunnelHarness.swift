@@ -141,9 +141,13 @@ actor FakeBridle {
     private var channels: [ObjectIdentifier: SecureChannel] = [:]
     private var head = 0
 
-    init(name: String = "a-mac", staticKeys: StaticKeyPair = .generate()) {
+    /// What the ready frame advertises as this machine's current addresses.
+    let direct: [String]
+
+    init(name: String = "a-mac", staticKeys: StaticKeyPair = .generate(), direct: [String] = []) {
         self.name = name
         self.staticKeys = staticKeys
+        self.direct = direct
     }
 
     /// Accept a handshake and then read whatever the app sends.
@@ -166,6 +170,7 @@ actor FakeBridle {
                 "bridle": .string("fake/0"),
                 "machine": .string(name),
                 "dshReachable": .bool(true),
+                "direct": .array(direct.map(JSONValue.string)),
                 "seq": .number(Double(head)),
             ])
             while true {

@@ -260,6 +260,13 @@ public struct ReadyFrame: Sendable {
     public let dshReachable: Bool
     /// The harness `host.describe` value when reachable.
     public let host: JSONValue?
+    /// Where this machine can be dialled directly right now, best first.
+    ///
+    /// `nil` from a Bridle too old to send it — which must leave the app's
+    /// stored addresses alone. `[]` is different and deliberate: it means the
+    /// direct listener is off, and keeping stale addresses around would have
+    /// the app dialling a listener the operator turned off.
+    public let direct: [String]?
     /// Highest event sequence the Bridle has produced.
     public let seq: Int
 }
@@ -308,6 +315,7 @@ public extension ServerFrame {
                 machine: value["machine"]?.stringValue ?? "a computer",
                 dshReachable: value["dshReachable"]?.boolValue ?? false,
                 host: value["host"],
+                direct: value["direct"]?.arrayValue.map { $0.compactMap(\.stringValue) },
                 seq: value["seq"]?.intValue ?? 0
             ))
         case "res":

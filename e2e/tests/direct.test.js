@@ -27,6 +27,13 @@ test('a phone on the same network works with the relay switched off', { skip, ti
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Desk Mac')
   assert.equal(ready.dshReachable, true)
+  // The frame that lets a phone follow a Mac across networks: the addresses it
+  // can dial *now*, not the ones frozen into the pairing bundle.
+  assert.ok(Array.isArray(ready.direct), 'ready must carry the current direct addresses')
+  assert.ok(
+    ready.direct.some((entry) => entry.endsWith(`:${String(stack.direct.port)}`)),
+    `ready.direct ${JSON.stringify(ready.direct)} does not name the live listener`,
+  )
 
   const describe = await phone.call('host.describe', {})
   assert.equal(describe.ok, true, JSON.stringify(describe))

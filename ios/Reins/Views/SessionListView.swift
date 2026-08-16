@@ -163,14 +163,34 @@ struct SessionListView: View {
     /// Three states used to be one. Dialling, fetching, and failing all ended
     /// up at "Can't reach this Mac", because the only question asked was
     /// `!isOnline` — and for the first second of every launch that is true for
-    /// the most ordinary reason there is. Failure is `waiting` or `refused`,
-    /// and those keep their loud screens; this covers the two that are just
-    /// work in progress.
+    /// the most ordinary reason there is. Failure keeps a loud screen; this
+    /// covers everything that is just work in progress. Two gaps closed since
+    /// the first version, both found by launching the app and watching:
+    ///
+    /// - The early retries. A first dial that fails — one flaky address is
+    ///   enough — put the app in `waiting` for half a second, and this said
+    ///   "Can't reach" over a connection that succeeds on the next attempt.
+    ///   The banner already reports each failure and offers Retry; the
+    ///   full-screen verdict now needs the backoff to have grown, which takes
+    ///   several consecutive failures. A verdict reached in 300ms is a guess
+    ///   wearing a verdict's clothes.
+    /// - The moment after connecting. Online, list not yet asked for: every
+    ///   claim below ("dsh isn't running", "no conversations") was rendered in
+    ///   that gap on facts that had not arrived.
     private var starting: Bool {
         guard query.isEmpty, session.sessions.isEmpty else { return false }
-        if case .connecting = session.status { return true }
-        if case .idle = session.status { return true }
-        return session.listing
+        switch session.status {
+        case .idle, .connecting:
+            return true
+        case .waiting(_, let retryIn):
+            // Backoff doubles from half a second; single digits mean only a
+            // failure or two so far. At the ceiling it has genuinely tried.
+            return retryIn < 8
+        case .online:
+            return session.listing || !session.everListed || !session.harnessKnown
+        case .refused:
+            return false
+        }
     }
 
     @ViewBuilder

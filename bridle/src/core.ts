@@ -37,6 +37,18 @@ export class BridleCore {
   private readonly statusListeners = new Set<(status: DshStatus) => void>()
   private readonly connected = new Set<'mux' | 'host'>()
   private status: DshStatus = { reachable: false, detail: 'not probed yet' }
+
+  /**
+   * The LAN addresses a phone can dial this machine on right now, best first.
+   *
+   * Set by whoever owns the direct listener once it is bound, and sent to
+   * every app in the `ready` frame. The pairing bundle also carries a copy,
+   * but that one is frozen at pairing time — a Mac that later joins a
+   * different network (a hotspot, an office) would otherwise be reachable
+   * only through the relay forever, because the phone keeps dialling an
+   * address from a network neither of them is on any more.
+   */
+  directAddresses: string[] = []
   private healthTimer: NodeJS.Timeout | undefined
   private watcher: FSWatcher | undefined
   private writing = false

@@ -108,6 +108,16 @@ public final class AppModel {
             pairingToken: pairingTokens.removeValue(forKey: machineId),
             notifier: notifier
         )
+        // The machine tells every connection where it can be dialled directly
+        // *now*. Persisted so the next cold start dials the Mac where it is,
+        // not where it was on pairing day — a Mac that moved to a hotspot or
+        // an office network would otherwise be relay-only forever.
+        session.learnedDirect = { [weak self] addresses in
+            guard let self, let index = self.machines.firstIndex(where: { $0.id == machineId }) else { return }
+            guard self.machines[index].direct != addresses else { return }
+            self.machines[index].direct = addresses
+            self.persist()
+        }
         active = session
         session.start()
     }

@@ -135,7 +135,9 @@ final class TunnelTests: XCTestCase {
     /// Walking in the door should take the connection off the relay, and must
     /// not interrupt it to do so.
     func testWiFiAppearingMovesTheConnectionOffTheRelay() async throws {
-        let mac = FakeBridle()
+        // The ready frame teaches the current addresses, and an empty list
+        // means "direct is off" — so a machine with a listener must say so.
+        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
         let board = TestSwitchboard()
         board.route("relay.test:0", to: .machine(mac))
         board.route("192.168.1.9:61000", to: .blackHole)
@@ -168,7 +170,7 @@ final class TunnelTests: XCTestCase {
     /// The upgrade must not fire on cellular, where it can only ever cost two
     /// timeouts with the radio awake for both.
     func testNoUpgradeIsAttemptedWithoutWiFi() async throws {
-        let mac = FakeBridle()
+        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
         let board = TestSwitchboard()
         board.route("relay.test:0", to: .machine(mac))
         board.route("192.168.1.9:61000", to: .blackHole)
@@ -193,7 +195,9 @@ final class TunnelTests: XCTestCase {
     /// A local address that connects and immediately dies must not be tried
     /// again straight away, or the app spends its life switching.
     func testAnAddressThatFlapsIsLeftAloneForAWhile() async throws {
-        let mac = FakeBridle()
+        // Advertised in ready too: were it not, the learned empty list would
+        // remove the candidate on its own and the penalty would pass untested.
+        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
         let board = TestSwitchboard()
         board.route("relay.test:0", to: .machine(mac))
         board.route("192.168.1.9:61000", to: .machine(mac))
@@ -225,6 +229,40 @@ final class TunnelTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         let after = board.dialledAddresses.filter { $0 == "192.168.1.9:61000" }.count
         XCTAssertEqual(after, before, "the penalised address was dialled again")
+        await tunnel.stop()
+    }
+
+    /// A Mac that moved networks is dialled where it is, not where it was.
+    ///
+    /// The pairing bundle freezes the direct addresses of pairing day. Before
+    /// the ready frame carried fresh ones, a Mac that later joined a hotspot
+    /// or an office network was relay-only forever — the phone kept dialling
+    /// an address from a network neither of them was on any more.
+    func testTheMachineTeachesItsCurrentAddressAndTheUpgradeUsesIt() async throws {
+        let mac = FakeBridle(direct: ["ws://172.20.10.2:61000"])
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        // Pairing-day address: a network that no longer exists.
+        board.route("192.168.1.9:61000", to: .blackHole)
+        board.route("172.20.10.2:61000", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        timings.handshake = 0.2
+        timings.relayHeadStart = 0
+        let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
+
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+
+        await tunnel.networkChangedForTesting(onWiFi: true)
+        try await waitFor("the switch onto the learned address") {
+            if case .online(.lan, _, _) = await tunnel.status { return true }
+            return false
+        }
+        // The learned list replaces the stale one rather than joining it, so
+        // the upgrade dialled only the address the machine actually has.
+        let upgradeDials = board.dialledAddresses.dropFirst(2)
+        XCTAssertEqual(Array(upgradeDials), ["172.20.10.2:61000"])
         await tunnel.stop()
     }
 

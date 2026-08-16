@@ -106,6 +106,12 @@ export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void
     if (config.noDirect !== true) {
       direct = new DirectServer(core, { version: VERSION, port: config.directPort ?? 0, log: () => {} })
       await direct.listen()
+      // Same publication the standalone makes, for the same reason: the ready
+      // frame is how a phone learns where this machine lives *now*, as opposed
+      // to where it lived when they paired.
+      core.directAddresses = [...(config.advertise ?? []), ...direct.addresses]
+    } else {
+      core.directAddresses = config.advertise ?? []
     }
 
     if (state.relayUrl.length > 0) {

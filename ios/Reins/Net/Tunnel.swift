@@ -64,7 +64,9 @@ public enum TunnelSignal: Sendable {
     /// The machine's harness went away or came back.
     case harness(reachable: Bool, detail: String?)
     /// A fresh handshake completed; `confirmation` is the six-digit number.
-    case handshake(confirmation: String, host: JSONValue?)
+    /// `direct` is where the machine says it can be dialled locally right now —
+    /// nil from a Bridle too old to say.
+    case handshake(confirmation: String, host: JSONValue?, direct: [String]?)
     /// One line about what the connection is doing, for the diagnostics screen.
     case note(ConnectionNote)
 }
@@ -199,6 +201,14 @@ public actor Tunnel {
     /// Whether the phone currently has Wi-Fi. Set by the first path update,
     /// which `NWPathMonitor` delivers as soon as it is started.
     private var onWiFi = false
+    /// The machine's current LAN addresses, as told by the last `ready` frame.
+    ///
+    /// The bundle's copy is a snapshot from pairing day; this one is from the
+    /// last time the machine actually answered. A Mac that moved to a hotspot
+    /// is dialled where it is, not where it was. `nil` until a ready frame says
+    /// — including from an old Bridle that never will, which keeps the bundle
+    /// copy in use rather than discarding addresses that may still be right.
+    private var learnedDirect: [String]?
 
     private var continuation: AsyncStream<TunnelSignal>.Continuation?
     private(set) public var status: TunnelStatus = .idle {
@@ -723,7 +733,7 @@ public actor Tunnel {
     private func candidates() -> [Candidate] {
         var found: [Candidate] = []
         let now = Date()
-        for address in bundle.direct ?? [] {
+        for address in learnedDirect ?? bundle.direct ?? [] {
             guard let url = URL(string: "\(address)/v1/tunnel") else { continue }
             let label = "Wi-Fi \(Tunnel.place(url))"
             // A penalised address is skipped by the opening dial too, not just
@@ -860,8 +870,14 @@ public actor Tunnel {
                 highestSeq = ready.seq
                 everConnected = true
             }
+            if let direct = ready.direct, direct != learnedDirect {
+                learnedDirect = direct
+                note(.ok, direct.isEmpty
+                    ? "The Mac says it has no direct address"
+                    : "The Mac is now at \(direct.compactMap { URL(string: $0).map(Tunnel.place) }.joined(separator: ", "))")
+            }
             status = .online(carrier: currentCarrier, machine: ready.machine, harnessUp: ready.dshReachable)
-            continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host))
+            continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host, direct: ready.direct))
             continuation?.yield(.harness(reachable: ready.dshReachable, detail: nil))
             try? write(ResumeFrame(since: highestSeq))
         case .response(let id, let result):
