@@ -1,5 +1,7 @@
 {
-  // The four pages `reins.novabox.ai` needs that are not the Relay.
+  // The public site. `reins.novabox.ai` is the site and nothing else — the
+  // relay lives on `relay.novabox.ai`, so a rule aimed at these pages can no
+  // longer reach it.
   //
   // Static assets, no Worker code: there is nothing here to compute, and a
   // script would be one more thing that can break between someone tapping

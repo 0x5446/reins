@@ -116,14 +116,14 @@ record itself, and the ingress lives in a file you can diff.
 
   cloudflared tunnel login
   cloudflared tunnel create reins-relay
-  cloudflared tunnel route dns reins-relay reins.novabox.ai
+  cloudflared tunnel route dns reins-relay reins-relay.novabox.ai
 
 Then put the ingress in /etc/cloudflared/config.yml —
 
   tunnel: <id printed by create>
   credentials-file: /etc/cloudflared/reins-relay.json
   ingress:
-    - hostname: reins.novabox.ai
+    - hostname: reins-relay.novabox.ai
       service: http://127.0.0.1:8787
     - service: http_status:404
 
@@ -134,5 +134,5 @@ Then put the ingress in /etc/cloudflared/config.yml —
 
 Verify from somewhere else, not from this host:
 
-  curl -fsS https://reins.novabox.ai/healthz
+  curl -fsS https://reins-relay.novabox.ai/healthz
 DONE

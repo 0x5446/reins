@@ -15,11 +15,16 @@ private final class StubAuthenticator: Authenticator, @unchecked Sendable {
     private(set) var attempts = 0
     private(set) var reasons: [String] = []
 
+    /// Run while the attempt is in flight, to stand in for what the system's
+    /// own sheet does to the scene phase.
+    var onAuthenticate: (@MainActor () -> Void)?
+
     func isAvailable() -> Bool { available }
 
     func authenticate(reason: String) async -> AuthFailure? {
         attempts += 1
         reasons.append(reason)
+        if let onAuthenticate { await MainActor.run(body: onAuthenticate) }
         return answer
     }
 }
@@ -78,6 +83,51 @@ final class AppLockTests: XCTestCase {
         let subject = lock(enabled: false)
         XCTAssertFalse(subject.isEnabled)
         XCTAssertFalse(subject.isLocked)
+    }
+
+    func testTheDefaultDelayIsAMinuteAndNotImmediately() {
+        // Regression. `integer(forKey:)` answers 0 for a key that was never
+        // set, and 0 is `.immediately` — a real case, so the `??` fallback that
+        // was supposed to give a minute never ran. Every fresh install locked
+        // on every departure, which combined with the bug below made the app
+        // impossible to get into.
+        suite.removeObject(forKey: "reins.lock.delay.v1")
+        let subject = AppLock(authenticator: stub, defaults: suite, now: clock.read)
+        XCTAssertEqual(subject.delay, .oneMinute)
+    }
+
+    // MARK: - The prompt is not a departure
+
+    func testTheAuthenticationPromptDoesNotCountAsLeaving() async {
+        // The system's Face ID and passcode sheets make the app inactive while
+        // they are up. Counting that as a departure means unlocking re-locks —
+        // and at `.immediately` that is an infinite loop whose only exit is
+        // force-quitting the app. Reported from a real device.
+        let subject = lock(delay: .immediately)
+        XCTAssertTrue(subject.isLocked)
+
+        // What the scene phase does around a prompt: inactive on the way out,
+        // active on the way back, both while the attempt is in flight.
+        stub.onAuthenticate = {
+            subject.willResignActive()
+            subject.didBecomeActive()
+        }
+        await subject.unlock()
+
+        XCTAssertFalse(subject.isLocked, "unlocking must survive its own prompt")
+        XCTAssertFalse(subject.isCovered)
+    }
+
+    func testARealDepartureStillLocksAtImmediately() async {
+        // The fix must not turn `.immediately` into "never": a departure that is
+        // not an authentication still counts.
+        let subject = lock(delay: .immediately)
+        await unlockSuccessfully(subject)
+
+        subject.willResignActive()
+        subject.didBecomeActive()
+
+        XCTAssertTrue(subject.isLocked)
     }
 
     // MARK: - The idle timeout
@@ -274,5 +324,40 @@ final class AppLockTests: XCTestCase {
         stub.answer = nil
         await subject.unlock()
         XCTAssertFalse(subject.isLocked)
+    }
+}
+
+/// Retiring a relay address without breaking every pairing made at the old one.
+final class RelayMigrationTests: XCTestCase {
+    func testEveryRetiredAddressIsRewritten() {
+        // Two of them now. The second lived about an hour, which is exactly the
+        // kind of address that gets left out of a migration list and then
+        // strands whoever paired during it.
+        for retired in retiredRelayURLs {
+            XCTAssertEqual(currentRelayURL(for: retired), defaultRelayURL, retired)
+        }
+    }
+
+    func testTheCurrentAddressIsNotItselfRetired() {
+        // A list that accidentally contains the destination is an infinite
+        // rename waiting to happen.
+        XCTAssertFalse(retiredRelayURLs.contains(defaultRelayURL))
+    }
+
+    func testAnAddressSomebodyChoseIsLeftAlone() {
+        // Somebody's own relay is theirs. Rewriting it would silently move
+        // their traffic onto ours, which is the opposite of the point.
+        XCTAssertEqual(currentRelayURL(for: "wss://relay.example.com"), "wss://relay.example.com")
+        XCTAssertEqual(currentRelayURL(for: "ws://127.0.0.1:8787"), "ws://127.0.0.1:8787")
+    }
+
+    func testAPairingMadeAtTheOldAddressReconnectsToTheNewOne() {
+        let bundle = PairingBundle(
+            relay: "wss://reins.novabox.ai", direct: [], device: "d1",
+            key: "k", token: "t", name: "Mac"
+        )
+        let machine = PairedMachine(bundle: bundle)
+        XCTAssertEqual(machine.relay, "wss://reins.novabox.ai", "what was stored is kept")
+        XCTAssertEqual(machine.reconnectBundle.relay, defaultRelayURL, "what is dialled is current")
     }
 }

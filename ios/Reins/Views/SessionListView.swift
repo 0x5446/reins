@@ -8,6 +8,7 @@ import SwiftUI
 
 struct SessionListView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppLock.self) private var lock
     let session: MachineSession
     @Binding var path: [String]
 
@@ -24,6 +25,12 @@ struct SessionListView: View {
     @State private var picking = false
     @State private var renaming: SessionSummary?
     @State private var renameText = ""
+    /// The workspace whose name is being edited, and what it is being changed
+    /// to. Held as the whole group rather than an id so the alert can say which
+    /// one it is about even as the list underneath it changes.
+    @State private var renamingGroup: SessionGroup?
+    @State private var groupName = ""
+    @State private var deletingGroup: SessionGroup?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -57,9 +64,55 @@ struct SessionListView: View {
                 renaming = nil
             }
         }
+        .alert("Rename workspace", isPresented: Binding(get: { renamingGroup != nil }, set: { if !$0 { renamingGroup = nil } })) {
+            TextField("Name", text: $groupName)
+            Button("Cancel", role: .cancel) { renamingGroup = nil }
+            Button("Save") {
+                if let target = renamingGroup {
+                    Task { await session.renameWorkspace(target.id, title: groupName) }
+                }
+                renamingGroup = nil
+            }
+        } message: {
+            // Said because it is not obvious from a phone: this is the Mac's own
+            // sidebar, and the name changes there too.
+            Text("This is the name on the Mac’s sidebar as well.")
+        }
+        .confirmationDialog(
+            "Stop grouping by \(deletingGroup?.title ?? "this folder")?",
+            isPresented: Binding(get: { deletingGroup != nil }, set: { if !$0 { deletingGroup = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove workspace", role: .destructive) {
+                guard let target = deletingGroup else { return }
+                deletingGroup = nil
+                Task {
+                    // Not undoable from here: re-registering the same folder
+                    // mints a new workspace that adopts nothing, so the grouping
+                    // is gone for good even though nothing else is.
+                    guard await lock.confirm("Remove the \(target.title) workspace on your Mac.") else { return }
+                    await session.deleteWorkspace(target.id)
+                }
+            }
+            Button("Cancel", role: .cancel) { deletingGroup = nil }
+        } message: {
+            // Checked against the machine's own contract rather than assumed.
+            // Deleting a workspace removes the grouping and nothing else: the
+            // folder, the files in it, and every conversation stay exactly as
+            // they were, and the conversations reappear under Ungrouped.
+            Text("The folder, its files, and \(held) stay exactly as they are — they just move to Ungrouped. Only the grouping goes.")
+        }
         .overlay(alignment: .top) {
             ProblemBanner(session: session)
         }
+    }
+
+    /// What the workspace about to be removed is holding, for the confirmation.
+    /// The count is the reassuring part — someone is about to tap a red button
+    /// over a section with forty conversations under it.
+    private var held: String {
+        let count = deletingGroup?.sessions.count ?? 0
+        return count == 1 ? "the conversation in it" : "all \(count) conversations in it"
     }
 
     @ViewBuilder
@@ -172,7 +225,8 @@ struct SessionListView: View {
         SessionBoard(
             sessions: session.sessions,
             workspaces: session.workspaces,
-            waitingOn: Set(session.approvals.keys).union(session.questions.keys)
+            waitingOn: Set(session.approvals.keys).union(session.questions.keys),
+            archived: session.archivedSessionIds
         )
     }
 
@@ -204,6 +258,23 @@ struct SessionListView: View {
                         session.folds.set(group.id, open: !open)
                     }
                 }
+                // Long press rather than a swipe: a section header is not a row
+                // and cannot carry swipe actions, and rename and remove are both
+                // things done once, deliberately, not while scrolling past.
+                //
+                // Attached only to real workspaces, and by branching rather than
+                // by an empty menu body — a `contextMenu` with nothing in it
+                // still opens on long press, and a blank popup reads as broken.
+                // "Ungrouped" is this app's own word for what nothing claims;
+                // there is no workspace behind it to rename or remove.
+                .modifier(WorkspaceHeaderActions(
+                    group: group,
+                    rename: {
+                        groupName = group.title
+                        renamingGroup = group
+                    },
+                    remove: { deletingGroup = group }
+                ))
             }
         }
     }
@@ -240,14 +311,72 @@ struct SessionListView: View {
             }
             .tint(Palette.accent)
         }
+        // Rename is here as well as on the swipe so this menu is never empty:
+        // the filing item below is absent for most rows, and a context menu with
+        // nothing in it still opens on long press.
+        .contextMenu {
+            Button {
+                renameText = item.summary.title ?? ""
+                renaming = item.summary
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            filing(item.summary)
+        }
+    }
+
+    /// The one thing that can be done about a conversation's grouping.
+    ///
+    /// Not a "move to…" menu, because there is nowhere to move it to. A
+    /// conversation belongs to the workspace whose folder is its own working
+    /// folder, that folder never changes, and the machine refuses to file a
+    /// conversation anywhere else. So the only case worth a menu item is the one
+    /// this app used to cause: a conversation sitting in the leftovers whose
+    /// folder does have — or could have — a workspace.
+    @ViewBuilder
+    private func filing(_ summary: SessionSummary) -> some View {
+        switch session.filing(for: summary) {
+        case .settled:
+            EmptyView()
+        case .join(let workspaceId, let title):
+            Button {
+                Task { await session.fileSession(summary.id, into: workspaceId) }
+            } label: {
+                Label("Move into \(title)", systemImage: "folder")
+            }
+        case .claim(let folder):
+            Button {
+                Task {
+                    // Two calls, and the second is the point: making the
+                    // workspace groups nothing by itself. Stopping after the
+                    // first would leave the row exactly where it was, under a
+                    // section that had just appeared empty.
+                    if let failure = await session.createWorkspace(path: folder) {
+                        session.problem = failure
+                        return
+                    }
+                    guard case .joins(let workspaceId, _) = session.placement(for: folder) else { return }
+                    await session.fileSession(summary.id, into: workspaceId)
+                }
+            } label: {
+                Label("Group by \((folder as NSString).lastPathComponent)", systemImage: "folder.badge.plus")
+            }
+        }
     }
 
     /// Search results, when there is a query, joined against the list this screen
     /// already holds — the machine answers with ids and excerpts, and the titles
     /// and timestamps live here.
     private var rows: [Row] {
+        // The same archive filter `SessionBoard` applies, because this is the
+        // path taken when there is nothing to group by — a machine with one
+        // workspace or none — and an archived conversation must not come back
+        // just because the sections did not draw.
+        let visible = session.archivedSessionIds.isEmpty
+            ? session.sessions
+            : session.sessions.filter { !session.archivedSessionIds.contains($0.id) }
         guard !query.isEmpty else {
-            return session.sessions.map { Row(summary: $0, snippet: nil) }
+            return visible.map { Row(summary: $0, snippet: nil) }
         }
         // The machine is the only search backend, deliberately. An earlier
         // version filtered titles locally as a floor when the machine could not
@@ -257,7 +386,7 @@ struct SessionListView: View {
         // local half quietly returns rows the machine would not have. Half a
         // search that disagrees with the machine is worse than no search that
         // says so.
-        let byId = Dictionary(uniqueKeysWithValues: session.sessions.map { ($0.id, $0) })
+        let byId = Dictionary(uniqueKeysWithValues: visible.map { ($0.id, $0) })
         return hits.compactMap { hit in
             guard let summary = byId[hit.id] else { return nil }
             return Row(summary: summary, snippet: hit.snippet.isEmpty ? nil : hit.snippet)
@@ -287,6 +416,34 @@ struct SessionListView: View {
             // a footnote under results and not a banner over them.
             searchUnavailable = (error as? LocalizedError)?.errorDescription
                 ?? "This Mac has full-text search turned off."
+        }
+    }
+}
+
+/// Long-press actions for a section that stands for a real workspace.
+///
+/// A modifier rather than an `if` inside the menu body, because an empty
+/// `contextMenu` is not the same as no `contextMenu`: the first still opens a
+/// blank popup over the header. A group is either the leftovers or a workspace
+/// for its whole life, so branching on it never swaps a view's identity
+/// mid-flight.
+private struct WorkspaceHeaderActions: ViewModifier {
+    let group: SessionGroup
+    let rename: () -> Void
+    let remove: () -> Void
+
+    func body(content: Content) -> some View {
+        if group.isUngrouped {
+            content
+        } else {
+            content.contextMenu {
+                Button(action: rename) {
+                    Label("Rename workspace", systemImage: "pencil")
+                }
+                Button(role: .destructive, action: remove) {
+                    Label("Remove workspace", systemImage: "folder.badge.minus")
+                }
+            }
         }
     }
 }

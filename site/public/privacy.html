@@ -117,9 +117,10 @@
 <h2>Cloudflare</h2>
 
 <p>
-  <code>reins.novabox.ai</code> is served by Cloudflare, and since August 2026
-  the relay <em>is</em> a Cloudflare Worker rather than a program on a machine
-  we rent. Cloudflare therefore both terminates TLS and runs the code, and can
+  The relay runs at <code>reins-relay.novabox.ai</code>, and since August 2026 it
+  <em>is</em> a Cloudflare Worker rather than a program on a machine we rent.
+  It has a hostname of its own, separate from this site, so that a rule aimed
+  at these pages cannot reach the thing your phone depends on. Cloudflare therefore both terminates TLS and runs the code, and can
   observe the same metadata described above — your IP address, timing, and
   volume — subject to
   <a href="https://www.cloudflare.com/privacypolicy/">its own privacy policy</a>.

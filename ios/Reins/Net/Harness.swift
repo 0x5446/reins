@@ -9,23 +9,43 @@
 
 import Foundation
 
+/// The one thing `Harness` needs from the world: a way to invoke a method and a
+/// way to answer a request the machine made.
+///
+/// A protocol rather than the concrete `Tunnel` for one reason — the write paths
+/// in `MachineSession` are mostly *failure* handling, and a rollback that has
+/// never been run is a rollback nobody has checked. Tests hand in a transport
+/// that fails on demand; the app hands in the tunnel and nothing else changes.
+public protocol HarnessTransport: Sendable {
+    @discardableResult
+    func call(_ method: String, _ payload: JSONValue) async throws -> JSONValue
+    @discardableResult
+    func respond(rpcId: String, value: JSONValue) async throws -> JSONValue
+}
+
+extension Tunnel: HarnessTransport {}
+
 public struct Harness: Sendable {
-    public let tunnel: Tunnel
+    let transport: any HarnessTransport
 
     public init(tunnel: Tunnel) {
-        self.tunnel = tunnel
+        transport = tunnel
+    }
+
+    public init(transport: any HarnessTransport) {
+        self.transport = transport
     }
 
     // MARK: - Machine
 
     /// Version, working directory, and current model of the machine.
     public func describe() async throws -> JSONValue {
-        try await tunnel.call("host.describe")
+        try await transport.call("host.describe", .emptyObject)
     }
 
     /// Browse the machine's filesystem for a folder to start a conversation in.
     public func listDirectory(path: String?) async throws -> DirectoryListing {
-        let value = try await tunnel.call("host.listDirectory", .object(dropping: ["path": path.map(JSONValue.string)]))
+        let value = try await transport.call("host.listDirectory", .object(dropping: ["path": path.map(JSONValue.string)]))
         return DirectoryListing(
             path: value["path"]?.stringValue ?? "/",
             home: value["home"]?.stringValue ?? "/",
@@ -50,26 +70,133 @@ public struct Harness: Sendable {
 
     /// Every persisted conversation, newest first.
     public func listSessions() async throws -> [SessionSummary] {
-        let value = try await tunnel.call("session.list")
+        let value = try await transport.call("session.list", .emptyObject)
         return (value["items"]?.arrayValue ?? []).compactMap(SessionSummary.init)
     }
 
-    /// The machine's sidebar groups, and which conversations are in each.
+    /// The machine's sidebar groups, which conversations are in each, and which
+    /// conversations have been filed away.
     ///
     /// A second call rather than a field on the session rows, because that is
     /// how the machine holds it: membership belongs to the workspace. The list
     /// screen joins the two.
     ///
-    /// Throws `method-not-found` on a dsh that predates workspaces, which the
-    /// caller treats as "this machine does not group" rather than as a fault.
-    public func listWorkspaces() async throws -> [Workspace] {
-        let value = try await tunnel.call("workspace.list")
-        return (value["items"]?.arrayValue ?? []).compactMap(Workspace.init)
+    /// The archive set comes back here rather than from `session.list`, which
+    /// does not filter it — the machine treats hiding an archived conversation
+    /// as the client's job, and this is the only call that says which they are.
+    ///
+    /// Throws on a dsh that predates workspaces. Not with a code worth matching
+    /// on, unfortunately: the route simply does not exist, the Bridle sees an
+    /// HTTP 404 and reports `internal`, which is indistinguishable from a real
+    /// fault. So the caller treats *any* failure as "cannot say" and only ever
+    /// concludes that a machine groups from a call that succeeded.
+    public func listWorkspaces() async throws -> (items: [Workspace], archived: Set<String>) {
+        let value = try await transport.call("workspace.list", .emptyObject)
+        let archived = (value["archivedSessionIds"]?.arrayValue ?? []).compactMap { $0.stringValue }
+        return ((value["items"]?.arrayValue ?? []).compactMap(Workspace.init), Set(archived))
+    }
+
+    // MARK: - Rearranging the sidebar
+    //
+    // Five of the machine's seven `workspace.*` methods; the two missing ones
+    // are missing on purpose.
+    //
+    // `workspace.insertBefore {workspaceId, beforeWorkspaceId?}` moves a
+    // workspace within the Mac's own sidebar order. This app sorts its sections
+    // by what was touched most recently instead — see `SessionBoard` — so
+    // calling it would write a durable change to the Mac that has no effect on
+    // any screen here.
+    //
+    // `workspace.insertSessionBefore {workspaceId, sessionId, beforeSessionId?}`
+    // reorders a conversation *inside* the workspace that already holds it. Two
+    // reasons it is not wired up: the same one — group members are sorted by
+    // activity here, so the manual order is invisible — and the more important
+    // one, that it cannot move anything between workspaces. The machine refuses
+    // a session the named workspace does not already account for
+    // (`workspace-move-invalid`), because membership is not a free choice: a
+    // workspace stands for a directory, and a conversation belongs to it only
+    // when its own working directory *is* that directory. There is no reparent
+    // to offer.
+
+    /// Adopt an existing directory as a workspace.
+    ///
+    /// Nothing is created on disk — the machine refuses a path that is not
+    /// already a directory. Asking twice for the same folder is not an error and
+    /// not a duplicate: the second call answers with the workspace that is
+    /// already there.
+    ///
+    /// The new workspace starts empty. It does not sweep up the conversations
+    /// that already run in that folder, and no call exposed to this app can;
+    /// what it does is claim the folder, so that conversations started in it
+    /// from here on are filed there.
+    ///
+    /// - Returns: the workspace, and whether this call is what made it.
+    public func createWorkspace(path: String) async throws -> (workspace: Workspace, created: Bool) {
+        let value = try await transport.call("workspace.create", .object(["path": .string(path)]))
+        guard let made = value["workspace"].flatMap(Workspace.init) else {
+            throw CallError(code: "internal", message: "The Mac made a workspace but didn’t say which.")
+        }
+        return (made, value["created"]?.boolValue ?? true)
+    }
+
+    /// Rename a workspace.
+    ///
+    /// The machine trims the title, refuses a blank one, and refuses a title
+    /// another workspace already carries (`workspace-name-conflict`). Its
+    /// message for that names the clash, so it is worth showing verbatim.
+    public func renameWorkspace(id: String, title: String) async throws -> Workspace {
+        let value = try await transport.call("workspace.rename", .object([
+            "workspaceId": .string(id),
+            "title": .string(title),
+        ]))
+        guard let renamed = value["workspace"].flatMap(Workspace.init) else {
+            throw CallError(code: "internal", message: "The Mac renamed the workspace but didn’t say what to.")
+        }
+        return renamed
+    }
+
+    /// Remove a workspace registration.
+    ///
+    /// Only the grouping. The directory, the files in it, and every one of the
+    /// conversations it held survive untouched — they stop being grouped and
+    /// nothing else. Verified against the machine's own contract, which is
+    /// explicit that deletion "never substitutes" for removing a folder or a
+    /// session, and that the sessions "consequently become ungrouped".
+    ///
+    /// Not reversible from here, though, and that is the part worth a
+    /// confirmation: re-registering the same folder mints a fresh workspace that
+    /// does not re-adopt anything, so the grouping itself is gone for good.
+    public func deleteWorkspace(id: String) async throws {
+        try await transport.call("workspace.delete", .object(["workspaceId": .string(id)]))
+    }
+
+    /// File an existing conversation under the workspace that stands for its
+    /// folder.
+    ///
+    /// There is no `workspace.attachSession` on the wire. What there is, is
+    /// `session.create` being idempotent for an id that already exists: given
+    /// both a `sessionId` and a `workspaceId` the machine resolves the session
+    /// it already has and then attaches it, which is the same code path a
+    /// conversation created *into* a workspace takes.
+    ///
+    /// Two things follow from going in this way, and both are why this is only
+    /// offered as a deliberate action rather than done quietly in the
+    /// background. A conversation that was only on disk gets resumed into
+    /// memory as a side effect — harmless, and the same thing typing into it
+    /// would do, but it is not nothing. And the machine compares the session's
+    /// recorded working directory against the workspace's path as plain strings,
+    /// so a folder reached through a symlink is refused with `session-conflict`
+    /// even though it is the same directory.
+    public func fileSession(_ sessionId: String, into workspaceId: String) async throws {
+        try await transport.call("session.create", .object([
+            "sessionId": .string(sessionId),
+            "workspaceId": .string(workspaceId),
+        ]))
     }
 
     /// One page of a session's event log. Omit `beforeSeq` for the tail.
     public func history(sessionId: String, beforeSeq: Int? = nil, maxMessages: Int? = nil) async throws -> JSONValue {
-        try await tunnel.call("session.history", .object(dropping: [
+        try await transport.call("session.history", .object(dropping: [
             "sessionId": .string(sessionId),
             "beforeSeq": beforeSeq.map { JSONValue.number(Double($0)) },
             "maxMessages": maxMessages.map { JSONValue.number(Double($0)) },
@@ -78,7 +205,7 @@ public struct Harness: Sendable {
 
     /// Start a conversation in a folder.
     public func createSession(cwd: String?, agentPreset: String? = nil) async throws -> String {
-        let value = try await tunnel.call("session.create", .object(dropping: [
+        let value = try await transport.call("session.create", .object(dropping: [
             "cwd": cwd.map(JSONValue.string),
             "agentPreset": agentPreset.map(JSONValue.string),
         ]))
@@ -106,7 +233,7 @@ public struct Harness: Sendable {
                 "name": image.name.map(JSONValue.string),
             ]))
         }
-        try await tunnel.call("session.prompt", .object([
+        try await transport.call("session.prompt", .object([
             "sessionId": .string(sessionId),
             "mode": .string(steer ? "steer" : "queue"),
             "content": .array(content),
@@ -116,14 +243,14 @@ public struct Harness: Sendable {
 
     /// Stop the running turn.
     public func cancel(sessionId: String) async throws {
-        try await tunnel.call("session.cancel", .object(["sessionId": .string(sessionId)]))
+        try await transport.call("session.cancel", .object(["sessionId": .string(sessionId)]))
     }
 
     /// Branch a conversation, keeping its history up to now.
     ///
     /// - Returns: the new session's id.
     public func fork(sessionId: String) async throws -> String {
-        let value = try await tunnel.call("session.fork", .object(["sessionId": .string(sessionId)]))
+        let value = try await transport.call("session.fork", .object(["sessionId": .string(sessionId)]))
         guard let id = value["sessionId"]?.stringValue else {
             throw CallError(code: "internal", message: "The Mac branched the conversation but didn’t say where to.")
         }
@@ -136,7 +263,7 @@ public struct Harness: Sendable {
     /// machine archiving is a sidebar operation; the session itself is intact
     /// and the Mac can bring it back.
     public func archive(sessionId: String) async throws {
-        try await tunnel.call("workspace.archiveSession", .object(["sessionId": .string(sessionId)]))
+        try await transport.call("workspace.archiveSession", .object(["sessionId": .string(sessionId)]))
     }
 
     /// Change how much the agent is allowed to touch.
@@ -150,7 +277,7 @@ public struct Harness: Sendable {
     /// This is a machine-wide setting. `permission` is one namespace and it has
     /// one value; there is no per-session variant to reach for.
     public func setPermission(_ preset: String) async throws {
-        let described = try await tunnel.call("settings.describe")
+        let described = try await transport.call("settings.describe", .emptyObject)
         let revision = (described["namespaces"]?.arrayValue ?? [])
             .first { $0["ns"]?.stringValue == "permission" }?["revision"]?.intValue
         var payload: [String: JSONValue] = [
@@ -158,12 +285,12 @@ public struct Harness: Sendable {
             "patch": .object(["defaultPreset": .string(preset)]),
         ]
         if let revision { payload["expectedRevision"] = .number(Double(revision)) }
-        try await tunnel.call("settings.update", .object(payload))
+        try await transport.call("settings.update", .object(payload))
     }
 
     /// Set a session's title by hand.
     public func rename(sessionId: String, title: String) async throws {
-        try await tunnel.call("session.rename", .object([
+        try await transport.call("session.rename", .object([
             "sessionId": .string(sessionId),
             "title": .string(title),
         ]))
@@ -175,7 +302,7 @@ public struct Harness: Sendable {
     /// timestamps stay owned by `session.list` — so the caller joins the hits
     /// against the list it already holds.
     public func search(query: String) async throws -> (hits: [SearchHit], hasMore: Bool) {
-        let value = try await tunnel.call("session.search", .object(["query": .string(query)]))
+        let value = try await transport.call("session.search", .object(["query": .string(query)]))
         let hits = (value["items"]?.arrayValue ?? []).compactMap { item -> SearchHit? in
             guard let id = item["sessionId"]?.stringValue else { return nil }
             return SearchHit(id: id, snippet: item["snippet"]?.stringValue ?? "")
@@ -192,7 +319,7 @@ public struct Harness: Sendable {
                 "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
             ])
         }
-        try await tunnel.call("session.updateQueue", .object([
+        try await transport.call("session.updateQueue", .object([
             "sessionId": .string(sessionId),
             "itemId": .string(itemId),
             "action": payload,
@@ -201,7 +328,7 @@ public struct Harness: Sendable {
 
     /// Fetch one image referenced by a message, as base64.
     public func attachment(sessionId: String, attachmentId: String) async throws -> (mediaType: String, base64: String) {
-        let value = try await tunnel.call("session.attachment", .object([
+        let value = try await transport.call("session.attachment", .object([
             "sessionId": .string(sessionId),
             "attachmentId": .string(attachmentId),
         ]))
@@ -217,7 +344,7 @@ public struct Harness: Sendable {
     /// it is not the same as "no children", and the UI has to be able to tell
     /// "nothing spawned anything" from "cannot say".
     public func subagents(parentSessionId: String) async throws -> (children: [SubagentChild], available: Bool) {
-        let value = try await tunnel.call("subagent.list", .object(["parentSessionId": .string(parentSessionId)]))
+        let value = try await transport.call("subagent.list", .object(["parentSessionId": .string(parentSessionId)]))
         let children = (value["entries"]?.arrayValue ?? []).compactMap { SubagentChild($0) }
         return (children, value["parentAvailable"]?.boolValue ?? false)
     }
@@ -227,7 +354,7 @@ public struct Harness: Sendable {
     /// Per session rather than per machine: skills can be scoped, and asking
     /// the machine in general would offer names that turn out not to work here.
     public func skills(sessionId: String) async throws -> [SkillCommand] {
-        let value = try await tunnel.call("skill.list", .object(["sessionId": .string(sessionId)]))
+        let value = try await transport.call("skill.list", .object(["sessionId": .string(sessionId)]))
         return (value["skills"]?.arrayValue ?? []).compactMap(SkillCommand.init)
     }
 
@@ -235,7 +362,7 @@ public struct Harness: Sendable {
 
     /// The models this session can switch to.
     public func models(sessionId: String) async throws -> ModelCatalog {
-        Harness.catalog(try await tunnel.call("session.models", .object(["sessionId": .string(sessionId)])))
+        Harness.catalog(try await transport.call("session.models", .object(["sessionId": .string(sessionId)])))
     }
 
     /// Every model the machine can route to, independent of any session.
@@ -243,7 +370,7 @@ public struct Harness: Sendable {
     /// `session.models` needs a session to ask about, which is the wrong shape
     /// for choosing what a session that does not exist yet should start on.
     public func machineModels() async throws -> ModelCatalog {
-        Harness.catalog(try await tunnel.call("llm.models", .emptyObject))
+        Harness.catalog(try await transport.call("llm.models", .emptyObject))
     }
 
     /// Both calls answer with the same `groups → models` shape.
@@ -304,7 +431,7 @@ public struct Harness: Sendable {
 
     /// Switch this session's model.
     public func selectModel(sessionId: String, option: ModelOption, reasoningEffort: String? = nil) async throws {
-        try await tunnel.call("session.selectModel", .object(dropping: [
+        try await transport.call("session.selectModel", .object(dropping: [
             "sessionId": .string(sessionId),
             "provider": .string(option.provider),
             "model": .string(option.model),
@@ -316,7 +443,7 @@ public struct Harness: Sendable {
 
     /// Allow or refuse one tool call.
     public func answerApproval(_ request: ApprovalRequest, allow: Bool) async throws {
-        try await tunnel.respond(rpcId: request.id, value: .object([
+        try await transport.respond(rpcId: request.id, value: .object([
             "sessionId": .string(request.sessionId),
             "approvalId": .string(request.approvalId),
             "outcome": .string(allow ? "allowed-once" : "rejected"),
@@ -333,7 +460,7 @@ public struct Harness: Sendable {
                 "custom": answer?.custom.map(JSONValue.string),
             ])
         }
-        try await tunnel.respond(rpcId: request.id, value: .object([
+        try await transport.respond(rpcId: request.id, value: .object([
             "sessionId": .string(request.sessionId),
             "answer": .object(["answers": .array(payload)]),
         ]))

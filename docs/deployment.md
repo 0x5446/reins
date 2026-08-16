@@ -1,6 +1,16 @@
 # 部署
 
-全部挂在 **`reins.novabox.ai`** 一个域名下：Relay 的 WebSocket、短码 API、还有 `curl | sh` 拉的那个安装脚本。不需要第二个静态站点——它唯一的内容会是两个说明页。
+**两个域名，故意分开的**：
+
+| 域名 | 是什么 |
+|---|---|
+| `reins-relay.novabox.ai` | Relay。app 和 Bridle 拨的就是这个，别的什么都没有 |
+| `reins.novabox.ai` | 官网四个页面 + `/install` 重定向。**不承载任何中继路径** |
+| `reins-relay-standby.novabox.ai` | Node relay 的常驻备用地址，见 §1.6 |
+
+它们共用过一天同一个域名，那是个错误：站点是公开营销页，Relay 是基础设施，而 Cloudflare 的每一项控制（缓存规则、WAF 规则、"我正被攻击"开关）都是**按主机名生效的**。一条冲着页面去的规则会连 Relay 一起命中，而 Relay 是不能挂的那一半。共用还意味着任一侧的 Worker 写出 `/*` 路由就能把另一侧整个吞掉。
+
+`e2e/tests/site.test.js` 有一条专门盯这个：站点域名上的 `/healthz`、`/v1/*` 必须是 404。
 
 `novabox.ai` 现状（2026-08-15 查）：
 
@@ -24,26 +34,28 @@
 | 源码路径 | `/opt/reins`，`root:root` 只读，服务账号 `reins`（nologin） |
 | 入口 | Cloudflare Tunnel `reins-relay`，systemd `cloudflared` |
 | 隧道配置 | `/etc/cloudflared/config.yml`（本地管理，不是面板管理） |
-| DNS | `reins.novabox.ai` CNAME → `<tunnel-id>.cfargotunnel.com`，橙云开 |
-| `/install` | Cloudflare Redirect Rule → GitHub raw，**不经过 Relay** |
-| `/` `/get` `/help` `/privacy` | Cloudflare Worker `reins-site`（静态资源，无源站） |
+| `reins-relay.novabox.ai` | Cloudflare Worker `reins-relay`（custom domain），Durable Objects |
+| `reins-relay-standby.novabox.ai` | 北京那台的 Node relay，经隧道 |
+| `reins.novabox.ai` | Worker `reins-site`（静态资源，无源站）+ `/install` 重定向规则 |
 
-一个域名，三样东西按路径分开：
+站点那个域名按路径分：
 
-| 路径 | 谁在服务 | 为什么是它 |
+| 路径 | 谁在服务 | 为什么 |
 |---|---|---|
-| `/v1/*`、`/healthz` | Relay（隧道回源） | 唯一需要有状态进程的部分 |
-| `/install` | Cloudflare 重定向规则 | 中继和安装链路必须是两个信任域 |
-| `/`、`/get`、`/help`、`/privacy` | Worker 静态资源，跑在边缘 | Relay 是北京一台小机器上的单实例；它挂了隐私页不能跟着挂，而 App Store 审核会去拉那个链接 |
-| `/_/*` | 同上 | 站点自己的静态资源。加 favicon 或图片时不用再加一条路由 |
+| `/`、`/get`、`/help`、`/privacy` | Worker 静态资源，跑在边缘 | 无源站。Relay 挂了隐私页不能跟着挂，App Store 审核会去拉那个链接 |
+| `/_/*` | 同上 | 站点自己的静态资源。加 favicon 时不用再加一条路由 |
+| `/install` | Cloudflare 重定向规则 → GitHub raw | 中继和安装链路必须是两个信任域 |
 
-**Worker 路由绝不能写成 `/*`**。那会把 `/healthz`、`/install`、`/v1/*` 全吞掉，也就是整个产品——而四个页面依然返回 200，看起来一切正常。`deployed.test.js` 里有一条专门盯这个：`/healthz` 的 content-type 必须还是 `application/json`。
+**站点 Worker 的路由绝不能写成 `/*`**。虽然 Relay 已经搬走了，`/install` 那条重定向规则仍在这个域名上，一个通配路由会把它吞掉，而四个页面依然返回 200 —— 看起来一切正常。
 
 验证方式是 `e2e/tests/deployed.test.js`，它打的是真实公网地址而不是进程内的 Relay：
 
 ```sh
-REINS_E2E_RELAY_URL=wss://reins.novabox.ai npm run build && \
+REINS_E2E_RELAY_URL=wss://reins-relay.novabox.ai npm run build && \
   node --test e2e/tests/deployed.test.js
+
+# 或者两套 Relay 一起验，确认随时可切：
+npm run conformance:deployed
 ```
 
 没有这个环境变量它会跳过。**别把它从 CI 里删掉再指望别的测试能替代它**——其余 e2e 全跑在 loopback 上，隧道拒绝 WebSocket 升级、代理把流缓冲成没用、容量上限设错，这几种它们一个都发现不了。
@@ -360,6 +372,21 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 - 分发只能靠源码；浏览器插件（Chrome Store $5 一次性、无设备限制）反而成为唯一能真正上架的客户端
 
 **这条路可以走，但它是一个不同的产品。**混着说会让所有计划都建立在一个没做的决策上。
+
+### 官网要重做（未开始）
+
+现在这四个页面是**功能正确、定位错误**的：它们在用文字解释一个视觉产品。
+
+一个手机 App 的官网，主体应该是**手机 App 本身长什么样** —— 截图、录屏、真实界面。用户扫一眼就知道这是什么、界面好不好看、值不值得装。现在首页第一屏是三段散文，用户看完还是不知道它长什么样。
+
+重做时的要求：
+
+- **视觉主体是设备图 / 录屏**，不是文字。审批卡片、轨迹、会话面板这三个是最有说服力的画面
+- 文字降级为图旁的说明，不是内容主体
+- 保留现在这版**内容上的诚实**：`/get` 说清楚还没上架、`/privacy` 说清楚 Relay 存了什么。重做的是表达方式，不是把这些话删掉换成营销词
+- 截图要能随 App 更新而更新，不能手工维护一堆很快过期的图
+
+**前置**：App 的界面要先稳定下来，现在还在每天改。等功能收敛了再做，否则拍的图第二天就过期。
 
 ### 对外页面
 

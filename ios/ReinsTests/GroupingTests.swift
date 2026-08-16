@@ -51,6 +51,166 @@ final class WorkspaceParsingTests: XCTestCase {
     func testRowWithoutIdIsRejected() {
         XCTAssertNil(Workspace(.object(["path": .string("/tmp")])))
     }
+
+    /// Workspaces stamp ISO-8601, sessions stamp epoch milliseconds. Reading
+    /// this row as a number is what the first version did, and it silently made
+    /// every workspace date 1970.
+    func testCreatedAtIsReadAsAnIsoString() {
+        let workspace = Workspace(.object([
+            "workspaceId": .string("w1"),
+            "path": .string("/Users/x/code/thing"),
+            "createdAt": .string("2026-07-25T09:41:07.123Z"),
+        ]))
+        XCTAssertEqual(workspace?.createdAt.timeIntervalSince1970 ?? 0, 1_784_972_467.123, accuracy: 0.01)
+    }
+
+    func testCreatedAtWithoutFractionalSecondsStillParses() {
+        let workspace = Workspace(.object([
+            "workspaceId": .string("w1"),
+            "createdAt": .string("2026-07-25T09:41:07Z"),
+        ]))
+        XCTAssertEqual(workspace?.createdAt.timeIntervalSince1970 ?? 0, 1_784_972_467, accuracy: 0.01)
+    }
+
+    /// Kept because guessing the spelling wrong once already cost a field.
+    func testCreatedAtStillAcceptsEpochMilliseconds() {
+        let workspace = Workspace(.object([
+            "workspaceId": .string("w1"),
+            "createdAt": .number(1_700_000_000_000),
+        ]))
+        XCTAssertEqual(workspace?.createdAt, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testUnreadableCreatedAtFallsBackRatherThanRejectingTheRow() {
+        let workspace = Workspace(.object([
+            "workspaceId": .string("w1"),
+            "createdAt": .string("last Tuesday"),
+        ]))
+        XCTAssertNotNil(workspace, "a date nobody can read is not a reason to lose the workspace")
+        XCTAssertEqual(workspace?.createdAt, Date(timeIntervalSince1970: 0))
+    }
+}
+
+// MARK: - Which workspace a folder is
+
+/// The rule the folder browser now states out loud before a conversation
+/// starts. Exact match, and the nested case is the one that matters: the machine
+/// this was written against has both `~/workspace` and
+/// `~/workspace/invoice-service` registered.
+final class WorkspacePlacementTests: XCTestCase {
+    private let registered = [
+        Workspace(id: "w1", path: "/Users/dev/code", title: "workspace", sessionIds: []),
+        Workspace(id: "w2", path: "/Users/dev/code/invoice-service", title: "Invoice service", sessionIds: []),
+    ]
+
+    func testAFolderThatIsAWorkspaceJoinsIt() {
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/Users/dev/code/invoice-service", workspaces: registered, grouping: true),
+            .joins(workspaceId: "w2", title: "Invoice service")
+        )
+    }
+
+    /// Prefix matching would name `~/workspace` for every conversation in the
+    /// nested folder, and every one of those names would be wrong.
+    func testAFolderInsideAWorkspaceIsNotThatWorkspace() {
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/Users/dev/code/something-else", workspaces: registered, grouping: true),
+            .ungrouped
+        )
+    }
+
+    func testATrailingSlashIsTheSameFolder() {
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/Users/dev/code/", workspaces: registered, grouping: true),
+            .joins(workspaceId: "w1", title: "workspace")
+        )
+    }
+
+    func testAnUnclaimedFolderSaysSo() {
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/tmp/scratch", workspaces: registered, grouping: true),
+            .ungrouped
+        )
+    }
+
+    /// The degradation. A dsh with no `workspace.list` never lets `grouping`
+    /// become true, and then the screen must claim nothing at all — not
+    /// "ungrouped", which is a claim, and which on that machine is meaningless.
+    func testAMachineThatHasNotSaidItGroupsClaimsNothing() {
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/Users/dev/code", workspaces: [], grouping: false),
+            .unknown
+        )
+        XCTAssertEqual(
+            WorkspacePlacement.resolve(path: "/Users/dev/code", workspaces: registered, grouping: false),
+            .unknown,
+            "a stale list from before the connection dropped is not permission to claim"
+        )
+    }
+
+    /// "Wherever the Mac defaults to" cannot be resolved from here.
+    func testNoFolderMeansNoAnswer() {
+        XCTAssertEqual(WorkspacePlacement.resolve(path: nil, workspaces: registered, grouping: true), .unknown)
+        XCTAssertEqual(WorkspacePlacement.resolve(path: "", workspaces: registered, grouping: true), .unknown)
+    }
+
+    func testAWorkspaceWithNoPathMatchesNothing() {
+        let odd = [Workspace(id: "w1", path: nil, title: "Nowhere", sessionIds: [])]
+        XCTAssertEqual(WorkspacePlacement.resolve(path: "/tmp", workspaces: odd, grouping: true), .ungrouped)
+    }
+}
+
+// MARK: - What can be done about a stray conversation
+
+final class SessionFilingTests: XCTestCase {
+    private let registered = [
+        Workspace(id: "w1", path: "/code/one", title: "One", sessionIds: ["held"]),
+    ]
+
+    func testAConversationTheMachineAlreadyFiledIsLeftAlone() {
+        let summary = session("held", cwd: "/code/one")
+        XCTAssertEqual(SessionFiling.resolve(summary, workspaces: registered, grouping: true), .settled)
+    }
+
+    /// The case this app spent a long time creating: started from the phone
+    /// into a folder that already had a workspace, and never filed under it.
+    func testAStrayConversationCanJoinTheWorkspaceForItsFolder() {
+        let summary = session("stray", cwd: "/code/one")
+        XCTAssertEqual(
+            SessionFiling.resolve(summary, workspaces: registered, grouping: true),
+            .join(workspaceId: "w1", title: "One")
+        )
+    }
+
+    func testAStrayConversationInAnUnclaimedFolderOffersToClaimIt() {
+        let summary = session("stray", cwd: "/code/two")
+        XCTAssertEqual(
+            SessionFiling.resolve(summary, workspaces: registered, grouping: true),
+            .claim(path: "/code/two")
+        )
+    }
+
+    /// Membership is a folder. Without one there is nothing to file it under,
+    /// and no call would accept it.
+    func testAConversationWithNoFolderOffersNothing() {
+        XCTAssertEqual(SessionFiling.resolve(session("stray"), workspaces: registered, grouping: true), .settled)
+    }
+
+    func testAMachineThatDoesNotGroupOffersNothing() {
+        let summary = session("stray", cwd: "/code/one")
+        XCTAssertEqual(SessionFiling.resolve(summary, workspaces: registered, grouping: false), .settled)
+    }
+
+    /// Filed somewhere the folder does not explain — the machine's accounting is
+    /// its own business, and offering to re-file it would be the app arguing
+    /// with a decision it cannot see the reason for.
+    func testAConversationHeldByADifferentWorkspaceIsLeftAlone() {
+        let odd = [
+            Workspace(id: "w1", path: "/code/one", title: "One", sessionIds: []),
+            Workspace(id: "w2", path: "/code/two", title: "Two", sessionIds: ["s"]),
+        ]
+        XCTAssertEqual(SessionFiling.resolve(session("s", cwd: "/code/one"), workspaces: odd, grouping: true), .settled)
+    }
 }
 
 // MARK: - Arranging
@@ -223,6 +383,48 @@ final class SessionBoardTests: XCTestCase {
     func testNoSessionsMeansNoSections() {
         let board = SessionBoard(sessions: [], workspaces: [Workspace(id: "w1", path: "/code/one", sessionIds: ["a"])])
         XCTAssertTrue(board.groups.isEmpty)
+        XCTAssertFalse(board.grouped)
+    }
+
+    // MARK: - Whatever was filed away
+
+    /// `session.list` keeps answering with archived conversations — the machine
+    /// treats hiding them as this end's job — so this filter is the only thing
+    /// standing between the archive button and a row that comes straight back.
+    func testArchivedConversationsAreNotDrawn() {
+        let board = SessionBoard(
+            sessions: [session("a", minutesAgo: 1), session("filed", minutesAgo: 2)],
+            workspaces: [Workspace(id: "w1", path: "/code/one", sessionIds: ["a", "filed"])],
+            archived: ["filed"]
+        )
+        XCTAssertEqual(board.groups.flatMap { $0.sessions.map(\.id) }, ["a"])
+    }
+
+    /// Deliberate, and the one place this could be argued the other way: the
+    /// machine's rule is that an archived conversation leaves every grouping
+    /// surface, and lifting one back out because a tool is waiting would put a
+    /// row on screen that somebody just made go away.
+    func testArchivingBeatsWaiting() {
+        let board = SessionBoard(
+            sessions: [session("a", minutesAgo: 1), session("filed", minutesAgo: 2)],
+            workspaces: [],
+            waitingOn: ["filed"],
+            archived: ["filed"]
+        )
+        XCTAssertTrue(board.waiting.isEmpty)
+        XCTAssertEqual(board.groups.flatMap { $0.sessions.map(\.id) }, ["a"])
+    }
+
+    func testASectionEmptiedByArchivingDisappears() {
+        let board = SessionBoard(
+            sessions: [session("only", minutesAgo: 1), session("b", minutesAgo: 2)],
+            workspaces: [
+                Workspace(id: "w1", path: "/code/one", sessionIds: ["only"]),
+                Workspace(id: "w2", path: "/code/two", sessionIds: ["b"]),
+            ],
+            archived: ["only"]
+        )
+        XCTAssertEqual(board.groups.map(\.id), ["w2"])
         XCTAssertFalse(board.grouped)
     }
 }

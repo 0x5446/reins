@@ -74,17 +74,29 @@
   // `/install` (an edge Redirect Rule) and the four static pages, and every one
   // of them would start 404ing while `/healthz` still looked healthy.
   //
-  // Live since 2026-08-16. A Worker route is evaluated at the edge before the
-  // origin is contacted, so these take the two relay paths away from the
-  // Cloudflare Tunnel without touching DNS — the tunnel and the Node relay on
-  // the Beijing box stay up and stay unreferenced.
+  // A hostname of its own, not a path on the site's.
   //
-  // **This is the switch.** Deleting these two lines and redeploying hands the
-  // paths back to the tunnel; nothing on any phone or Mac changes, because the
-  // hostname in every pairing bundle is the same either way. See
-  // `docs/deployment.md` §1.6.
+  // They shared `reins.novabox.ai` for a day and that was a mistake worth
+  // naming: the site is public marketing and the relay is infrastructure, and
+  // every zone-level control is applied per hostname. One cache rule, one WAF
+  // rule, one "I'm under attack" toggle aimed at the pages would have taken the
+  // relay with it — and the relay is the half that cannot go down. Sharing also
+  // meant a `/*` route on either Worker could swallow the other whole.
+  //
+  // A custom domain rather than a route, because the Worker *is* this hostname
+  // — there is no origin behind it and nothing else answers on it. Wrangler
+  // provisions the DNS record and the certificate, which a plain route does
+  // not: a route on a name with no record resolves nowhere and fails in a way
+  // that looks like the Worker is broken.
+  //
+  // `reins-relay.` and not `relay.reins.` — which would read better — because
+  // Cloudflare's free Universal SSL covers the apex and *one* level of
+  // subdomain only. A Worker custom domain would get its own certificate at
+  // any depth, but the standby address behind the tunnel relies on the
+  // wildcard, and having the two live at different depths to save a hyphen is
+  // not worth the Advanced Certificate Manager subscription it would take to
+  // make them match.
   "routes": [
-    { "pattern": "reins.novabox.ai/healthz", "zone_name": "novabox.ai" },
-    { "pattern": "reins.novabox.ai/v1/*", "zone_name": "novabox.ai" }
+    { "pattern": "reins-relay.novabox.ai", "custom_domain": true }
   ]
 }

@@ -183,6 +183,8 @@ struct Composer: View {
 struct QueueStrip: View {
     let queue: [QueuedMessage]
     let onRemove: (QueuedMessage) -> Void
+    /// Cut this one into the turn already running.
+    var onPromote: ((QueuedMessage) -> Void)?
 
     var body: some View {
         VStack(spacing: 4) {
@@ -196,6 +198,21 @@ struct QueueStrip: View {
                         .lineLimit(1)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
+                    if let onPromote, item.placement != "steering" {
+                        // dsh's own client offers this and the app did not: a
+                        // queued message waits for the turn to finish, and
+                        // sometimes what you have just typed is the reason the
+                        // turn should stop. Sending is queueing now, so this is
+                        // the only way to say the other thing.
+                        Button {
+                            onPromote(item)
+                        } label: {
+                            Image(systemName: "arrow.up.circle")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Palette.accent)
+                        }
+                        .accessibilityLabel("Send this now")
+                    }
                     Button {
                         onRemove(item)
                     } label: {

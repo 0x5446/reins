@@ -9,7 +9,34 @@
 import Foundation
 
 /// Where the app looks when the person typed a code instead of scanning.
-public let defaultRelayURL = "wss://reins.novabox.ai"
+public let defaultRelayURL = "wss://reins-relay.novabox.ai"
+
+/// Addresses this project used to ship as the default, and no longer serves.
+///
+/// The relay moved off `reins.novabox.ai` so the public site and the
+/// infrastructure stop sharing a hostname: a cache rule or a WAF rule aimed at
+/// the marketing pages would otherwise hit the relay too, and the relay is the
+/// half that must not go down.
+///
+/// A paired machine carries the address it was paired at, so without this
+/// every existing pairing would quietly stop connecting to a host nobody chose
+/// and nobody could see. Rewritten on read. **Only these exact strings** — an
+/// address someone set themselves, or their own self-hosted relay, is theirs.
+public let retiredRelayURLs: Set<String> = [
+    "wss://reins.novabox.ai",
+    // Lived for about an hour. `relay.` sat at the organisation level for
+    // one product's infrastructure; `reins-relay.` keeps the namespace and
+    // still fits inside the free wildcard certificate, which
+    // `relay.reins.novabox.ai` would not.
+    "wss://relay.novabox.ai",
+]
+
+/// The address to actually dial for a stored one.
+/// - Parameter stored: whatever the pairing bundle carries.
+/// - Returns: the current address, or `stored` unchanged.
+public func currentRelayURL(for stored: String) -> String {
+    retiredRelayURLs.contains(stored) ? defaultRelayURL : stored
+}
 
 public struct RelayDirectory: Sendable {
     public let base: String

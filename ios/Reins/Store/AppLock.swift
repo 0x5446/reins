@@ -187,7 +187,13 @@ public final class AppLock {
         isLocked = on
         isCovered = on
         isEnabled = on
-        delay = LockDelay(rawValue: defaults.integer(forKey: Keys.delay)) ?? .oneMinute
+        // `integer(forKey:)` answers 0 for a key that was never set, and 0 is
+        // `.immediately` — a real case, not a sentinel. So the `?? .oneMinute`
+        // that used to be here never once ran, and every fresh install locked
+        // on every departure instead of after a minute. Check for the key.
+        delay = defaults.object(forKey: Keys.delay) == nil
+            ? .oneMinute
+            : LockDelay(rawValue: defaults.integer(forKey: Keys.delay)) ?? .oneMinute
     }
 
     // MARK: - Lifecycle
@@ -196,14 +202,23 @@ public final class AppLock {
     /// control-centre pull, which is also when the switcher takes its picture.
     public func willResignActive() {
         isCovered = true
-        // Only the first departure counts. `.inactive` then `.background` fires
-        // twice, and restarting the clock on the second would hand back the
-        // seconds already spent away.
+        // Authenticating is not leaving. The system's Face ID and passcode
+        // sheets make the app inactive while they are up, so counting that as a
+        // departure means the act of unlocking re-locks — and at
+        // `.immediately`, which was silently the default, that is an infinite
+        // loop the only escape from which is force-quitting.
+        guard !authenticating else { return }
+        // Only the first real departure counts. `.inactive` then `.background`
+        // fires twice, and restarting the clock on the second would hand back
+        // the seconds already spent away.
         if leftAt == nil { leftAt = now() }
     }
 
     /// The app is frontmost again.
     public func didBecomeActive() {
+        // Coming back from the system's own prompt, mid-attempt. Leave every
+        // piece of state alone: `unlock()` is still running and about to decide.
+        guard !authenticating else { return }
         defer { leftAt = nil }
         guard isEnabled else {
             isCovered = false

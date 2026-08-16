@@ -260,11 +260,17 @@ struct ConversationView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if !conversation.queue.isEmpty {
-                QueueStrip(queue: conversation.queue) { item in
-                    Task {
-                        try? await session.harness.updateQueue(sessionId: sessionId, itemId: item.id, action: .remove)
+                QueueStrip(
+                    queue: conversation.queue,
+                    onRemove: { item in
+                        Task {
+                            try? await session.harness.updateQueue(sessionId: sessionId, itemId: item.id, action: .remove)
+                        }
+                    },
+                    onPromote: { item in
+                        Task { await session.promote(sessionId: sessionId, item: item) }
                     }
-                }
+                )
             }
             Composer(
                 running: conversation.running,

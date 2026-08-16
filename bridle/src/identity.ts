@@ -66,7 +66,23 @@ export interface BridleState {
 }
 
 /** Default public Relay. Overridable per install; the Relay never sees plaintext either way. */
-export const DEFAULT_RELAY_URL = 'wss://reins.novabox.ai'
+export const DEFAULT_RELAY_URL = 'wss://reins-relay.novabox.ai'
+
+/**
+ * Addresses this project used to ship as the default, and no longer serves.
+ *
+ * The relay moved off `reins.novabox.ai` so that the public site and the
+ * infrastructure stop sharing a hostname — one cache rule, one WAF rule, or one
+ * "under attack" toggle aimed at the marketing pages would otherwise take the
+ * relay with it, and the relay is the half that must not go down.
+ *
+ * Migrated on load rather than left to break, because the address lives in a
+ * file written months ago and nobody would connect a silent connection failure
+ * to a hostname they never chose. **Only these exact strings are rewritten** —
+ * an address someone set themselves, or pointed at their own relay, is theirs
+ * and is left alone.
+ */
+const RETIRED_RELAY_URLS: readonly string[] = ['wss://reins.novabox.ai', 'wss://relay.novabox.ai']
 
 /** Default dsh loopback address, matching the web profile's own default port. */
 export const DEFAULT_DSH_URL = 'http://127.0.0.1:3080'
@@ -113,6 +129,10 @@ export function loadState(): BridleState {
     const parsed = JSON.parse(raw) as BridleState
     if (parsed.version > STATE_VERSION) {
       throw new Error(`${path} was written by a newer Bridle (format ${String(parsed.version)})`)
+    }
+    if (RETIRED_RELAY_URLS.includes(parsed.relayUrl)) {
+      parsed.relayUrl = DEFAULT_RELAY_URL
+      saveState(parsed)
     }
     return applyEnvironment(parsed)
   }

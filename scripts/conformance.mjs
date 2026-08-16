@@ -30,15 +30,15 @@ const deployed = process.argv.includes('--deployed')
 /** Where each implementation answers. */
 const targets = deployed
   ? [
-      // The public hostname, served by whichever implementation the Worker
-      // routes currently point at.
-      { name: 'live · reins.novabox.ai', url: 'wss://reins.novabox.ai' },
+      // The address every app and Bridle dials, served by whichever
+      // implementation is currently deployed to it.
+      { name: 'live · reins-relay.novabox.ai', url: 'wss://reins-relay.novabox.ai' },
       // The Node relay on its own name. It needs one: the Worker routes take
       // /healthz and /v1/* at the edge, so from the moment they went live the
       // box became unreachable and therefore untestable. A fallback nobody can
       // exercise is not a fallback, which is the whole reason this address
       // exists — see docs/deployment.md §1.6.
-      { name: 'standby · relay-standby.novabox.ai', url: 'wss://relay-standby.novabox.ai' },
+      { name: 'standby · reins-relay-standby.novabox.ai', url: 'wss://reins-relay-standby.novabox.ai' },
     ]
   : [
       { name: 'the Node relay', url: null, spawn: nodeRelay },

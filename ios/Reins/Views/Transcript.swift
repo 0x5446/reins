@@ -33,6 +33,12 @@ struct UserBubble: View {
         if turn.synthetic {
             synthetic
         } else {
+            // `maxWidth: .infinity` is load-bearing, not decoration. The parent
+            // is a `LazyVStack(alignment: .leading)`, which lays a child out at
+            // its *ideal* width — and the ideal width of [Spacer, Text] is the
+            // whole unwrapped line. Without this the bubble runs off the right
+            // edge of the screen and the end of the message is simply gone,
+            // which is what happened to every message longer than one line.
             HStack {
                 Spacer(minLength: 44)
                 VStack(alignment: .trailing, spacing: 6) {
@@ -55,6 +61,7 @@ struct UserBubble: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
         }
     }
 

@@ -41,6 +41,25 @@ public final class MachineSession {
     /// a machine that has never made a workspace and on one whose dsh is too
     /// old to have the call.
     public private(set) var workspaces: [Workspace] = []
+    /// Whether this machine has *ever* answered `workspace.list`.
+    ///
+    /// The distinction `workspaces.isEmpty` cannot make: a machine with no
+    /// groups yet and a machine that has never heard of them look identical in
+    /// the list, but only the first one can be offered a "make this folder a
+    /// workspace" button that will work.
+    ///
+    /// Only a success sets it, and nothing clears it. A failure could be an old
+    /// dsh answering 404, or the tunnel dropping mid-call, and the two arrive
+    /// indistinguishable — so the app never concludes "this machine cannot
+    /// group" from a failure, it simply keeps not knowing.
+    public private(set) var canGroup = false
+    /// Conversations the machine has filed away.
+    ///
+    /// Kept because `session.list` does not filter them: on this machine
+    /// archiving is a sidebar act, the log stays exactly where it was, and
+    /// hiding the row is the client's job. Without this the archive button
+    /// worked for about a second and then the conversation came back.
+    public private(set) var archivedSessionIds: Set<String> = []
     /// Which of those groups are folded shut, remembered between launches.
     public let folds: GroupFolds
     /// What the machine says about itself.
@@ -79,7 +98,19 @@ public final class MachineSession {
     private let notifier: Notifier
     private let defaults: UserDefaults
 
-    public init(machine: PairedMachine, identity: StaticKeyPair, deviceName: String, clientVersion: String, pairingToken: String?, notifier: Notifier, defaults: UserDefaults = .standard) {
+    /// - Parameter transport: what the harness calls go down. Defaults to this
+    ///   machine's own tunnel; tests pass a stub so the write paths — which are
+    ///   nearly all rollback — can be made to fail on demand.
+    public init(
+        machine: PairedMachine,
+        identity: StaticKeyPair,
+        deviceName: String,
+        clientVersion: String,
+        pairingToken: String?,
+        notifier: Notifier,
+        defaults: UserDefaults = .standard,
+        transport: (any HarnessTransport)? = nil
+    ) {
         self.machine = machine
         self.notifier = notifier
         self.defaults = defaults
@@ -94,7 +125,7 @@ public final class MachineSession {
             clientVersion: clientVersion,
             pairingToken: pairingToken
         )
-        harness = Harness(tunnel: tunnel)
+        harness = Harness(transport: transport ?? tunnel)
     }
 
     // MARK: - Lifecycle
@@ -278,6 +309,12 @@ public final class MachineSession {
             // at the keyboard; this app sorts its sections by what was touched
             // most recently instead, so there is nothing here to apply.
             break
+        case "host/archived-sessions-changed":
+            // The whole set, not a delta, so it can be taken as read — and both
+            // directions cost nothing, because `sessions` holds everything the
+            // machine reported and the archive is applied when the list is
+            // arranged. Unarchiving at the keyboard puts the row straight back.
+            archivedSessionIds = Set((payload["archivedSessionIds"]?.arrayValue ?? []).compactMap { $0.stringValue })
         case "stream/error":
             problem = payload.path("error", "message")?.stringValue
         default:
@@ -368,6 +405,16 @@ public final class MachineSession {
         conversations[sessionId]
     }
 
+    /// Which workspace a conversation started in this folder would join.
+    public func placement(for folder: String?) -> WorkspacePlacement {
+        WorkspacePlacement.resolve(path: folder, workspaces: workspaces, grouping: canGroup)
+    }
+
+    /// What can be done about a conversation no workspace holds.
+    public func filing(for summary: SessionSummary) -> SessionFiling {
+        SessionFiling.resolve(summary, workspaces: workspaces, grouping: canGroup)
+    }
+
     /// Fetch the session list.
     public func refreshSessions() async {
         guard !listing else { return }
@@ -420,8 +467,11 @@ public final class MachineSession {
         defer { listingWorkspaces = false }
         repeat {
             workspacesStale = false
-            guard let items = try? await harness.listWorkspaces() else { return }
-            workspaces = items
+            guard let answer = try? await harness.listWorkspaces() else { return }
+            workspaces = answer.items
+            archivedSessionIds = answer.archived
+            // Only ever set by a call that came back. See `canGroup`.
+            canGroup = true
         } while workspacesStale
     }
 
@@ -466,16 +516,49 @@ public final class MachineSession {
     // MARK: - Writes
 
     /// Send a message, showing it immediately.
-    public func send(sessionId: String, text: String, images: [PromptImage] = []) async {
+    /// Send a message.
+    ///
+    /// - Parameter steer: interrupt the running turn instead of waiting for it.
+    ///   Defaults to queueing, which is what dsh's own client does and the safer
+    ///   of the two: steering cuts into work already in progress, and a person
+    ///   typing a follow-up while the agent is mid-thought usually means "next",
+    ///   not "stop what you are doing". `promote` is how they say the other one.
+    ///
+    ///   Queueing on an *idle* session is not a stall — dsh claims it and opens
+    ///   a turn straight away, which was worth checking rather than assuming.
+    public func send(sessionId: String, text: String, images: [PromptImage] = [], steer: Bool = false) async {
         let conversation = conversation(sessionId)
         let pendingId = "pending-\(UUID().uuidString)"
-        let steer = conversation.running
         conversation.showPending(text: text, id: pendingId)
         do {
             try await harness.prompt(sessionId: sessionId, text: text, images: images, steer: steer)
         } catch {
             conversation.dropPending(id: pendingId)
             problem = (error as? LocalizedError)?.errorDescription ?? "That message didn’t send."
+        }
+    }
+
+    /// Cut a queued message into the running turn.
+    ///
+    /// dsh has no "promote" on `session.updateQueue` — it edits and removes —
+    /// so this is a remove followed by a steered resend. The order matters: if
+    /// the remove fails the message is still queued and nothing was lost, while
+    /// the reverse would risk the same text arriving twice.
+    public func promote(sessionId: String, item: QueuedMessage) async {
+        do {
+            try await harness.updateQueue(sessionId: sessionId, itemId: item.id, action: .remove)
+        } catch {
+            problem = (error as? LocalizedError)?.errorDescription ?? "That message could not be moved up."
+            return
+        }
+        do {
+            try await harness.prompt(sessionId: sessionId, text: item.text, steer: true)
+        } catch {
+            // Removed and not resent: say so, because the message is now gone
+            // from a queue the person was watching and silence would read as
+            // "it went through".
+            problem = (error as? LocalizedError)?.errorDescription
+                ?? "That message left the queue but could not be sent. Send it again."
         }
     }
 
@@ -542,10 +625,41 @@ public final class MachineSession {
             if let summary, !sessions.contains(where: { $0.id == id }) {
                 sessions.insert(summary, at: 0)
             }
+            await joinWorkspace(id, folder: cwd)
             return id
         } catch {
             problem = (error as? LocalizedError)?.errorDescription ?? "Could not start a conversation."
             return nil
+        }
+    }
+
+    /// File a just-created conversation under the workspace for its folder.
+    ///
+    /// A second call rather than creating it with `workspaceId` in the first
+    /// place, which the machine also supports. The reason is what happens on a
+    /// machine that is *nearly* new enough: a dsh with `workspace.list` but an
+    /// older `session.create` would drop the unknown `workspaceId`, fall back to
+    /// its own default directory, and start the conversation somewhere else
+    /// entirely. Sending the folder is the thing that must not be got wrong;
+    /// the grouping is a convenience and can be attempted afterwards, where
+    /// failing means an ungrouped conversation rather than one in the wrong
+    /// place.
+    private func joinWorkspace(_ sessionId: String, folder: String?) async {
+        guard case .joins(let workspaceId, let title) = WorkspacePlacement.resolve(
+            path: folder,
+            workspaces: workspaces,
+            grouping: canGroup
+        ) else { return }
+        do {
+            try await harness.fileSession(sessionId, into: workspaceId)
+            await refreshWorkspaces()
+        } catch {
+            // Said out loud, quietly. The conversation exists and is open in
+            // the right folder, so this is not a failure to start anything —
+            // but the picker had just promised which section it would appear
+            // under, and letting it turn up somewhere else without a word is
+            // the app being wrong on purpose.
+            problem = "Started, but it didn’t join \(title). It’s under Ungrouped."
         }
     }
 
@@ -567,17 +681,139 @@ public final class MachineSession {
 
     /// Take a conversation out of the list.
     ///
-    /// Removed locally before the machine confirms, because the list is the
+    /// Archived locally before the machine confirms, because the list is the
     /// screen the person is looking at and a row that lingers for a round trip
-    /// reads as a failed tap. `refreshSessions` puts it back if the Mac refused.
+    /// reads as a failed tap. A refusal puts it back.
+    ///
+    /// Marked rather than removed. `session.list` keeps answering with archived
+    /// conversations — the machine treats hiding them as the client's job — so
+    /// dropping the row here would only have held until the next refresh, which
+    /// is exactly what used to happen. The set is what the list is filtered by,
+    /// and it is also why unarchiving at the keyboard needs no refetch.
     public func archive(sessionId: String) async {
-        let held = sessions
-        sessions.removeAll { $0.id == sessionId }
+        let held = archivedSessionIds
+        archivedSessionIds.insert(sessionId)
         do {
             try await harness.archive(sessionId: sessionId)
         } catch {
-            sessions = held
+            archivedSessionIds = held
             problem = (error as? LocalizedError)?.errorDescription ?? "Could not archive the conversation."
+        }
+    }
+
+    // MARK: - Workspaces
+
+    /// Claim a folder as a workspace.
+    ///
+    /// Nothing is applied before the machine answers, unlike the rest of the
+    /// writes here. There is nothing honest to apply: only the machine can say
+    /// what id the workspace has, whether it already existed, and — the part
+    /// that would make an optimistic row a lie — that it starts *empty*.
+    /// Claiming a folder does not gather up the conversations already running
+    /// in it; it decides where the next one goes.
+    ///
+    /// The failure comes back rather than going to `problem`, following
+    /// `setPermission`: this is done from inside the folder sheet, and the
+    /// banner lives on the screen behind it, so a message sent there would be
+    /// delivered somewhere nobody can see.
+    ///
+    /// - Returns: nil on success, otherwise what to tell the person.
+    @discardableResult
+    public func createWorkspace(path: String) async -> String? {
+        do {
+            let made = try await harness.createWorkspace(path: path)
+            canGroup = true
+            if let index = workspaces.firstIndex(where: { $0.id == made.workspace.id }) {
+                workspaces[index] = made.workspace
+            } else {
+                // The machine prepends, and matching that keeps the two in step
+                // until the next read — which is only cosmetic here, since the
+                // sections are ordered by activity rather than by this list.
+                workspaces.insert(made.workspace, at: 0)
+            }
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription
+                ?? "The Mac wouldn’t make that folder a workspace."
+        }
+    }
+
+    /// Give a workspace a different name.
+    ///
+    /// Applied locally first: this is a header on the screen being looked at,
+    /// and the round trip is long enough to read as a tap that missed. A refusal
+    /// — a blank name, or one another workspace already has — puts the old name
+    /// back and shows what the machine said, which names the clash.
+    @discardableResult
+    public func renameWorkspace(_ workspaceId: String, title: String) async -> Bool {
+        let wanted = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Checked here as well as on the machine, so the empty case costs
+        // nothing and says something better than a schema message would.
+        guard !wanted.isEmpty else {
+            problem = "A workspace needs a name."
+            return false
+        }
+        let held = workspaces
+        if let index = workspaces.firstIndex(where: { $0.id == workspaceId }) {
+            workspaces[index].title = wanted
+        }
+        do {
+            let renamed = try await harness.renameWorkspace(id: workspaceId, title: wanted)
+            if let index = workspaces.firstIndex(where: { $0.id == workspaceId }) {
+                workspaces[index] = renamed
+            }
+            return true
+        } catch {
+            workspaces = held
+            problem = (error as? LocalizedError)?.errorDescription ?? "Could not rename that workspace."
+            return false
+        }
+    }
+
+    /// Stop grouping by a folder.
+    ///
+    /// The section goes immediately and its conversations fall into the
+    /// leftovers, which is exactly what the machine does — see
+    /// `Harness.deleteWorkspace` for what survives, which is everything except
+    /// the grouping. A refusal puts the section back where it was.
+    @discardableResult
+    public func deleteWorkspace(_ workspaceId: String) async -> Bool {
+        let held = workspaces
+        workspaces.removeAll { $0.id == workspaceId }
+        do {
+            try await harness.deleteWorkspace(id: workspaceId)
+            return true
+        } catch {
+            workspaces = held
+            problem = (error as? LocalizedError)?.errorDescription ?? "Could not remove that workspace."
+            return false
+        }
+    }
+
+    /// File an existing conversation under the workspace for its folder.
+    ///
+    /// Only ever *its* folder — see `Harness.fileSession`. There is no move
+    /// between workspaces to offer, so this is the one direction that exists:
+    /// a conversation the machine never filed, joining the group it already
+    /// belongs in by working directory.
+    @discardableResult
+    public func fileSession(_ sessionId: String, into workspaceId: String) async -> Bool {
+        let held = workspaces
+        if let index = workspaces.firstIndex(where: { $0.id == workspaceId }),
+           !workspaces[index].sessionIds.contains(sessionId) {
+            // Prepended to match the machine, whose attach puts new members
+            // first. The order is not drawn anywhere — the sections sort by
+            // activity — so this only has to be somewhere the join will find it.
+            workspaces[index].sessionIds.insert(sessionId, at: 0)
+        }
+        do {
+            try await harness.fileSession(sessionId, into: workspaceId)
+            return true
+        } catch {
+            workspaces = held
+            problem = (error as? LocalizedError)?.errorDescription
+                ?? "The Mac wouldn’t file that conversation there."
+            return false
         }
     }
 

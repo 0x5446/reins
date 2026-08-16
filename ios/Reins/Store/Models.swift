@@ -34,8 +34,22 @@ public struct PairedMachine: Codable, Identifiable, Equatable, Sendable {
 
     /// A bundle for reconnecting. No token: the pairing already happened, and
     /// this device is recognised by its key from here on.
+    ///
+    /// The relay address is resolved through `currentRelayURL` rather than used
+    /// as stored. A pairing carries the address it was made at, and one of
+    /// those addresses has since been retired — without this, every machine
+    /// paired before the move would go on dialling a host that no longer
+    /// answers, and the only symptom would be a connection that never
+    /// completes.
     public var reconnectBundle: PairingBundle {
-        PairingBundle(relay: relay, direct: direct, device: id, key: key, token: "", name: name)
+        PairingBundle(
+            relay: currentRelayURL(for: relay),
+            direct: direct,
+            device: id,
+            key: key,
+            token: "",
+            name: name
+        )
     }
 
     /// Human-readable identity check, matching what `bridle devices` prints.
@@ -86,9 +100,11 @@ public struct SessionSummary: Identifiable, Equatable, Sendable {
 
 /// One of the machine's sidebar groups.
 ///
-/// dsh's own filing system, arranged by whoever sits at the keyboard. The app
-/// reads it and never writes it: rearranging folders is a desk job, and the
-/// phone's job is to find the conversation someone left running.
+/// dsh's own filing system, arranged by whoever sits at the keyboard. A
+/// workspace *is* a directory: the machine canonicalises the path it was made
+/// from and a conversation belongs to the workspace whose path is exactly its
+/// own working directory. Nothing else joins the two — there is no dragging a
+/// conversation into a folder it does not run in.
 ///
 /// Membership is a list of session ids held by the workspace rather than a
 /// field on the session, which is why grouping is a join done here and not
@@ -97,7 +113,9 @@ public struct Workspace: Identifiable, Equatable, Sendable {
     public var id: String
     /// The folder the workspace stands for, when it stands for one.
     public var path: String?
-    /// The name someone gave it, which is often absent.
+    /// The name someone gave it. The machine defaults it to the folder's own
+    /// name at creation, so in practice this is nearly always present — but a
+    /// row without one is still a row.
     public var title: String?
     /// Members, in the order the machine keeps them.
     public var sessionIds: [String]
@@ -117,7 +135,20 @@ public struct Workspace: Identifiable, Equatable, Sendable {
         path = value["path"]?.stringValue
         title = value["title"]?.stringValue
         sessionIds = (value["sessionIds"]?.arrayValue ?? []).compactMap { $0.stringValue }
-        createdAt = Date(timeIntervalSince1970: (value["createdAt"]?.doubleValue ?? 0) / 1000)
+        createdAt = Workspace.instant(value["createdAt"]) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    /// Workspaces stamp their times as ISO-8601 strings, unlike sessions, whose
+    /// `updatedAt` is epoch milliseconds. Reading this as a number — which is
+    /// what the first version did — silently made every workspace date 1970.
+    /// Both spellings are accepted rather than the one seen today, because
+    /// guessing wrong once already cost a field.
+    static func instant(_ value: JSONValue?) -> Date? {
+        if let milliseconds = value?.doubleValue { return Date(timeIntervalSince1970: milliseconds / 1000) }
+        guard let text = value?.stringValue else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text)
     }
 
     public init(id: String, path: String? = nil, title: String? = nil, sessionIds: [String], createdAt: Date = Date(timeIntervalSince1970: 0)) {
@@ -126,6 +157,104 @@ public struct Workspace: Identifiable, Equatable, Sendable {
         self.title = title
         self.sessionIds = sessionIds
         self.createdAt = createdAt
+    }
+}
+
+/// Where a conversation started in a given folder will end up.
+///
+/// The question the folder browser could not answer before: someone picks
+/// `~/workspace/thing`, taps start, and finds the conversation either under a
+/// section they recognise or in the leftovers, with no way to have known which.
+///
+/// The rule is exact-match, and it has to be. The machine files a conversation
+/// under the workspace whose path *equals* its working directory, so a folder
+/// inside a workspace is not in that workspace — and this is not a hypothetical:
+/// a machine with both `~/workspace` and `~/workspace/invoice-service`
+/// registered is the shape this was written against, and prefix matching would
+/// name the wrong one for every conversation in the nested folder.
+public enum WorkspacePlacement: Equatable, Sendable {
+    /// A workspace stands for exactly this folder, and a conversation started
+    /// here joins it.
+    case joins(workspaceId: String, title: String)
+    /// No workspace stands for this folder, so the conversation will sit on its
+    /// own until someone makes one.
+    case ungrouped
+    /// The machine has not said whether it groups at all — an older dsh with no
+    /// `workspace.list`, or one that has not answered yet. Nothing may be
+    /// claimed either way, so the screens say nothing.
+    case unknown
+
+    /// - Parameters:
+    ///   - path: the folder in question, or nil for "wherever the Mac defaults
+    ///     to", which cannot be resolved from here.
+    ///   - workspaces: the machine's groups as last read.
+    ///   - grouping: whether `workspace.list` has ever succeeded on this
+    ///     machine. False means unknown rather than empty — see the enum.
+    public static func resolve(path: String?, workspaces: [Workspace], grouping: Bool) -> WorkspacePlacement {
+        guard grouping else { return .unknown }
+        guard let path, !path.isEmpty else { return .unknown }
+        let wanted = WorkspacePlacement.canonical(path)
+        guard let match = workspaces.first(where: { $0.path.map(WorkspacePlacement.canonical) == wanted }) else {
+            return .ungrouped
+        }
+        return .joins(workspaceId: match.id, title: match.displayTitle)
+    }
+
+    /// The workspace this folder is, if any.
+    public var workspaceId: String? {
+        if case .joins(let id, _) = self { return id }
+        return nil
+    }
+
+    /// Both ends already normalise — the machine through `realpath`, the folder
+    /// browser through `path.resolve` — so this only has to agree about the
+    /// trailing slash, which neither of them produces but a hand-typed or
+    /// remembered path can. Anything subtler than that (a symlinked home, two
+    /// spellings of the same volume) is left to disagree: guessing that two
+    /// unequal paths are the same folder would put a conversation under a name
+    /// that turns out to be wrong, and being told "ungrouped" and finding it
+    /// grouped is the kinder mistake of the two.
+    private static func canonical(_ path: String) -> String {
+        var trimmed = path
+        while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed.removeLast() }
+        return trimmed
+    }
+}
+
+/// What can be done about a conversation no workspace holds.
+///
+/// There is exactly one thing, and it is worth being blunt about why. A
+/// conversation belongs to the workspace whose folder is its own working
+/// folder, and a conversation's working folder never changes — so there is no
+/// "move to another workspace" to build. `workspace.insertSessionBefore` sounds
+/// like the call for it and is not: it reorders inside the one workspace that
+/// already accounts a session and refuses anything else.
+///
+/// What is left is real and worth having anyway, because it is the case this
+/// app itself created for a long time: a conversation started from the phone
+/// went to a folder without ever being filed under the workspace that folder
+/// already had, and there it sat in the leftovers forever.
+public enum SessionFiling: Equatable, Sendable {
+    /// Nothing to offer. Already in a workspace, no folder recorded, or a
+    /// machine that has not said it groups.
+    case settled
+    /// A workspace already stands for this conversation's folder.
+    case join(workspaceId: String, title: String)
+    /// Nothing stands for the folder yet. Claiming it takes two steps, and the
+    /// second one is `join`.
+    case claim(path: String)
+
+    public static func resolve(_ summary: SessionSummary, workspaces: [Workspace], grouping: Bool) -> SessionFiling {
+        guard grouping, let cwd = summary.cwd, !cwd.isEmpty else { return .settled }
+        // Held by *any* workspace, not just the one matching the folder. A
+        // conversation the machine already filed is not the app's business,
+        // even if the accounting looks odd from here.
+        guard !workspaces.contains(where: { $0.sessionIds.contains(summary.id) }) else { return .settled }
+        switch WorkspacePlacement.resolve(path: cwd, workspaces: workspaces, grouping: grouping) {
+        case .joins(let id, let title): return .join(workspaceId: id, title: title)
+        case .ungrouped: return .claim(path: cwd)
+        case .unknown: return .settled
+        }
     }
 }
 
@@ -191,8 +320,14 @@ public struct SessionBoard: Equatable {
     /// it drew before any of this existed.
     public var grouped: Bool { groups.count > 1 }
 
-    public init(sessions: [SessionSummary], workspaces: [Workspace], waitingOn: Set<String> = []) {
-        let ordered = sessions.sorted(by: SessionBoard.newestFirst)
+    /// - Parameter archived: conversations the machine has filed away. Dropped
+    ///   before anything else, including the lift for whatever is waiting: the
+    ///   machine's own rule is that an archived conversation "disappears from
+    ///   every grouping surface", and an exception for a stuck one would put a
+    ///   row on screen that someone deliberately made go away.
+    public init(sessions: [SessionSummary], workspaces: [Workspace], waitingOn: Set<String> = [], archived: Set<String> = []) {
+        let visible = archived.isEmpty ? sessions : sessions.filter { !archived.contains($0.id) }
+        let ordered = visible.sorted(by: SessionBoard.newestFirst)
         waiting = ordered.filter { waitingOn.contains($0.id) }
 
         let rest = ordered.filter { !waitingOn.contains($0.id) }
