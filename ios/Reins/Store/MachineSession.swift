@@ -24,6 +24,14 @@ import Observation
 /// yet, and because 25 messages already overfills a phone screen several times.
 private let historyPageSize = 25
 
+/// Messages in the first paint of a blank conversation.
+///
+/// Small enough to arrive fast on the relay path — measured at roughly a
+/// quarter of the full page's bytes and half its round trip on a heavy
+/// session, and far better than that on a poor uplink — while still filling a
+/// phone screen past its edge. The rest of the page follows immediately.
+private let firstPaintMessages = 8
+
 /// How many connection log lines to keep.
 ///
 /// Memory only, never written to disk: the log exists so a failure can be read
@@ -513,13 +521,37 @@ public final class MachineSession {
     }
 
     /// Load a conversation's tail page, or reload it after a resync.
+    ///
+    /// In two stages when the screen is blank. The cost of a history page is
+    /// almost all in its size — measured on a heavy session, 25 messages were
+    /// 253 KiB after the Bridle's thinning and 1.2s through the relay, while 8
+    /// were 69 KiB and 535ms; on a poor uplink the gap is seconds. And what a
+    /// person opens a conversation *for* is the last few exchanges. So the
+    /// tail arrives first, small enough to paint fast, and the rest of the
+    /// page follows behind it while they read — the same prepend the "load
+    /// earlier" button does, without the button.
     public func loadHistory(_ conversation: Conversation, reset: Bool) async {
         if reset { conversation.reset() }
         conversation.loading = true
         defer { conversation.loading = false }
         do {
-            let page = try await harness.history(sessionId: conversation.sessionId, maxMessages: historyPageSize)
+            let blank = conversation.items.isEmpty
+            let page = try await harness.history(
+                sessionId: conversation.sessionId,
+                maxMessages: blank ? firstPaintMessages : historyPageSize
+            )
             conversation.absorb(page: page, prepend: false)
+            // The top-up happens inside `loading`, so the "load earlier"
+            // control stays quiet until the conversation holds the same page
+            // it always used to start with.
+            if blank, conversation.hasMore, let before = conversation.oldestSeq {
+                let rest = try await harness.history(
+                    sessionId: conversation.sessionId,
+                    beforeSeq: before,
+                    maxMessages: historyPageSize - firstPaintMessages
+                )
+                conversation.absorb(page: rest, prepend: true)
+            }
         } catch let error as CallError where error.code == "disconnected" {
             // Same reasoning as the list: the reconnect retries.
         } catch {

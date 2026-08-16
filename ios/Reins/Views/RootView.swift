@@ -256,7 +256,13 @@ struct StatusLine: View {
                 return detail
             }
         case .online:
-            return session.harnessDetail
+            if let detail = session.harnessDetail { return detail }
+            // The stretch after a reconnect where the list on screen is from
+            // before. Refreshing is invisible otherwise — the rows sit there
+            // looking current while being anything but — and this window is
+            // most of what "the app takes forever to open" felt like.
+            if session.listing && !session.sessions.isEmpty { return "Catching up…" }
+            return nil
         }
     }
 
@@ -271,6 +277,8 @@ struct StatusLine: View {
     private var tint: Color {
         switch session.status {
         case .refused: return Palette.bad
+        // Catching up is routine; only a harness problem earns amber.
+        case .online where session.harnessDetail == nil: return .secondary
         // Amber is a claim that something is wrong, and reconnecting is not:
         // it is the normal end of every phone's every network. Grey says "hold
         // on" — which is what is happening — and keeps amber meaning something,

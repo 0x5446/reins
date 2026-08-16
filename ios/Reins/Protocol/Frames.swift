@@ -162,6 +162,23 @@ public struct ResumeFrame: TunnelFrame {
     }
 }
 
+/// Liveness question, app to Bridle. The Bridle answers with a pong carrying
+/// the same nonce — any frame at all proves the carrier, but asking forces an
+/// answer out of a connection that would otherwise be silently dead for the
+/// whole of the watchdog's patience.
+public struct PingFrame: TunnelFrame {
+    public let t = "ping"
+    public let nonce: String
+
+    public init(nonce: String) {
+        self.nonce = nonce
+    }
+
+    var members: [(String, JSONValue?)] {
+        [("t", .string(t)), ("nonce", .string(nonce))]
+    }
+}
+
 /// Liveness answer.
 public struct PongFrame: TunnelFrame {
     public let t = "pong"

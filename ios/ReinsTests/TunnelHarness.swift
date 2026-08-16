@@ -177,8 +177,20 @@ actor FakeBridle {
                 let bytes = try await carrier.receive()
                 guard let channel = channels[ObjectIdentifier(carrier)] else { return }
                 let plain = try channel.decrypt(bytes)
-                if let value = try? JSONValue(data: plain), value["t"]?.stringValue == "resume" {
+                guard let value = try? JSONValue(data: plain) else { continue }
+                switch value["t"]?.stringValue {
+                case "resume":
                     resumedFrom.append(value["since"]?.intValue ?? 0)
+                case "ping":
+                    // As the real Bridle does — the app's foreground probe
+                    // counts on this answer, and a fake that swallows pings
+                    // fails healthy connections instead of dead ones.
+                    try await push(to: carrier, json: [
+                        "t": .string("pong"),
+                        "nonce": value["nonce"] ?? .string(""),
+                    ])
+                default:
+                    break
                 }
             }
         } catch {

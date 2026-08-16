@@ -150,6 +150,14 @@ public struct TunnelTimings: Sendable {
     /// How often to check for that silence.
     public var livenessCheck: TimeInterval = 5
 
+    /// How long a probed carrier gets to say anything at all.
+    ///
+    /// Generous against a slow relay round trip, and still an order of
+    /// magnitude better than the silence limit it short-circuits: the probe
+    /// runs when the app comes back to the foreground, which is exactly when
+    /// someone is looking at the screen and about to tap something.
+    public var probe: TimeInterval = 4
+
     /// A direct connection that dies this soon after being adopted was not
     /// worth adopting. Long enough to cover a handshake that succeeds onto
     /// Wi-Fi the phone is about to fall off, short enough that an ordinary
@@ -189,6 +197,8 @@ public actor Tunnel {
     private var watchdog: Task<Void, Never>?
     private var watcher: PathWatcher?
     private var upgrade: Task<Void, Never>?
+    /// The outstanding foreground probe, so a second poke does not stack one.
+    private var probing: Task<Void, Never>?
     /// Bumped on every adopted carrier, so `pump` can tell a socket it is still
     /// reading from apart from one that was retired under it.
     private var carrierGeneration = 0
@@ -304,9 +314,45 @@ public actor Tunnel {
     public func poke() {
         sleeper?.cancel()
         checkLiveness()
+        probeCarrier()
         // Coming back is also the likeliest moment to have walked in the door
         // while the app was asleep, still holding a relayed connection.
         considerUpgrade()
+    }
+
+    /// Force a verdict out of a carrier that merely looks connected.
+    ///
+    /// The watchdog answers "has anything arrived lately", and after a short
+    /// suspension the honest answer is yes — twenty seconds ago, before iOS
+    /// froze the process and quietly killed the socket. Waiting out the rest
+    /// of the silence limit is what made every reopen of the app cost half a
+    /// minute of dead taps: the directory listing, the new conversation, the
+    /// send, all queued on a socket that would never answer.
+    ///
+    /// So ask. A ping forces the Bridle to say something; if nothing at all
+    /// arrives within {@link TunnelTimings.probe} of asking, the carrier is
+    /// closed and the reconnect loop — which takes a second or two — does the
+    /// rest. Any frame counts as the answer, not just the pong: proof of life
+    /// is proof of life.
+    private func probeCarrier() {
+        guard carrier != nil, probing == nil else { return }
+        let asked = Date()
+        note(.attempt, "Checking the connection is still alive")
+        try? write(PingFrame(nonce: "probe-\(Int(asked.timeIntervalSince1970))"))
+        let wait = timings.probe
+        probing = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            if Task.isCancelled { return }
+            await self?.settleProbe(askedAt: asked)
+        }
+    }
+
+    private func settleProbe(askedAt: Date) {
+        probing = nil
+        guard let socket = carrier else { return }
+        guard lastFrameAt < askedAt else { return }
+        note(.fail, "No answer to the probe in \(elapsed(Date().timeIntervalSince(askedAt))) — reconnecting")
+        socket.close("did not answer a probe")
     }
 
     // MARK: - Calls
@@ -914,6 +960,8 @@ public actor Tunnel {
     private func teardown(reason: String) {
         watchdog?.cancel()
         watchdog = nil
+        probing?.cancel()
+        probing = nil
         penaliseIfItFlapped()
         carrier?.close(reason)
         carrier = nil

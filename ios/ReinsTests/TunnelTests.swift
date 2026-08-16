@@ -130,6 +130,57 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
+    /// The failure that made reopening the app cost half a minute of dead
+    /// taps: iOS suspends the process, quietly kills the socket, and hands
+    /// back a connection that *looks* twenty seconds old — too fresh for the
+    /// watchdog, dead all the same. `poke` now demands proof of life instead
+    /// of waiting out the silence limit.
+    func testAPokeOnADeadCarrierForcesAReconnectWithinTheProbeWindow() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        timings.silenceLimit = 60      // The watchdog must not be what saves this.
+        timings.probe = 0.3
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: timings)
+
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+        let first = await mac.handshakes
+        XCTAssertEqual(first, 1)
+
+        // Suspended-and-resumed: the socket is dead but was alive recently,
+        // so silence-based detection has nothing to say for another minute.
+        board.carrier(for: "relay.test:0")?.goQuiet()
+        await tunnel.poke()
+
+        try await waitFor("the probe to force a second handshake") { await mac.handshakes >= 2 }
+        await tunnel.stop()
+    }
+
+    /// And the probe must not tear down a connection that answers.
+    func testAPokeOnAHealthyCarrierChangesNothing() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        timings.probe = 0.2
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: timings)
+
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+        await tunnel.poke()
+        try await Task.sleep(nanoseconds: 600_000_000)
+
+        let handshakes = await mac.handshakes
+        XCTAssertEqual(handshakes, 1, "a live carrier was torn down by its own probe")
+        let status = await tunnel.status
+        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        await tunnel.stop()
+    }
+
     // MARK: - Upgrading
 
     /// Walking in the door should take the connection off the relay, and must
