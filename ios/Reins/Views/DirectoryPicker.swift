@@ -33,6 +33,11 @@ struct DirectoryPicker: View {
     /// it replaces, not over the whole screen: the browser still works and the
     /// conversation can still start here, ungrouped.
     @State private var claimProblem: String?
+    /// Set when the Mac has no browsable picker at all, which is not a failure
+    /// so much as a different machine — see `cannotBrowse`.
+    @State private var browsingOff = false
+    /// A path typed by hand, for that case.
+    @State private var typed = ""
 
     /// Folders a conversation has already been started in, most used first.
     private var recents: [String] {
@@ -49,6 +54,8 @@ struct DirectoryPicker: View {
             Group {
                 if loading && listing == nil {
                     Placeholder(icon: "folder", title: "Reading folders…")
+                } else if browsingOff {
+                    cannotBrowse
                 } else if let problem {
                     Placeholder(icon: "exclamationmark.triangle", title: "Couldn’t browse", detail: problem) {
                         Button("Start in the default folder") { pick(nil) }
@@ -221,6 +228,92 @@ struct DirectoryPicker: View {
         }
     }
 
+    /// What to show when the Mac cannot list folders for anyone but itself.
+    ///
+    /// dsh composes `directory-picker-auto`, which decides at boot whether the
+    /// operator can see the host's screen — loopback bind, no SSH launch, a
+    /// desktop OS — and on a Mac all three are true, so it mounts the *native*
+    /// backend: an OS file dialog on that Mac. That is the right answer for the
+    /// browser on the same desk and no answer at all for a phone somewhere
+    /// else, and it is the **default**, so every Mac arrives here.
+    ///
+    /// An error and a dead end would therefore be the first thing most people
+    /// see. Two things still work without the call: the folders this machine
+    /// already has conversations in, which come from `session.list` and need
+    /// nothing, and typing. Both are offered before the fix is mentioned,
+    /// because most of the time the folder someone wants is one they have
+    /// already used.
+    private var cannotBrowse: some View {
+        List {
+            if !recents.isEmpty {
+                Section {
+                    ForEach(recents, id: \.self) { path in
+                        Button {
+                            pick(path)
+                        } label: {
+                            HStack(spacing: Metrics.gap) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text((path as NSString).lastPathComponent)
+                                        .font(.system(size: 15, weight: .medium))
+                                    Text(path)
+                                        .font(.code(10))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                }
+                                Spacer(minLength: Metrics.tight)
+                                if case .joins(_, let title) = session.placement(for: path) {
+                                    Pill(title, color: Palette.accent, icon: "folder.fill")
+                                }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                } header: {
+                    Text("Folders you have used")
+                }
+            }
+
+            Section {
+                TextField("/Users/you/code/thing", text: $typed)
+                    .font(.code(13))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                Button("Start here") { pick(typed.trimmingCharacters(in: .whitespaces)) }
+                    .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Or type a path")
+            } footer: {
+                // No validation before sending. The app cannot check a path on
+                // a machine that will not list its folders, and a guess that
+                // said "no such folder" about a folder that exists would be
+                // worse than letting the Mac answer.
+                Text("Not checked until the conversation starts — this Mac will not list its folders, so there is nothing to check against.")
+            }
+
+            Section {
+                Text("""
+                - id: directory-picker
+                  disabled: true
+
+                - insert:
+                    - id: directory-picker-browse
+                      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+                """)
+                .font(.code(11))
+                .textSelection(.enabled)
+            } header: {
+                Text("To browse folders from here")
+            } footer: {
+                Text("dsh decided at startup that whoever uses it can see this Mac's screen, so it opens a Finder window there instead of listing folders — which a phone cannot use. Add this to ~/.dsh/profiles/web/cordis.patch.yml. It reloads by itself; nothing needs restarting. The desktop then picks folders in the page rather than in Finder.")
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
     private func crumbs(_ listing: DirectoryListing) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
@@ -252,6 +345,11 @@ struct DirectoryPicker: View {
         defer { loading = false }
         do {
             listing = try await session.harness.listDirectory(path: path)
+            browsingOff = false
+        } catch let failure as CallError where failure.code == "directory-picker-unavailable" {
+            // Not a fault and not retryable: this machine has no browsable
+            // picker mounted and will not grow one while the sheet is open.
+            browsingOff = true
         } catch {
             problem = (error as? LocalizedError)?.errorDescription ?? "That folder couldn’t be read."
         }

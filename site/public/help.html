@@ -107,6 +107,32 @@ exec zsh</code></pre>
   registered: <code>bridle status</code> should show the relay as online.
 </p>
 
+<h3>“Couldn’t browse” when starting a conversation</h3>
+
+<p>
+  dsh decides at startup whether whoever uses it can see the Mac's screen — and
+  on a Mac it always concludes yes, so it opens a Finder window there instead
+  of listing folders. A phone cannot use a window on a desk somewhere else.
+</p>
+
+<p>
+  Reins falls back to the folders you have already worked in, and to typing a
+  path. To browse properly, add this to
+  <code>~/.dsh/profiles/web/cordis.patch.yml</code>:
+</p>
+
+<pre><code>- id: directory-picker
+  disabled: true
+
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'</code></pre>
+
+<p>
+  It reloads by itself — nothing needs restarting. Afterwards the desktop picks
+  folders in the page rather than in Finder.
+</p>
+
 <h3>Searching conversations finds nothing</h3>
 
 <p>
