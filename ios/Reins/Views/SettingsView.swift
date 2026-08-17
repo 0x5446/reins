@@ -238,7 +238,11 @@ struct SettingsView: View {
             Button {
                 showingDiagnostics = true
             } label: {
-                LabeledContent("What it's been doing") {
+                // Named plainly after someone went looking for it and could
+                // not find it. In a list of nouns — Machine, Route, dsh,
+                // Folder — a prose phrase reads as a sentence to skip rather
+                // than a row to tap, however much better it sounds alone.
+                LabeledContent("Connection log") {
                     Text(session.notes.isEmpty ? "—" : "\(session.notes.count) lines")
                         .foregroundStyle(.secondary)
                 }
