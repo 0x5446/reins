@@ -343,6 +343,17 @@ struct SessionListView: View {
         .listRowBackground(Palette.paper)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing) {
+            // Archive first, because it is the destructive-looking one and iOS
+            // puts the first trailing action closest to the thumb — and because
+            // filing something away is what a long list is for. It is not
+            // `role: .destructive`: nothing is deleted, the log stays exactly
+            // where it was, and a red button would say otherwise.
+            Button {
+                Task { await session.archive(sessionId: item.summary.id) }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+            .tint(Palette.warn)
             Button {
                 renameText = item.summary.title ?? ""
                 renaming = item.summary
@@ -362,6 +373,11 @@ struct SessionListView: View {
                 Label("Rename", systemImage: "pencil")
             }
             filing(item.summary)
+            Button {
+                Task { await session.archive(sessionId: item.summary.id) }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
         }
     }
 

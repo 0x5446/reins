@@ -625,3 +625,51 @@ final class AccessDefaultTests: XCTestCase {
         XCTAssertEqual(machine.accessDefault?.current, "workspace-write")
     }
 }
+
+// MARK: - Archiving
+
+/// Archiving is optimistic, which is only safe if the undo is real — and this
+/// undo had never been run. Noted as a gap when the row-level tests were
+/// written and left open until the transport seam existed; the swipe action
+/// that reaches it shipped before the test did.
+final class ArchiveTests: XCTestCase {
+    func testTheRowGoesBeforeTheMachineAnswers() async {
+        let stub = StubTransport()
+        let session = await make(stub)
+        await session.archive(sessionId: "s1")
+
+        let hidden = await MainActor.run { session.archivedSessionIds.contains("s1") }
+        XCTAssertTrue(hidden, "a row that lingers for a round trip reads as a tap that missed")
+        let sent = await stub.payloads("workspace.archiveSession").first
+        XCTAssertEqual(sent?["sessionId"]?.stringValue, "s1")
+    }
+
+    func testARefusalPutsTheRowBackAndSaysSo() async {
+        let stub = StubTransport()
+        await stub.fail("workspace.archiveSession", message: "the Mac said no")
+        let session = await make(stub)
+        await session.archive(sessionId: "s1")
+
+        let state = await MainActor.run { (session.archivedSessionIds, session.problem) }
+        XCTAssertFalse(state.0.contains("s1"), "the conversation stayed hidden after the machine refused")
+        XCTAssertEqual(state.1, "the Mac said no", "it vanished silently, which reads as success")
+    }
+
+    @MainActor
+    private func make(_ stub: StubTransport) -> MachineSession {
+        let bundle = PairingBundle(
+            relay: "https://relay.invalid", direct: nil, device: "device-1",
+            key: "", token: "", name: "Test Mac"
+        )
+        return MachineSession(
+            machine: PairedMachine(bundle: bundle),
+            identity: .generate(),
+            deviceName: "Test iPhone",
+            clientVersion: "reins-tests/1",
+            pairingToken: nil,
+            notifier: Notifier(center: nil),
+            defaults: UserDefaults(suiteName: "archive-tests-\(UUID().uuidString)")!,
+            transport: stub
+        )
+    }
+}
