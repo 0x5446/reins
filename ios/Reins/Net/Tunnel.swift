@@ -4,6 +4,24 @@
 /// harness downlinks, approvals. One socket, because a phone that holds four is
 /// a phone that reconnects four times every time the radio blinks.
 ///
+/// The way it picks a path is Happy Eyeballs — RFC 8305, by Apple's own
+/// Schinazi and Pauly — applied to endpoints rather than to address families:
+/// dial the candidates concurrently, stagger their starts to express a
+/// preference, take the first that answers, cancel the rest. The spec covers
+/// IPv6 against IPv4 for one host and an attempt to generalise it to other
+/// kinds of choice was abandoned, so this borrows the shape rather than
+/// implementing the document. The staggering constant comes from it, though;
+/// see `TunnelTimings.relayHeadStart`.
+///
+/// The full answer to "which of several paths" is ICE (RFC 8445), and it is
+/// the wrong tool here for a reason the spec states itself: candidate
+/// gathering, priority formulas, controlling and controlled roles and
+/// nomination all exist because two peers behind NATs are unlikely to reach
+/// each other directly. Nothing here punches a hole. The relay is a rendezvous
+/// that always works, not a last resort, so there are exactly two candidate
+/// kinds and no negotiation to run. Below this layer, URLSession already does
+/// the address-family race that RFC 8305 actually specifies.
+///
 /// Three properties this file is responsible for:
 ///
 /// - **Confidentiality from the Relay.** Noise IK with the machine's static key
@@ -120,13 +138,20 @@ public struct TunnelTimings: Sendable {
     /// than any timer.
     public var maximumBackoff: TimeInterval = 30
 
-    /// How long the Relay waits before joining a dial the LAN has started.
+    /// How long the Relay waits before joining a dial the local address started.
+    ///
+    /// RFC 8305's Connection Attempt Delay, and the value is the spec's rather
+    /// than one of mine: 250ms, chosen there by measurement across production
+    /// devices rather than by argument. curl settled on 200ms after its own,
+    /// which is close enough to suggest the number is real. This was 400ms
+    /// because 400 sounded careful.
     ///
     /// Long enough that a local handshake — tens of milliseconds on the same
-    /// Wi-Fi — always finishes first, so a phone at home never touches the
-    /// Relay. Short enough that a phone on cellular, where the LAN attempts
-    /// will only ever time out, pays this and nothing more.
-    public var relayHeadStart: TimeInterval = 0.4
+    /// network — finishes first every time, so a phone at home never touches
+    /// the Relay. The cost of being wrong is small and now smaller: a local
+    /// address is only dialled when it is on a subnet this device holds, so
+    /// off that network the Relay starts immediately and pays nothing at all.
+    public var relayHeadStart: TimeInterval = 0.25
 
     /// How long the app will sit on a silent carrier before deciding it is dead.
     ///
