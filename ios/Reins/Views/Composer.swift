@@ -143,6 +143,10 @@ struct Composer: View {
         text = ""
         images = []
         picked = []
+        // Give the screen back. The keyboard is half a phone, and what someone
+        // wants immediately after sending is to watch the answer arrive — not
+        // to type the next message into a slot four lines tall.
+        focused = false
     }
 
     /// Downscale before encoding. A 12-megapixel photo is several megabytes of

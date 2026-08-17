@@ -6,6 +6,9 @@
 /// waiting on a person is always directly above their thumb.
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ConversationView: View {
     let session: MachineSession
@@ -144,6 +147,14 @@ struct ConversationView: View {
                 .padding(.vertical, Metrics.gap)
             }
             .scrollDismissesKeyboard(.interactively)
+            // A drag already dismisses; a tap did not, and a tap is what
+            // someone does when they have finished typing and want to read.
+            // `simultaneousGesture` so the tool cards and links underneath
+            // still receive their own taps.
+            .simultaneousGesture(TapGesture().onEnded {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            })
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom {
                     Button {
