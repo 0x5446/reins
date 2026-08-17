@@ -177,6 +177,7 @@ public actor Tunnel {
     private let identity: StaticKeyPair
     private let clientVersion: String
     private let open: CarrierOpener
+    private let onOurNetwork: @Sendable (URL) -> Bool
     private let timings: TunnelTimings
     private let watchNetwork: Bool
     private var deviceName: String
@@ -202,9 +203,6 @@ public actor Tunnel {
     private var lanAdoptedAt: Date?
     /// Do not dial a local address before this moment.
     private var lanBlockedUntil: Date?
-    /// Whether the phone currently has Wi-Fi. Set by the first path update,
-    /// which `NWPathMonitor` delivers as soon as it is started.
-    private var onWiFi = false
     /// The machine's current LAN addresses, as told by the last `ready` frame.
     ///
     /// The bundle's copy is a snapshot from pairing day; this one is from the
@@ -243,6 +241,7 @@ public actor Tunnel {
         clientVersion: String,
         pairingToken: String?,
         open: @escaping CarrierOpener = { WebSocketCarrier.open(url: $0, timeout: $1) },
+        onOurNetwork: @escaping @Sendable (URL) -> Bool = { isOnOurNetwork($0) },
         watchNetwork: Bool = true,
         timings: TunnelTimings = TunnelTimings()
     ) {
@@ -252,6 +251,7 @@ public actor Tunnel {
         self.clientVersion = clientVersion
         self.pairingToken = pairingToken
         self.open = open
+        self.onOurNetwork = onOurNetwork
         self.watchNetwork = watchNetwork
         self.timings = timings
     }
@@ -621,9 +621,6 @@ public actor Tunnel {
     /// (on a change, never on a timer), and *not while a call is outstanding*,
     /// since a reply has nowhere to be replayed from.
     private func considerUpgrade() {
-        // Without Wi-Fi there is no local address to reach, and trying anyway
-        // costs a reconnect that can only land back on the relay.
-        guard onWiFi else { return }
         guard case .online(.relay, _, _) = status else { return }
         guard pending.isEmpty else { return }
         guard !candidates().filter({ $0.carrier == .lan }).isEmpty else { return }
@@ -649,14 +646,14 @@ public actor Tunnel {
 
     /// The phone's network changed under the connection.
     private func networkChanged(onWiFi: Bool) {
-        self.onWiFi = onWiFi
         note(.attempt, onWiFi ? "Joined a Wi-Fi network" : "Left Wi-Fi")
         // Retry now rather than sitting out a backoff that was set for a
         // network that no longer exists.
         sleeper?.cancel()
-        if onWiFi {
-            considerUpgrade()
-        } else if case .online(.lan, _, _) = status {
+        // The subnets just changed, so what counts as reachable changed with
+        // them; asking again is the whole response.
+        considerUpgrade()
+        if !onWiFi, case .online(.lan, _, _) = status {
             // A local address is not merely slow without Wi-Fi, it is
             // unreachable, so there is nothing to wait forty seconds to learn.
             note(.fail, "Wi-Fi went away while connected directly — reconnecting")
@@ -718,6 +715,10 @@ public actor Tunnel {
         let blocked = lanBlockedUntil.map { Date() < $0 } ?? false
         for address in blocked ? [] : (learnedDirect ?? bundle.direct ?? []) {
             guard let url = URL(string: "\(address)/v1/tunnel") else { continue }
+            // Only addresses on a network this device is actually on. Off that
+            // network the dial cannot succeed, and its only effect is to make
+            // the relay wait out a head start for a race with one runner.
+            guard onOurNetwork(url) else { continue }
             found.append(Candidate(url: url, carrier: .lan, label: "Wi-Fi \(Tunnel.place(url))", delay: 0))
         }
         if var components = URLComponents(string: bundle.relay) {

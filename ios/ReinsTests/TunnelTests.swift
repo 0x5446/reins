@@ -252,31 +252,6 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
-    /// The upgrade must not fire on cellular, where it can only ever cost two
-    /// timeouts with the radio awake for both.
-    func testNoUpgradeIsAttemptedWithoutWiFi() async throws {
-        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
-        let board = TestSwitchboard()
-        board.route("relay.test:0", to: .machine(mac))
-        board.route("192.168.1.9:61000", to: .blackHole)
-
-        var timings = TunnelTimings()
-        timings.handshake = 0.2
-        let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
-        await tunnel.start()
-        try await waitForOnline(tunnel)
-
-        board.route("192.168.1.9:61000", to: .machine(mac))
-        let before = board.dialledAddresses.count
-        await tunnel.poke()
-        try await Task.sleep(nanoseconds: 300_000_000)
-
-        XCTAssertEqual(board.dialledAddresses.count, before, "it dialled the local address with no Wi-Fi")
-        let status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
-        await tunnel.stop()
-    }
-
     /// A local address that connects and immediately dies must not be tried
     /// again straight away, or the app spends its life switching.
     func testAnAddressThatFlapsIsLeftAloneForAWhile() async throws {
@@ -412,12 +387,70 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
+    // MARK: - Reachability
+
+    /// A local address on a network this device is not on is not dialled.
+    ///
+    /// The app used to ask "are we on Wi-Fi", which is the wrong question in
+    /// both directions: on cellular it dialled addresses that could not answer,
+    /// and a Mac tethered to this very phone — whose own path is cellular —
+    /// would have been refused a dial to a machine one hop away. Asking whether
+    /// the address is inside one of our subnets answers both cases with one
+    /// fact, and lets the relay start at once when there is no local runner.
+    func testOnlyAddressesOnOurNetworkAreDialled() async throws {
+        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        board.route("192.168.1.9:61000", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        // Long enough that the relay could not win a race it was made to wait
+        // for: if the local address were dialled, this test would time out.
+        timings.relayHeadStart = 30
+        let tunnel = make(
+            bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]),
+            board: board,
+            timings: timings,
+            onOurNetwork: { _ in false }
+        )
+
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+
+        let status = await tunnel.status
+        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        XCTAssertEqual(
+            board.dialledAddresses, ["relay.test:0"],
+            "an address on no network of ours was dialled anyway"
+        )
+        await tunnel.stop()
+    }
+
+    /// And the check itself: it must refuse only what it can prove, since a
+    /// false negative hides a working path while a false positive costs one
+    /// failed connect.
+    func testTheNetworkCheckRefusesOnlyWhatItCanProve() {
+        // TEST-NET-3, reserved for documentation and on nobody's LAN.
+        XCTAssertFalse(isOnOurNetwork(URL(string: "ws://203.0.113.1:61000/v1/tunnel")!))
+        // Not an IPv4 literal, so not judgeable — a tailnet name, an operator's
+        // tunnel hostname. Dialled rather than discarded.
+        XCTAssertTrue(isOnOurNetwork(URL(string: "ws://my-mac.tailnet.ts.net:61000/v1/tunnel")!))
+        // Loopback is reachable by definition and must survive the filter, or
+        // the e2e suite loses its direct path.
+        XCTAssertTrue(isOnOurNetwork(URL(string: "ws://127.0.0.1:61000/v1/tunnel")!))
+    }
+
     // MARK: - Helpers
 
     private func make(
         bundle: PairingBundle,
         board: TestSwitchboard? = nil,
-        timings: TunnelTimings
+        timings: TunnelTimings,
+        // The addresses here are fictional and would not match whatever
+        // subnets the machine running the suite happens to be on, so the
+        // real check is replaced. `testOnlyAddressesOnOurNetworkAreDialled`
+        // exercises the filtering itself.
+        onOurNetwork: @escaping @Sendable (URL) -> Bool = { _ in true }
     ) -> Tunnel {
         let board = board ?? {
             let fresh = TestSwitchboard()
@@ -430,6 +463,7 @@ final class TunnelTests: XCTestCase {
             clientVersion: "test",
             pairingToken: nil,
             open: board.opener,
+            onOurNetwork: onOurNetwork,
             watchNetwork: false,
             timings: timings
         )
