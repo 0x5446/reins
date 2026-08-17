@@ -110,6 +110,10 @@ public final class MachineSession {
     /// handshake — but a render can land in those milliseconds, and until it
     /// does the app has no claim to make about dsh either way.
     public private(set) var harnessKnown = false
+    /// A one-off note that the route changed, shown briefly then cleared.
+    public private(set) var routeChange: String?
+    /// Distinguishes the timer that should clear the note from an older one.
+    private var routeChangeToken: UUID?
     /// Called when the machine reports where it can be dialled directly now,
     /// so the owner can persist the addresses for the next cold start.
     public var learnedDirect: (([String]) -> Void)?
@@ -214,9 +218,27 @@ public final class MachineSession {
         switch signal {
         case .status(let value):
             let wasOnline = isOnline
+            let wasCarrier = carrier
             status = value
             if case .online = value, !wasOnline {
                 Task { await self.refreshSessions() }
+            }
+            // A route that changes under a live connection is worth one line.
+            // The chip's icon changes too, but an icon swapping while nobody
+            // was looking at it explains nothing; this says what happened and
+            // then gets out of the way. Only a change *between* two live
+            // carriers — coming online is not a switch.
+            if let now = carrier, let before = wasCarrier, now != before {
+                routeChange = now == .lan
+                    ? "Now connected directly over Wi-Fi"
+                    : "Wi-Fi is gone — back on the relay"
+                let token = UUID()
+                routeChangeToken = token
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    guard let self, self.routeChangeToken == token else { return }
+                    self.routeChange = nil
+                }
             }
         case .event(let frame):
             switch frame.stream {

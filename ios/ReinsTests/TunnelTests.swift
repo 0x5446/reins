@@ -317,6 +317,40 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
+    /// The route the chip draws has to be the route in use, at the moment it
+    /// changes — the whole value of showing it is that it stops being true
+    /// while you watch.
+    func testTheStatusReportsTheRouteAndUpdatesWhenItSwitches() async throws {
+        let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        board.route("192.168.1.9:61000", to: .blackHole)
+
+        var timings = TunnelTimings()
+        timings.handshake = 0.2
+        timings.relayHeadStart = 0
+        let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
+
+        // Every status the app sees, which is what the chip renders from.
+        let seen = Routes()
+        let stream = await tunnel.signals()
+        Task {
+            for await signal in stream {
+                if case .status(.online(let carrier, _, _)) = signal { await seen.add(carrier) }
+            }
+        }
+
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+        try await waitFor("the relay to be reported") { await seen.all == [.relay] }
+
+        board.route("192.168.1.9:61000", to: .machine(mac))
+        await tunnel.networkChangedForTesting(onWiFi: true)
+
+        try await waitFor("the switch to be reported") { await seen.all == [.relay, .lan] }
+        await tunnel.stop()
+    }
+
     // MARK: - Helpers
 
     private func make(
@@ -369,6 +403,14 @@ final class TunnelTests: XCTestCase {
             }
         }
         return counter
+    }
+}
+
+/// The carriers the app was told about, in order.
+actor Routes {
+    private(set) var all: [Carrier] = []
+    func add(_ carrier: Carrier) {
+        if all.last != carrier { all.append(carrier) }
     }
 }
 

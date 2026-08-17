@@ -146,7 +146,18 @@ struct MachineView: View {
     }
 }
 
-/// The title-bar control: which Mac, and whether it is reachable.
+/// The title-bar control: which Mac, how it is reached, and whether it answers.
+///
+/// The route was already known — `TunnelStatus.online` has always carried it —
+/// and already live, since an upgrade to Wi-Fi replaces the status and SwiftUI
+/// redraws from it. It was simply buried in Settings, which is the wrong place
+/// for a fact that changes by itself while you watch. Two paths with different
+/// costs and different privacy stories should not look identical on the screen
+/// you spend all your time on.
+///
+/// An icon rather than a word, because this sits in a toolbar next to a machine
+/// name that can be long: an antenna for a local hop, a cloud for the relay.
+/// The accessibility label spells it out, and Settings still gives the sentence.
 struct MachineChip: View {
     let name: String
     let status: TunnelStatus
@@ -157,11 +168,27 @@ struct MachineChip: View {
             Text(name)
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
+            if let carrier {
+                Image(systemName: carrier == .lan ? "wifi" : "cloud")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(carrier == .lan ? AnyShapeStyle(Palette.good) : AnyShapeStyle(.secondary))
+                    .accessibilityLabel(carrier == .lan ? "Direct over Wi-Fi" : "Through the relay")
+                    // Route changes mid-session, on purpose. Sliding one icon
+                    // out and the other in is what makes that legible as a
+                    // change rather than a redraw someone half-noticed.
+                    .transition(.opacity.combined(with: .scale))
+            }
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.tertiary)
         }
         .foregroundStyle(.primary)
+        .animation(.easeInOut(duration: 0.25), value: carrier)
+    }
+
+    private var carrier: Carrier? {
+        if case .online(let carrier, _, _) = status { return carrier }
+        return nil
     }
 }
 
@@ -259,6 +286,9 @@ struct StatusLine: View {
             }
         case .online:
             if let detail = session.harnessDetail { return detail }
+            // Briefly, after a switch. Above "Catching up…" because a route
+            // change is the rarer and more surprising of the two.
+            if let change = session.routeChange { return change }
             // The stretch after a reconnect where the list on screen is from
             // before. Refreshing is invisible otherwise — the rows sit there
             // looking current while being anything but — and this window is
