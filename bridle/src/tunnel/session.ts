@@ -25,6 +25,7 @@ import { acceptPeer, findPeer, offerAccepts, touchPeer } from '../identity.ts'
 import type { BridleCore, DshStatus } from '../core.ts'
 import type { LoggedEvent } from './event-log.ts'
 import { thinHistory } from './history.ts'
+import { thinRoster } from './roster.ts'
 import type { AgentResult } from '../agents/types.ts'
 
 /**
@@ -305,11 +306,27 @@ export class TunnelSession {
         ? await this.historyThatFits(payload, controller.signal)
         : method === 'session.export'
           ? await this.exportSession(payload)
-          : await this.core.dsh.call(method, payload, controller.signal)
+          : method === 'session.list'
+            ? this.trimRoster(await this.core.dsh.call(method, payload, controller.signal))
+            : await this.core.dsh.call(method, payload, controller.signal)
       if (!this.closed) this.sendFrame({ t: 'res', id, result })
     } finally {
       this.inflight.delete(id)
     }
+  }
+
+  /**
+   * Drop the list projections the app does not read.
+   * @param result - whatever dsh answered `session.list` with.
+   * @returns the same result, lighter.
+   */
+  private trimRoster(result: AgentResult): AgentResult {
+    if (!result.ok) return result
+    const { value, trimming } = thinRoster(result.value)
+    if (trimming !== undefined) {
+      this.options.log?.(`session.list ${String(trimming.before)} to ${String(trimming.after)} bytes`)
+    }
+    return { ok: true, value }
   }
 
   private async exportSession(payload: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string; details: unknown } }> {

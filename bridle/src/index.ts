@@ -9,6 +9,7 @@ export type { AgentClient, AgentHealth, AgentResult, AgentStream } from './agent
 export { DshClient, assertLoopback, type DshHealth, type DshResult } from './dsh/client.ts'
 export { ensureDsh, portOpen, probeDsh, type DiscoveredDsh } from './dsh/discovery.ts'
 export { EventLog, type LoggedEvent, type ReplayResult } from './tunnel/event-log.ts'
+export { thinRoster, type Trimming } from './tunnel/roster.ts'
 export { TunnelSession, type SessionOptions, type TunnelTransport } from './tunnel/session.ts'
 export { RelayClient, toWebSocketUrl, type RelayState } from './relay-client.ts'
 export { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
