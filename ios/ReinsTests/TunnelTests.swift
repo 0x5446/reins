@@ -69,6 +69,37 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
+    /// A dial that hangs must not hold the connection that already succeeded.
+    ///
+    /// Measured from a phone's connection log: the relay was up in a second and
+    /// the app stayed unusable for three more minutes, because a task group
+    /// does not return until every child has and a `send` to an address that
+    /// no longer exists ignored cancellation. The winner sat waiting on the
+    /// losers. Now every attempt is bounded by closing its own socket, which
+    /// nothing can ignore.
+    func testAHangingDialDoesNotHoldTheWinner() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        // Accepts the connection and then says nothing at all, forever.
+        board.route("10.9.9.9:61000", to: .blackHole)
+
+        var timings = TunnelTimings()
+        timings.handshake = 1
+        timings.relayHeadStart = 0
+        let tunnel = make(bundle: mac.bundle(direct: ["ws://10.9.9.9:61000"]), board: board, timings: timings)
+
+        let started = Date()
+        await tunnel.start()
+        try await waitForOnline(tunnel)
+        let took = Date().timeIntervalSince(started)
+
+        // The bound is the handshake timeout, not whatever URLSession would
+        // have done with a black hole — which in the field was 198 seconds.
+        XCTAssertLessThan(took, 3, "the winner waited \(took)s on a hanging dial")
+        await tunnel.stop()
+    }
+
     // MARK: - Liveness
 
     /// The bug behind "I sent a message and nothing happened". The socket stops

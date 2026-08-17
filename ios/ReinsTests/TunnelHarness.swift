@@ -27,6 +27,14 @@ final class LoopbackCarrier: Carrying, @unchecked Sendable {
     /// Set to stop delivering without closing — the failure this whole file
     /// exists to reproduce.
     private var muted = false
+    /// Whether a read ignores task cancellation, as `URLSessionWebSocketTask`
+    /// was observed to when writing to an address that no longer exists.
+    ///
+    /// On by default for a black hole and only there. A fake that is politely
+    /// cancellable cannot reproduce the bug that mattered — a losing racer
+    /// holding the whole dial for three minutes — and a test written against
+    /// the polite version passes whether or not the code is fixed.
+    var ignoresCancellation = false
 
     /// The other end. Weak on one side would break the pair; both are held by
     /// the harness, which outlives them.
@@ -70,6 +78,7 @@ final class LoopbackCarrier: Carrying, @unchecked Sendable {
                 lock.unlock()
             }
         } onCancel: {
+            guard !ignoresCancellation else { return }
             lock.lock()
             let pending = waiter
             waiter = nil
@@ -273,7 +282,9 @@ final class TestSwitchboard: @unchecked Sendable {
             case .machine(let bridle):
                 Task { await bridle.serve(machine) }
             case .blackHole, .none:
-                break
+                // Deaf to cancellation as well as to messages: the two
+                // together are what a dead address actually behaves like.
+                app.ignoresCancellation = true
             }
             return app
         }

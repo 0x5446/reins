@@ -117,7 +117,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     await direct.listen()
     // As the CLI and the plugin both do: the ready frame advertises where the
     // machine can be dialled now, and the stack has to be honest about it too.
-    core.directAddresses = direct.addresses
+    core.directAddresses = () => direct?.addresses ?? []
   }
 
   const relayClient = new RelayClient(core, { version: VERSION })

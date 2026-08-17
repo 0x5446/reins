@@ -41,14 +41,18 @@ export class BridleCore {
   /**
    * The LAN addresses a phone can dial this machine on right now, best first.
    *
-   * Set by whoever owns the direct listener once it is bound, and sent to
-   * every app in the `ready` frame. The pairing bundle also carries a copy,
-   * but that one is frozen at pairing time — a Mac that later joins a
-   * different network (a hotspot, an office) would otherwise be reachable
-   * only through the relay forever, because the phone keeps dialling an
-   * address from a network neither of them is on any more.
+   * A function, not an array, and that is the whole point. The first version
+   * stored the value the direct listener reported when it started, which made
+   * every `ready` frame advertise the network the Mac was on at boot: a laptop
+   * that moved from a hotspot to an office went on telling every phone to dial
+   * the hotspot, forever, while `bridle status` — which recomputes — showed the
+   * right one. Measured from the phone's own connection log, dialling an
+   * address from the night before.
+   *
+   * Set by whoever owns the listener. The pairing bundle carries a copy too,
+   * but that one is frozen at pairing time and this is what corrects it.
    */
-  directAddresses: string[] = []
+  directAddresses: () => string[] = () => []
   private healthTimer: NodeJS.Timeout | undefined
   private watcher: FSWatcher | undefined
   private writing = false

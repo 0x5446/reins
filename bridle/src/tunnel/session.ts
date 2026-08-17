@@ -226,7 +226,7 @@ export class TunnelSession {
       // empty: an empty list is the truth about a machine whose direct
       // listener is off, and withholding it would leave the app dialling a
       // listener that no longer exists.
-      direct: this.core.directAddresses,
+      direct: this.core.directAddresses(),
       seq: this.core.events.head,
     })
     this.unwatchStatus = this.core.onDshStatus((next: DshStatus) => {

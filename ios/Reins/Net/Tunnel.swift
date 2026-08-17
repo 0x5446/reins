@@ -764,6 +764,54 @@ public actor Tunnel {
         }
         let started = Date()
         let socket = open(candidate.url, timeout)
+        // Closing is the only thing that reliably stops an attempt, so it is
+        // what both the deadline and the loss of the race do.
+        //
+        // Measured cost of not having this: a dial reported failure after 198
+        // seconds with the relay already connected and idle the whole time. A
+        // task group does not return until every child has, only `receive` was
+        // under a deadline, and a `send` to an address that no longer exists
+        // ignored cancellation. So the winner waited on the losers.
+        //
+        // `onCancel` covers the ordinary case — a winner cancels the group and
+        // every loser drops immediately. The deadline covers the case with no
+        // winner at all, and bounds the whole dial by the handshake timeout.
+        return await withTaskCancellationHandler {
+            await Tunnel.attempt(candidate, socket: socket, started: started, identity: identity,
+                                 remoteStatic: remoteStatic, request: request, timeout: timeout)
+        } onCancel: {
+            socket.close("lost the race")
+        }
+    }
+
+    /// The handshake itself, once a socket exists.
+    private nonisolated static func attempt(
+        _ candidate: Candidate,
+        socket: any Carrying,
+        started: Date,
+        identity: StaticKeyPair,
+        remoteStatic: Data,
+        request: HandshakeRequest,
+        timeout: TimeInterval
+    ) async -> Outcome {
+        // Bound the whole attempt, not just the read.
+        //
+        // Only `receive` used to be under a deadline, and the observed cost was
+        // a dial that reported failure after 198 seconds — with the relay
+        // already connected and waiting the whole time, because a task group
+        // does not return until every child has. A `send` to an address that no
+        // longer exists is where it hung, and cancellation could not reach it.
+        //
+        // Closing the socket can, and does it whatever the operation was: it
+        // makes both `send` and `receive` fail at once. That keeps the drain
+        // after a winner bounded by the handshake timeout rather than by
+        // whatever URLSession decides to do with a black hole.
+        let deadline = Task {
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            if Task.isCancelled { return }
+            socket.close("did not answer within \(Int(timeout))s")
+        }
+        defer { deadline.cancel() }
         do {
             let initiator = try NoiseInitiator(staticKeys: identity, remoteStatic: remoteStatic, prologue: tunnelPrologue)
             try await socket.send(initiator.writeMessage(try request.encoded()))

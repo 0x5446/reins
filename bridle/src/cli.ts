@@ -172,7 +172,7 @@ async function start(options: Options): Promise<void> {
   }
   // Published to every app in the ready frame, so a phone paired on one
   // network learns where this machine lives on the next one.
-  core.directAddresses = directAddresses
+  core.directAddresses = () => [...advertised, ...(direct?.addresses ?? [])]
 
   const relay = new RelayClient(core, {
     version: VERSION,
