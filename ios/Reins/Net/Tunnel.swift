@@ -196,18 +196,12 @@ public actor Tunnel {
     private var lastFrameAt = Date()
     private var watchdog: Task<Void, Never>?
     private var watcher: PathWatcher?
-    private var upgrade: Task<Void, Never>?
     /// The outstanding foreground probe, so a second poke does not stack one.
     private var probing: Task<Void, Never>?
-    /// Bumped on every adopted carrier, so `pump` can tell a socket it is still
-    /// reading from apart from one that was retired under it.
-    private var carrierGeneration = 0
-    /// Which direct address is live, and since when — the two facts needed to
-    /// know whether a drop counts as flapping.
-    private var adoptedLabel: String?
-    private var adoptedAt: Date?
-    /// Direct addresses not to try again before this moment.
-    private var lanPenalty: [String: Date] = [:]
+    /// When the live carrier went direct, so a drop can be judged as flapping.
+    private var lanAdoptedAt: Date?
+    /// Do not dial a local address before this moment.
+    private var lanBlockedUntil: Date?
     /// Whether the phone currently has Wi-Fi. Set by the first path update,
     /// which `NWPathMonitor` delivers as soon as it is started.
     private var onWiFi = false
@@ -297,8 +291,6 @@ public actor Tunnel {
         loop?.cancel()
         loop = nil
         sleeper?.cancel()
-        upgrade?.cancel()
-        upgrade = nil
         watcher = nil
         teardown(reason: "closed by the app")
         status = .idle
@@ -601,100 +593,58 @@ public actor Tunnel {
 
     // MARK: - Upgrading to the local network
 
-    /// Move a relayed connection onto the local network when one appears.
+    /// Move a relayed connection onto the local network by reconnecting.
     ///
-    /// A phone that walks in the door is still talking through Cloudflare, and
-    /// will be until something makes it reconnect — which, since the relay is
-    /// working, is nothing. That costs latency on every keystroke, spends the
-    /// Worker's request budget on traffic that never needed to leave the flat,
-    /// and tells the relay a session is happening when the two machines are a
-    /// metre apart.
+    /// A phone that walks in the door goes on talking through Cloudflare,
+    /// because the relay is working and nothing asks it to stop: an extra
+    /// round trip on every keystroke, a request budget spent on traffic that
+    /// never needed to leave the flat, and a third party told a session is
+    /// happening between two machines a metre apart.
     ///
-    /// Three rules, and each one is there because the naive version is worse
-    /// than not doing it:
+    /// The first version of this built a second tunnel, swapped it in, and
+    /// retired the old one — seamless, and about a hundred and fifty lines,
+    /// including a generation counter that the receive loop had to consult on
+    /// every frame to know whether the bytes in its hand belonged to a socket
+    /// already thrown away. All of it bought one property: no visible blink.
     ///
-    /// - **Triggered, never polled.** Only a path change or a return to the
-    ///   foreground starts this. A timer would wake the radio to ask a question
-    ///   whose answer is almost always "no".
-    /// - **Built before adopted.** The relay carrier is not touched until the
-    ///   local handshake has completed. A failed upgrade is invisible; there is
-    ///   no window in which neither is live.
-    /// - **Penalised if it flaps.** Wi-Fi at the edge of range connects and
-    ///   dies, and a switch that keeps happening is worse than never switching
-    ///   at all. An address that drops within {@link flapWindow} of being
-    ///   adopted is left alone for {@link flapPenalty}.
+    /// That property is not worth it. Reconnecting is the best-tested path in
+    /// this file — a phone does it every time the radio sleeps — and it is
+    /// lossless by construction: `resume` replays the gap by sequence number.
+    /// It costs about a second and a line of grey text. So the upgrade is now
+    /// the same thing a dropped connection is, deliberately: close the socket
+    /// and let the reconnect happen. The opening race already prefers the
+    /// local address, because the relay starts {@link TunnelTimings.relayHeadStart}
+    /// late, so "try Wi-Fi again" needs no machinery of its own — it is just
+    /// "dial again, from here".
+    ///
+    /// What is left is the part that is actually load-bearing: *when* to do it
+    /// (on a change, never on a timer), and *not while a call is outstanding*,
+    /// since a reply has nowhere to be replayed from.
     private func considerUpgrade() {
         // Without Wi-Fi there is no local address to reach, and trying anyway
-        // costs two eight-second timeouts with the radio awake for both — on
-        // every return to the foreground, for a phone that is out of the house
-        // and cannot possibly succeed.
+        // costs a reconnect that can only land back on the relay.
         guard onWiFi else { return }
         guard case .online(.relay, _, _) = status else { return }
-        guard upgrade == nil else { return }
-        // Only while nothing is outstanding. A call already sent to the relay
-        // would be answered on a socket about to be retired, and while the
-        // event stream survives a swap by sequence number, a reply does not:
-        // it has nowhere to be replayed from.
         guard pending.isEmpty else { return }
-        let targets = directCandidates()
-        guard !targets.isEmpty else { return }
-        upgrade = Task { await self.attemptUpgrade(targets) }
+        guard !candidates().filter({ $0.carrier == .lan }).isEmpty else { return }
+        note(.attempt, "Wi-Fi is available — reconnecting to try the local address")
+        carrier?.close("looking for a local address")
     }
 
-    private func attemptUpgrade(_ targets: [Candidate]) async {
-        defer { upgrade = nil }
-        guard let remoteStatic = bundle.staticKey else { return }
-        note(.attempt, "On the relay with Wi-Fi available — trying to go direct")
-        let (winner, _, refusal) = await dial(targets, remoteStatic: remoteStatic)
-        // A refusal here is not the refusal it would be during a dial. The
-        // relay connection is up and working, and whatever the Mac thinks of
-        // this device over the local address, taking down a live tunnel to act
-        // on it would replace a working app with a broken one.
-        if let refusal { note(.fail, "The Mac refused the direct connection: \(refusal)") }
-        guard let winner else {
-            note(.attempt, "Staying on the relay")
-            return
-        }
-
-        // Everything checked before the dial has had a whole handshake to stop
-        // being true: the relay may have dropped, a call may have gone out, the
-        // person may have backgrounded the app. Adopting on stale premises is
-        // how a "seamless" switch loses a reply.
-        guard case .online(.relay, _, _) = status, pending.isEmpty else {
-            winner.socket.close("no longer needed")
-            return
-        }
-        let retiring = carrier
-        adopt(winner)
-        adoptedAt = Date()
-        adoptedLabel = winner.label
-        // Retired only after the new one is in place, and its in-flight bytes
-        // are dropped rather than decrypted: `pump` compares generations, and
-        // anything it discards is replayed by `resume` because nothing that was
-        // dropped ever advanced `highestSeq`.
-        retiring?.close("upgraded to the local network")
-        note(.ok, "Moved off the relay onto \(winner.label) in \(elapsed(winner.took))")
-    }
-
-    /// Local addresses worth trying, minus any that have just proved flaky.
-    private func directCandidates() -> [Candidate] {
-        let now = Date()
-        return candidates().filter { candidate in
-            guard candidate.carrier == .lan else { return false }
-            guard let until = lanPenalty[candidate.label] else { return true }
-            return now >= until
-        }
-    }
-
-    /// Record that a direct connection did not last, so the next chance to take
-    /// it is not taken immediately.
+    /// Record that a direct connection did not last, so the next dial does not
+    /// walk straight back into it.
+    ///
+    /// Per path rather than per address. The distinction bought nothing: the
+    /// addresses on offer are one real interface and a Docker bridge that never
+    /// answers, and "the local path is unreliable right now" is the whole of
+    /// what the app can usefully know. One date instead of a dictionary.
     private func penaliseIfItFlapped() {
-        guard let label = adoptedLabel, let at = adoptedAt else { return }
-        adoptedLabel = nil
-        adoptedAt = nil
-        guard Date().timeIntervalSince(at) < timings.flapWindow else { return }
-        lanPenalty[label] = Date().addingTimeInterval(timings.flapPenalty)
-        note(.fail, "\(label) dropped after \(elapsed(Date().timeIntervalSince(at))) — leaving it alone for a while")
+        guard let at = lanAdoptedAt else { return }
+        lanAdoptedAt = nil
+        let lasted = Date().timeIntervalSince(at)
+        guard lasted < timings.flapWindow else { return }
+        lanBlockedUntil = Date().addingTimeInterval(timings.flapPenalty)
+        note(.fail, "The local address dropped after \(elapsed(lasted)) — leaving it alone for a while")
     }
 
     /// The phone's network changed under the connection.
@@ -718,33 +668,16 @@ public actor Tunnel {
     private func adopt(_ attempt: Attempt) {
         carrier = attempt.socket
         channel = attempt.channel
-        carrierGeneration += 1
         lastFrameAt = Date()
         startWatchdog()
         pairingToken = nil
         confirmation = Pairing.confirmationNumber(handshakeHash: attempt.channel.handshakeHash)
-        // Whether dsh is up is a fact about the Mac, not about the wire, so it
-        // survives a change of wire. Resetting it would flash "dsh isn't
-        // running" across the screen during an upgrade in which nothing about
-        // dsh happened; on a first connection there is nothing to carry and
-        // `ready` fills it in a moment later either way.
-        var harnessUp = false
-        if case .online(_, _, let known) = status { harnessUp = known }
         status = .online(
             carrier: attempt.carrier,
             machine: attempt.reply.machine ?? bundle.name,
-            harnessUp: harnessUp
+            harnessUp: false
         )
-        // Tracked for any adopted direct carrier, not just an upgraded one: an
-        // address that drops connections does it whether the opening race or
-        // the upgrade was what picked it.
-        if attempt.carrier == .lan {
-            adoptedLabel = attempt.label
-            adoptedAt = Date()
-        } else {
-            adoptedLabel = nil
-            adoptedAt = nil
-        }
+        lanAdoptedAt = attempt.carrier == .lan ? Date() : nil
     }
 
     /// One address worth trying.
@@ -778,16 +711,14 @@ public actor Tunnel {
 
     private func candidates() -> [Candidate] {
         var found: [Candidate] = []
-        let now = Date()
-        for address in learnedDirect ?? bundle.direct ?? [] {
+        // A penalised path is skipped by the opening dial too, not just by the
+        // upgrade. Racing an address that has just proved it drops connections
+        // is how a flap becomes a loop: it wins precisely because it is local,
+        // then dies, then wins again.
+        let blocked = lanBlockedUntil.map { Date() < $0 } ?? false
+        for address in blocked ? [] : (learnedDirect ?? bundle.direct ?? []) {
             guard let url = URL(string: "\(address)/v1/tunnel") else { continue }
-            let label = "Wi-Fi \(Tunnel.place(url))"
-            // A penalised address is skipped by the opening dial too, not just
-            // by the upgrade. Racing an address that has just proved it drops
-            // connections is how a flap becomes a loop: it wins the race
-            // precisely because it is local, then dies, then wins again.
-            if let until = lanPenalty[label], now < until { continue }
-            found.append(Candidate(url: url, carrier: .lan, label: label, delay: 0))
+            found.append(Candidate(url: url, carrier: .lan, label: "Wi-Fi \(Tunnel.place(url))", delay: 0))
         }
         if var components = URLComponents(string: bundle.relay) {
             components.scheme = components.scheme == "https" || components.scheme == "wss" ? "wss" : "ws"
@@ -869,28 +800,12 @@ public actor Tunnel {
 
     /// Read frames until the socket dies or the task is cancelled.
     ///
-    /// Re-reads `carrier` every pass rather than holding the one it started
-    /// with, because an upgrade to Wi-Fi replaces it mid-loop. The generation
-    /// counter is what makes that safe: bytes that arrive on a socket already
-    /// retired belong to a cipher state that no longer exists, and its failure
-    /// belongs to a connection nobody is using — neither should be allowed to
-    /// tear down the connection that took its place. Discarding them loses
-    /// nothing, because nothing discarded advanced `highestSeq`, and the new
-    /// carrier's `resume` asks for everything past it.
     private func pump() async throws {
+        guard let socket = carrier, let channel else {
+            throw CallError(code: "disconnected", message: "Not connected.")
+        }
         while !Task.isCancelled {
-            guard let socket = carrier, let channel else {
-                throw CallError(code: "disconnected", message: "Not connected.")
-            }
-            let generation = carrierGeneration
-            let bytes: Data
-            do {
-                bytes = try await socket.receive()
-            } catch {
-                if carrierGeneration != generation { continue }
-                throw error
-            }
-            guard carrierGeneration == generation else { continue }
+            let bytes = try await socket.receive()
             lastFrameAt = Date()
             let plaintext: Data
             do {
@@ -908,6 +823,7 @@ public actor Tunnel {
     private func handle(_ frame: ServerFrame) {
         switch frame {
         case .ready(let ready):
+            var learned = false
             // Events do not flow until the app asks. On a first connection it
             // asks from the machine's own head, so it gets what happens next
             // rather than a replay of a conversation it is about to fetch in
@@ -921,11 +837,24 @@ public actor Tunnel {
                 note(.ok, direct.isEmpty
                     ? "The Mac says it has no direct address"
                     : "The Mac is now at \(direct.compactMap { URL(string: $0).map(Tunnel.place) }.joined(separator: ", "))")
+                // Learning an address is itself a reason to try it. Without
+                // this the two triggers — a path change and a return to the
+                // foreground — both miss the case that actually happens: a Mac
+                // that moved networks while the phone was away. The stored
+                // address is stale, so the opening race loses it and the relay
+                // wins; the ready frame then hands over the address that would
+                // have won, and nothing asks again. Measured on a machine that
+                // had moved to a different office network: relayed for as long
+                // as the app stayed open, a metre from the Mac.
+                learned = true
             }
             status = .online(carrier: currentCarrier, machine: ready.machine, harnessUp: ready.dshReachable)
             continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host, direct: ready.direct))
             continuation?.yield(.harness(reachable: ready.dshReachable, detail: nil))
             try? write(ResumeFrame(since: highestSeq))
+            // After the status is settled, so the guard inside sees the live
+            // carrier rather than the one being replaced.
+            if learned { considerUpgrade() }
         case .response(let id, let result):
             settle(id, result.mapError { $0 as Error })
         case .event(let event):

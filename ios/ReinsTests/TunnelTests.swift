@@ -195,7 +195,11 @@ final class TunnelTests: XCTestCase {
 
         var timings = TunnelTimings()
         timings.handshake = 0.2
-        timings.relayHeadStart = 0
+        // The shipping head start, not zero. It *is* the preference for the
+        // local path — the upgrade is now a plain reconnect, and what makes
+        // that reconnect land on Wi-Fi is the relay starting late. Zeroing it
+        // tests a configuration that never ships and makes the race a toss-up.
+        timings.relayHeadStart = 0.15
         let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
 
         await tunnel.start()
@@ -213,7 +217,6 @@ final class TunnelTests: XCTestCase {
             return false
         }
         status = await tunnel.status
-        // Carried across the swap rather than reset — nothing about dsh changed.
         XCTAssertEqual(status, .online(carrier: .lan, machine: "a-mac", harnessUp: true))
         await tunnel.stop()
     }
@@ -283,43 +286,6 @@ final class TunnelTests: XCTestCase {
         await tunnel.stop()
     }
 
-    /// A Mac that moved networks is dialled where it is, not where it was.
-    ///
-    /// The pairing bundle freezes the direct addresses of pairing day. Before
-    /// the ready frame carried fresh ones, a Mac that later joined a hotspot
-    /// or an office network was relay-only forever — the phone kept dialling
-    /// an address from a network neither of them was on any more.
-    func testTheMachineTeachesItsCurrentAddressAndTheUpgradeUsesIt() async throws {
-        let mac = FakeBridle(direct: ["ws://172.20.10.2:61000"])
-        let board = TestSwitchboard()
-        board.route("relay.test:0", to: .machine(mac))
-        // Pairing-day address: a network that no longer exists.
-        board.route("192.168.1.9:61000", to: .blackHole)
-        board.route("172.20.10.2:61000", to: .machine(mac))
-
-        var timings = TunnelTimings()
-        timings.handshake = 0.2
-        timings.relayHeadStart = 0
-        let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
-
-        await tunnel.start()
-        try await waitForOnline(tunnel)
-
-        await tunnel.networkChangedForTesting(onWiFi: true)
-        try await waitFor("the switch onto the learned address") {
-            if case .online(.lan, _, _) = await tunnel.status { return true }
-            return false
-        }
-        // The learned list replaces the stale one rather than joining it, so
-        // the upgrade dialled only the address the machine actually has.
-        let upgradeDials = board.dialledAddresses.dropFirst(2)
-        XCTAssertEqual(Array(upgradeDials), ["172.20.10.2:61000"])
-        await tunnel.stop()
-    }
-
-    /// The route the chip draws has to be the route in use, at the moment it
-    /// changes — the whole value of showing it is that it stops being true
-    /// while you watch.
     func testTheStatusReportsTheRouteAndUpdatesWhenItSwitches() async throws {
         let mac = FakeBridle(direct: ["ws://192.168.1.9:61000"])
         let board = TestSwitchboard()
@@ -328,7 +294,7 @@ final class TunnelTests: XCTestCase {
 
         var timings = TunnelTimings()
         timings.handshake = 0.2
-        timings.relayHeadStart = 0
+        timings.relayHeadStart = 0.15
         let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.1.9:61000"]), board: board, timings: timings)
 
         // Every status the app sees, which is what the chip renders from.
@@ -348,6 +314,70 @@ final class TunnelTests: XCTestCase {
         await tunnel.networkChangedForTesting(onWiFi: true)
 
         try await waitFor("the switch to be reported") { await seen.all == [.relay, .lan] }
+        await tunnel.stop()
+    }
+
+    /// A Mac that moved while the phone was away must not stay relayed.
+    ///
+    /// The sequence measured in an office: the stored address is from another
+    /// network, so the opening race loses it and the relay wins; the ready
+    /// frame then hands over the address that *would* have won. With only a
+    /// path change or a foreground return as triggers, nothing asks again —
+    /// the app sat on the relay a metre from the Mac for as long as it stayed
+    /// open.
+    ///
+    /// The first version of this test passed without the fix, which made it
+    /// worth nothing: it let the harness deliver the fresh address on the very
+    /// first dial, so the race found it unaided. The stale address has to
+    /// actually win the first round for the question to be asked at all, which
+    /// is what `direct(after:)` arranges.
+    func testLearningAFreshAddressIsEnoughToLeaveTheRelay() async throws {
+        let mac = FakeBridle(direct: ["ws://10.1.151.64:61000"])
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        board.route("192.168.110.32:61000", to: .blackHole)
+        // Reachable only once the app has been told about it — before that a
+        // dial to it is as dead as any address on a network you have left.
+        board.route("10.1.151.64:61000", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        timings.handshake = 0.2
+        timings.relayHeadStart = 0.15
+        // The bundle knows only the old address, so the first race is between
+        // a black hole and the relay: the relay must win it.
+        let tunnel = make(bundle: mac.bundle(direct: ["ws://192.168.110.32:61000"]), board: board, timings: timings)
+
+        // Wi-Fi throughout; the path never changes and the app is never
+        // backgrounded, so neither existing trigger can fire. Only the ready
+        // frame is new.
+        //
+        // Read from the status stream rather than by polling: the upgrade is
+        // fast enough that a poll can miss the relay entirely, and a test that
+        // has to be slower than the code to see what it asserts is a test that
+        // will fail on a quick machine for no reason.
+        let seen = Routes()
+        let stream = await tunnel.signals()
+        Task {
+            for await signal in stream {
+                if case .status(.online(let carrier, _, _)) = signal { await seen.add(carrier) }
+            }
+        }
+        await tunnel.networkChangedForTesting(onWiFi: true)
+        await tunnel.start()
+
+        try await waitFor("the relay first, then the address it was taught") {
+            await seen.all == [.relay, .lan]
+        }
+        XCTAssertTrue(
+            board.dialledAddresses.contains("10.1.151.64:61000"),
+            "the learned address was never dialled: \(board.dialledAddresses)"
+        )
+        // And the learned list replaces the stale one rather than joining it:
+        // an address from a network the phone has left is never dialled twice.
+        XCTAssertEqual(
+            board.dialledAddresses.filter { $0 == "192.168.110.32:61000" }.count, 1,
+            "the stale address was dialled again after the machine taught a new one"
+        )
         await tunnel.stop()
     }
 
