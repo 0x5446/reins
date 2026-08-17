@@ -39,6 +39,28 @@ export class BridleCore {
   private status: DshStatus = { reachable: false, detail: 'not probed yet' }
 
   /**
+   * The requests dsh is still waiting on a person for, by session.
+   *
+   * An approval or a question crosses the wire once, as a live event. A phone
+   * that is not attached at that instant never learns the machine has stopped
+   * — and "not attached at that instant" is the normal case for this app,
+   * whose whole premise is that you are somewhere else. Opening Reins to find
+   * out why the agent went quiet showed a conversation that simply stopped.
+   *
+   * dsh does not have this problem because it re-sends pending requests to
+   * every new subscriber on the mux stream, which is what makes a browser
+   * reload work. Bridle's subscription is long-lived, so it collects that
+   * re-send only when *it* restarts, never when a phone reconnects. Holding
+   * them here puts the same guarantee one layer further out, where the phones
+   * actually come and go.
+   *
+   * Keyed by kind and session because that is the shape of the thing: a
+   * session waits on one approval or one question at a time, and the
+   * `resolved` event names the session rather than the request it closes.
+   */
+  private readonly waiting = new Map<string, unknown>()
+
+  /**
    * The LAN addresses a phone can dial this machine on right now, best first.
    *
    * A function, not an array, and that is the whole point. The first version
@@ -68,6 +90,48 @@ export class BridleCore {
     this.events = overrides.eventCapacity === undefined ? new EventLog() : new EventLog(overrides.eventCapacity)
   }
 
+  /** Every request still waiting on a person, for an app that just attached. */
+  get pendingRequests(): unknown[] {
+    return [...this.waiting.values()]
+  }
+
+  /**
+   * Note a request that has stopped the agent, or forget one that was answered.
+   * @param frame - a mux frame, verbatim.
+   */
+  private trackWaiting(frame: unknown): void {
+    const payload = (frame as { payload?: { type?: unknown; sessionId?: unknown } }).payload
+    const type = payload?.type
+    const sessionId = payload?.sessionId
+    if (typeof type !== 'string' || typeof sessionId !== 'string') return
+    if (type === 'approval/requested' || type === 'question/requested') {
+      this.waiting.set(`${type}:${sessionId}`, frame)
+      return
+    }
+    // Answered — by this phone, another one, or the browser on the machine
+    // itself. Whoever it was, nobody should be asked again.
+    if (type === 'approval/resolved') this.waiting.delete(`approval/requested:${sessionId}`)
+    if (type === 'question/resolved') this.waiting.delete(`question/requested:${sessionId}`)
+  }
+
+  /**
+   * Stop holding a request for a session that no longer exists.
+   *
+   * The only way an entry could outlive its answer: a session deleted while it
+   * was waiting on someone resolves nothing, so without this it would be
+   * offered to every phone that ever attached, forever. Small, but the only
+   * part of this bookkeeping that was not already bounded by construction.
+   * @param frame - a host-stream frame, verbatim.
+   */
+  private forgetRemoved(frame: unknown): void {
+    const payload = (frame as { payload?: { type?: unknown; sessionId?: unknown } }).payload
+    if (payload?.type !== 'host/session-removed') return
+    const sessionId = payload.sessionId
+    if (typeof sessionId !== 'string') return
+    this.waiting.delete(`approval/requested:${sessionId}`)
+    this.waiting.delete(`question/requested:${sessionId}`)
+  }
+
   /** dsh reachability as of the last probe or downlink transition. */
   get dshStatus(): DshStatus {
     return this.status
@@ -79,8 +143,14 @@ export class BridleCore {
    */
   async start(): Promise<void> {
     const signal = this.abort.signal
-    void this.dsh.pump('mux', frame => { this.events.append('mux', frame) }, (up, detail) => { this.onStream('mux', up, detail) }, signal)
-    void this.dsh.pump('host', frame => { this.events.append('host', frame) }, (up, detail) => { this.onStream('host', up, detail) }, signal)
+    void this.dsh.pump('mux', frame => {
+      this.trackWaiting(frame)
+      this.events.append('mux', frame)
+    }, (up, detail) => { this.onStream('mux', up, detail) }, signal)
+    void this.dsh.pump('host', frame => {
+      this.forgetRemoved(frame)
+      this.events.append('host', frame)
+    }, (up, detail) => { this.onStream('host', up, detail) }, signal)
     await this.probe()
     this.healthTimer = setInterval(() => { void this.probe() }, HEALTH_INTERVAL_MS)
     this.healthTimer.unref()

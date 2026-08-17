@@ -26,7 +26,7 @@ function core() {
       dshUrl: 'http://127.0.0.1:9',
       peers: [],
     },
-    { dsh: { call: async () => ({ ok: true, value: {} }), probe: async () => ({ reachable: false }), pump: async () => {} } },
+    { dsh: { baseUrl: 'http://127.0.0.1:9', call: async () => ({ ok: true, value: {} }), health: async () => ({ reachable: false }), pump: async () => {} } },
   )
 }
 

@@ -230,6 +230,16 @@ export class TunnelSession {
       direct: this.core.directAddresses(),
       seq: this.core.events.head,
     })
+    // Whatever the machine is already waiting on, said before anything else.
+    //
+    // Sent at sequence zero on purpose: these are not a position in the event
+    // log but a statement of what is true now, and a real sequence here would
+    // move the app's resume point past events it has not been given yet. The
+    // app folds them exactly as it folds the live ones, and being told twice
+    // is harmless — the card is keyed by session, not appended to a list.
+    for (const request of this.core.pendingRequests) {
+      this.sendFrame({ t: 'ev', seq: 0, stream: 'mux', frame: request })
+    }
     this.unwatchStatus = this.core.onDshStatus((next: DshStatus) => {
       this.sendFrame({ t: 'status', dshReachable: next.reachable, ...(next.detail === undefined ? {} : { detail: next.detail }) })
     })

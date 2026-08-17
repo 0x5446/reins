@@ -1069,3 +1069,18 @@ public final class GroupFolds {
         "reins.groupFolds.\(machineId)"
     }
 }
+
+// MARK: - Test seam
+
+extension MachineSession {
+    /// Feed one tunnel signal, as the pump does.
+    ///
+    /// The interrupts — an approval, a question — arrive only this way and
+    /// only from a machine that has stopped to ask, which is a state no test
+    /// could reach through the public surface. They went untested for exactly
+    /// that reason, and the first time one was needed in the field it did not
+    /// appear.
+    func receiveForTesting(_ signal: TunnelSignal) {
+        receive(signal)
+    }
+}
