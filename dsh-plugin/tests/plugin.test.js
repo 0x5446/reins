@@ -12,6 +12,7 @@ import test from 'node:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import { readRuntime } from '@reins/bridle'
 import { apply, name } from '../lib/index.js'
 
@@ -97,4 +98,30 @@ test('a Bridle inside dsh still answers "bridle status"', async (t) => {
 
   ctx.dispose()
   assert.equal(readRuntime(), undefined, 'unloading left a snapshot claiming a Bridle that is gone')
+})
+
+test('a Bridle that cannot start does not take dsh with it', async (t) => {
+  const previous = isolateHome()
+  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+
+  // Hold the port the plugin is told to use, the way a restart overlapping its
+  // predecessor does. This crashed a running harness: EADDRINUSE surfaced as an
+  // unhandled rejection out of `apply`'s fire-and-forget start, and Node treats
+  // that as fatal. A guest must fail alone.
+  const squatter = createServer()
+  await new Promise(resolve => squatter.listen(0, '0.0.0.0', resolve))
+  const port = squatter.address().port
+  t.after(() => { squatter.close() })
+
+  const failures = []
+  const onUnhandled = (reason) => failures.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  t.after(() => { process.off('unhandledRejection', onUnhandled) })
+
+  const ctx = fakeContext()
+  assert.doesNotThrow(() => { apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', directPort: port }) })
+  await new Promise(resolve => setTimeout(resolve, 600))
+
+  assert.deepEqual(failures, [], 'an unhandled rejection here is a dead harness')
+  assert.doesNotThrow(() => { ctx.dispose() })
 })

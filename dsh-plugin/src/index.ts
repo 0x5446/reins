@@ -62,7 +62,13 @@ const VERSION = '0.1.0'
  * @param ctx - the plugin context; its dispose hook owns teardown.
  * @param config - plugin settings, all optional.
  */
-export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void }, config: BridlePluginConfig = {}): void {
+export function apply(
+  ctx: {
+    on: (event: 'dispose', handler: () => void) => void
+    logger?: { error?: (message: string) => void }
+  },
+  config: BridlePluginConfig = {},
+): void {
   const state: BridleState = loadState()
   if (config.relay !== undefined && config.relay.length > 0) state.relayUrl = config.relay
   if (config.dsh !== undefined && config.dsh.length > 0) state.dshUrl = config.dsh
@@ -100,7 +106,23 @@ export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void
 
   // Nothing here awaits: Cordis mounts plugins concurrently and a plugin that
   // blocks its apply() holds up the harness it is meant to be a guest in.
+  //
+  // And nothing here may throw. `void` on a rejecting promise is an unhandled
+  // rejection, which Node treats as fatal — so a Bridle that cannot start
+  // would take dsh with it. That is not theoretical: a restart overlapping its
+  // predecessor could not bind the direct port, and the harness died rather
+  // than the plugin. A guest that fails should fail alone and say so.
   void (async () => {
+    try {
+      await start()
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      ctx.logger?.error?.(`reins-bridle failed to start: ${detail}`)
+      publish('offline')
+    }
+  })()
+
+  async function start(): Promise<void> {
     await core.start()
 
     if (config.noDirect !== true) {
@@ -116,7 +138,7 @@ export function apply(ctx: { on: (event: 'dispose', handler: () => void) => void
       relay.start()
     }
     publish()
-  })()
+  }
 
   ctx.on('dispose', () => {
     // Reverse order, and every step tolerant: a plugin that throws on unload

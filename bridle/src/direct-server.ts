@@ -47,21 +47,55 @@ export class DirectServer {
     })
     this.wss = new WebSocketServer({ server: this.http, path: DIRECT_PATH, maxPayload: 64 * 1024 * 1024 })
     this.wss.on('connection', (socket: WebSocket) => { this.attach(socket) })
+    // `ws` re-emits the HTTP server's failures, and an 'error' event with no
+    // listener takes the process down. This one is a guest inside dsh.
+    this.wss.on('error', (error: Error) => { this.options.log?.(`direct tunnel: ${error.message}`) })
   }
 
   /**
    * Start listening.
+   *
+   * A requested port that is already taken falls back to one the OS picks
+   * rather than failing. The pinned port is a convenience — it keeps a phone's
+   * stored direct address valid across restarts — and a convenience must not
+   * be able to stop the listener existing at all. It very nearly did: a
+   * restart that overlapped its predecessor hit EADDRINUSE, the `ws` server
+   * re-emitted it as an unhandled `error`, and the whole harness this runs
+   * inside went down with it.
+   *
+   * Losing the pinned port costs one failed dial: the phone tries the address
+   * it remembers, misses, connects by relay, and is told the new one in the
+   * `ready` frame.
    * @returns the bound port.
    */
-  listen(): Promise<number> {
+  async listen(): Promise<number> {
+    const wanted = this.options.port ?? 0
+    try {
+      return await this.bind(wanted)
+    } catch (error) {
+      const code = (error as { code?: string }).code
+      if (wanted === 0 || code !== 'EADDRINUSE') throw error
+      this.options.log?.(`port ${String(wanted)} is taken; letting the OS choose one`)
+      return this.bind(0)
+    }
+  }
+
+  private bind(port: number): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.http.once('error', reject)
-      this.http.listen(this.options.port ?? 0, '0.0.0.0', () => {
+      const onError = (error: Error): void => {
+        this.http.removeListener('listening', onListening)
+        reject(error)
+      }
+      const onListening = (): void => {
+        this.http.removeListener('error', onError)
         const address = this.http.address()
-        const port = typeof address === 'object' && address !== null ? address.port : 0
-        this.options.log?.(`direct tunnel listening on ${String(port)}`)
-        resolve(port)
-      })
+        const bound = typeof address === 'object' && address !== null ? address.port : 0
+        this.options.log?.(`direct tunnel listening on ${String(bound)}`)
+        resolve(bound)
+      }
+      this.http.once('error', onError)
+      this.http.once('listening', onListening)
+      this.http.listen(port, '0.0.0.0')
     })
   }
 
