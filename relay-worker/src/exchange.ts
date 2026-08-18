@@ -25,6 +25,7 @@ import {
   CLAIM_LIMIT,
   DEFAULT_MAX_CIRCUITS,
   DEFAULT_MAX_MACHINES,
+  SWEEP_INTERVAL_MS,
   MAX_OFFERS_PER_DEVICE,
   positiveInt,
 } from './limits.ts'
@@ -84,6 +85,7 @@ export type MachineDescription = { online: false } | { online: true; name: strin
 /** The directory, the census, the ceilings, and the rate limits. */
 export class Exchange extends DurableObject<Env> {
   private readonly maxMachines: number
+  private readonly sweepInterval: number
   private readonly maxCircuits: number
   /**
    * Rate-limit buckets, in memory on purpose.
@@ -99,6 +101,8 @@ export class Exchange extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.maxMachines = positiveInt(env.REINS_MAX_MACHINES, DEFAULT_MAX_MACHINES)
+    // Overridable so a test can force a sweep without waiting ten minutes.
+    this.sweepInterval = positiveInt(env.REINS_SWEEP_INTERVAL_MS, SWEEP_INTERVAL_MS)
     this.maxCircuits = positiveInt(env.REINS_MAX_CIRCUITS, DEFAULT_MAX_CIRCUITS)
   }
 
@@ -152,11 +156,8 @@ export class Exchange extends DurableObject<Env> {
       }))
     }
     await this.ctx.storage.put(`m:${deviceId}`, { switchboard, name, version, since: Date.now(), circuits: 0 } satisfies MachineRow)
-    await this.write({
-      machines: counts.machines + (existing === undefined ? 1 : 0),
-      circuits: counts.circuits - (existing?.circuits ?? 0),
-      offers: counts.offers,
-    })
+    const alarm = await this.ctx.storage.getAlarm()
+    if (alarm === null) await this.ctx.storage.setAlarm(Date.now() + this.sweepInterval)
     return { ok: true }
   }
 
@@ -169,12 +170,6 @@ export class Exchange extends DurableObject<Env> {
     const machine = await this.ctx.storage.get<MachineRow>(`m:${deviceId}`)
     if (machine === undefined || machine.switchboard !== switchboard) return
     await this.ctx.storage.delete(`m:${deviceId}`)
-    const counts = await this.counts()
-    await this.write({
-      machines: Math.max(0, counts.machines - 1),
-      circuits: Math.max(0, counts.circuits - machine.circuits),
-      offers: counts.offers,
-    })
   }
 
   /**
@@ -214,8 +209,6 @@ export class Exchange extends DurableObject<Env> {
     if (machine === undefined || machine.switchboard !== switchboard) return
     const next = Math.max(0, machine.circuits + delta)
     await this.ctx.storage.put(`m:${deviceId}`, { ...machine, circuits: next } satisfies MachineRow)
-    const counts = await this.counts()
-    await this.write({ ...counts, circuits: Math.max(0, counts.circuits + (next - machine.circuits)) })
   }
 
   /**
@@ -264,7 +257,22 @@ export class Exchange extends DurableObject<Env> {
     await this.setSlots(deviceId, slots)
   }
 
-  /** Sweep offer slots nobody claimed, so the census stops counting them. */
+  /**
+   * Sweep what nobody will come back for: lapsed offer slots, and machines
+   * whose connection is gone.
+   *
+   * A directory row is retracted when the Bridle's socket closes, and that
+   * close is not guaranteed to arrive — an evicted Worker, a laptop that
+   * vanished, a runtime that never delivered the event. Until now the only
+   * thing that noticed was a phone dialling that exact machine, which retracts
+   * the row on its way to being refused. A device id nobody dials again was
+   * therefore counted forever, and the count is what the ceiling is checked
+   * against: enough orphans and this Relay refuses machines it has room for.
+   *
+   * Asking each row's object is one round trip per machine, and the number of
+   * machines is the very thing the ceiling bounds — so the sweep costs no more
+   * than the limit it protects.
+   */
   override async alarm(): Promise<void> {
     const now = Date.now()
     let next = Infinity
@@ -275,7 +283,35 @@ export class Exchange extends DurableObject<Env> {
       if (Object.keys(kept).length === Object.keys(slots).length) continue
       await this.setSlots(key.slice(2), kept)
     }
+    const orphans = await this.sweepMachines()
+    // Re-armed while anything is held, so the next sweep happens whether or
+    // not another offer is ever made.
+    const rows = await this.ctx.storage.list({ prefix: 'm:' })
+    if (rows.size > 0) next = Math.min(next, now + this.sweepInterval)
     if (next !== Infinity) await this.ctx.storage.setAlarm(next)
+  }
+
+  /**
+   * Drop rows whose Switchboard no longer holds a Bridle.
+   * @returns how many were dropped.
+   */
+  private async sweepMachines(): Promise<number> {
+    const rows = await this.ctx.storage.list<MachineRow>({ prefix: 'm:' })
+    let dropped = 0
+    for (const [key, row] of rows) {
+      let live = false
+      try {
+        const object = this.env.SWITCHBOARD.get(this.env.SWITCHBOARD.idFromString(row.switchboard))
+        live = await object.holdsBridle()
+      } catch {
+        // An id that no longer resolves is as gone as an object that says so.
+        live = false
+      }
+      if (live) continue
+      await this.ctx.storage.delete(key)
+      dropped += 1
+    }
+    return dropped
   }
 
   private live(slots: OfferSlots | undefined, now: number): OfferSlots {
@@ -287,21 +323,35 @@ export class Exchange extends DurableObject<Env> {
   }
 
   private async setSlots(deviceId: string, slots: OfferSlots): Promise<void> {
-    const before = Object.keys(await this.ctx.storage.get<OfferSlots>(`o:${deviceId}`) ?? {}).length
-    const after = Object.keys(slots).length
-    if (after === 0) await this.ctx.storage.delete(`o:${deviceId}`)
+    if (Object.keys(slots).length === 0) await this.ctx.storage.delete(`o:${deviceId}`)
     else await this.ctx.storage.put(`o:${deviceId}`, slots)
-    if (after === before) return
-    const counts = await this.counts()
-    await this.write({ ...counts, offers: Math.max(0, counts.offers + (after - before)) })
   }
 
+  /**
+   * Count what is actually stored, rather than keeping a tally beside it.
+   *
+   * The tally was the bug. `read → modify → write` is not atomic here: a
+   * Durable Object lets other events run at every `await`, and `register`
+   * kicks off a displacement that calls back in to `unregister`, so two paths
+   * would each read the same number, each add their delta, and the second
+   * write would erase the first. A lost decrement never comes back, so the
+   * error only ever accumulated — observed drifting by one per restart until
+   * the census claimed three machines where there was one. Left long enough it
+   * would refuse new machines at a ceiling it had not actually reached.
+   *
+   * Deriving costs one list per census. The rows are small and there are as
+   * many as there are machines using this Relay, which is the same number the
+   * ceiling exists to bound — so the cost is bounded by the thing it measures.
+   */
   private async counts(): Promise<Counts> {
-    return await this.ctx.storage.get<Counts>('counts') ?? { machines: 0, circuits: 0, offers: 0 }
-  }
-
-  private async write(counts: Counts): Promise<void> {
-    await this.ctx.storage.put('counts', counts)
+    const machines = await this.ctx.storage.list<MachineRow>({ prefix: 'm:' })
+    let circuits = 0
+    for (const row of machines.values()) circuits += Math.max(0, row.circuits)
+    const offers = await this.ctx.storage.list<OfferSlots>({ prefix: 'o:' })
+    let live = 0
+    const now = Date.now()
+    for (const slots of offers.values()) live += Object.keys(this.live(slots, now)).length
+    return { machines: machines.size, circuits, offers: live }
   }
 
   private async startedAt(): Promise<number> {

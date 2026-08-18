@@ -72,6 +72,22 @@ export class Switchboard extends DurableObject<Env> {
     this.evict(4000, 'replaced by a newer connection')
   }
 
+  /**
+   * Whether this object still holds a registered Bridle socket.
+   *
+   * Asked by the Exchange's sweep. A directory row is only meaningful while
+   * the object it names still has the socket, and the close that would retract
+   * it is not guaranteed to arrive — a Worker evicted mid-flight, a laptop that
+   * vanished, a runtime that never delivered the event. Rows left by those go
+   * on being counted forever, which is how a Relay ends up claiming three
+   * machines while serving one.
+   * @returns true while a registered Bridle is attached here.
+   */
+  async holdsBridle(): Promise<boolean> {
+    const bridle = this.bridleSocket()
+    return bridle !== undefined && this.attachmentOf(bridle)?.role === 'bridle'
+  }
+
   /** Registration ran out of time. */
   override async alarm(): Promise<void> {
     const bridle = this.bridleSocket()

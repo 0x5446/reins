@@ -14,6 +14,8 @@ export interface Env {
   PAIR_CODE: DurableObjectNamespace<PairCode>
   /** Global machine ceiling; see `limits.ts`. */
   REINS_MAX_MACHINES?: string
+  /** Seconds between directory sweeps; only a test ever sets it. */
+  REINS_SWEEP_INTERVAL_MS?: string
   /** Global circuit ceiling; see `limits.ts`. */
   REINS_MAX_CIRCUITS?: string
 }

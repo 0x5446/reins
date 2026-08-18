@@ -201,3 +201,65 @@ test('a second socket for the same machine displaces the first', { skip, timeout
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Worker Displacement', 'phones reach the surviving socket')
 })
+
+test('the census counts what is stored, not what it remembered', { skip, timeout: 120_000 }, async (t) => {
+  // The bug this exists for: the census used to be a tally kept beside the
+  // rows and updated by read-modify-write. A Durable Object lets other events
+  // run at every await, and registering displaces the previous Switchboard,
+  // which calls back in to unregister — so two paths would each read the same
+  // number, each apply their delta, and the second write would erase the
+  // first. A lost decrement never returns, so the error only accumulated:
+  // observed climbing by one per restart until /healthz claimed three machines
+  // where there was one. Left alone it would eventually refuse machines at a
+  // ceiling it had not reached.
+  const before = (await health()).machines
+
+  // Reconnect the same machine repeatedly. Every cycle races a registration
+  // against the displacement of its predecessor, which is precisely the
+  // interleaving that used to lose an update.
+  for (let round = 0; round < 4; round += 1) {
+    const stack = await bridle(t, `Churn ${String(round)}`)
+    await stack.stop()
+  }
+
+  // Polled here rather than with `waitFor`, which takes a synchronous
+  // predicate: an async one returns a promise, every promise is truthy, and
+  // the wait would pass without ever checking anything.
+  const deadline = Date.now() + 30_000
+  let after = await health()
+  while (after.machines !== before && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 250))
+    after = await health()
+  }
+  assert.equal(after.machines, before, `census drifted to ${String(after.machines)} from ${String(before)}`)
+  assert.equal(after.circuits, 0, 'circuits outlived every socket that could hold one')
+})
+
+test('the sweep does not evict a machine that is still there', { skip, timeout: 120_000 }, async (t) => {
+  // The sweep exists because a row is retracted only when the Bridle's socket
+  // closes, and that close is not guaranteed to arrive — an evicted Worker, a
+  // laptop that vanished. Rows left behind were counted forever, and the count
+  // is what the ceiling is checked against.
+  //
+  // The orphan itself cannot honestly be staged from out here: every
+  // disconnection a test can cause *does* deliver its close, and the row heals
+  // through the path that already worked. What can be tested is the failure
+  // that would actually hurt — a sweep that mistakes a live machine for a dead
+  // one and cuts off someone who is using it. Run this against a Worker with
+  // REINS_SWEEP_INTERVAL_MS set low enough for several sweeps to pass.
+  const before = (await health()).machines
+  const stack = await bridle(t, 'Still Here')
+  assert.equal((await health()).machines, before + 1)
+
+  // Long enough for the sweep to have run more than once at the test interval.
+  await new Promise(resolve => setTimeout(resolve, 6_000))
+
+  assert.equal((await health()).machines, before + 1, 'the sweep evicted a machine that was still connected')
+  assert.equal(stack.relayClient.connectionState, 'online', 'the Bridle was cut off by its own Relay')
+
+  // And it is still usable, not merely counted.
+  const phone = new ReinsPhone({ bundle: stack.invite().bundle, name: 'After the sweep' })
+  t.after(() => { phone.close() })
+  const ready = await phone.connect()
+  assert.equal(ready.machine, 'Still Here')
+})

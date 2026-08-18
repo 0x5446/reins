@@ -37,6 +37,17 @@ export const MAX_BODY_BYTES = 64 * 1024
 export const RUNTIME_MAX_FRAME_BYTES = 32 * 1024 * 1024
 
 /** Machines the whole Relay will hold at once, when `REINS_MAX_MACHINES` is unset. */
+/**
+ * How often the Exchange checks its directory against reality.
+ *
+ * A row is retracted when the Bridle's socket closes, and that close is not
+ * guaranteed: an evicted Worker or a laptop that simply vanished leaves a row
+ * behind. Ten minutes is short enough that the census is never far wrong and
+ * long enough that the sweep costs nothing — one round trip per machine, at
+ * most six times an hour.
+ */
+export const SWEEP_INTERVAL_MS = 10 * 60 * 1000
+
 export const DEFAULT_MAX_MACHINES = 1_000
 
 /** Circuits across every machine, when `REINS_MAX_CIRCUITS` is unset. */
