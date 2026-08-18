@@ -35,12 +35,19 @@ function fakeContext() {
 
 /**
  * Keep this run's identity and state out of the developer's real ~/.reins.
- * @returns {object} the previous value, to restore.
+ *
+ * Set once for the whole file rather than per test, and never restored. The
+ * per-test version looked tidier and was wrong: `apply` leaves a heartbeat
+ * running, so any test that did not dispose kept publishing — and by then the
+ * variable had been put back, so it published into the real ~/.reins. That
+ * happened, with a stub's `http://127.0.0.1:9` in it, and `bridle status` on a
+ * live machine reported the harness as down.
  */
+process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
+
+/** Kept as a no-op so each test still reads as isolating itself. */
 function isolateHome() {
-  const previous = process.env.REINS_HOME
-  process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
-  return previous
+  return process.env.REINS_HOME
 }
 
 test('the plugin names itself for the harness plugin list', () => {
@@ -119,9 +126,11 @@ test('a Bridle that cannot start does not take dsh with it', async (t) => {
   t.after(() => { process.off('unhandledRejection', onUnhandled) })
 
   const ctx = fakeContext()
+  // Disposed on the way out whatever happens: `apply` starts a heartbeat, and
+  // a heartbeat that outlives its test is a process that never exits.
+  t.after(() => { try { ctx.dispose() } catch { /* already down */ } })
   assert.doesNotThrow(() => { apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', directPort: port }) })
   await new Promise(resolve => setTimeout(resolve, 600))
 
   assert.deepEqual(failures, [], 'an unhandled rejection here is a dead harness')
-  assert.doesNotThrow(() => { ctx.dispose() })
 })
