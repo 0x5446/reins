@@ -5,7 +5,7 @@
 /// approve a shell command on someone's Mac. The gap the system lock leaves is
 /// an *unlocked* phone in the wrong hands — handed over, snatched at a table,
 /// left on a desk — and in that gap Reins is a remote shell with no further
-/// challenge. `the architecture review` #3.
+/// challenge.
 ///
 /// It cannot make the phone safe. What it can do is put a bound on the window:
 /// after the idle timeout the app is useless to whoever is holding it, and the

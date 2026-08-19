@@ -169,8 +169,8 @@ public struct Workspace: Identifiable, Equatable, Sendable {
 /// The rule is exact-match, and it has to be. The machine files a conversation
 /// under the workspace whose path *equals* its working directory, so a folder
 /// inside a workspace is not in that workspace — and this is not a hypothetical:
-/// a machine with both `~/workspace` and `~/workspace/invoice-service`
-/// registered is the shape this was written against, and prefix matching would
+/// a machine with both `~/code` and `~/code/invoice-service` registered is
+/// the shape this was written against, and prefix matching would
 /// name the wrong one for every conversation in the nested folder.
 public enum WorkspacePlacement: Equatable, Sendable {
     /// A workspace stands for exactly this folder, and a conversation started

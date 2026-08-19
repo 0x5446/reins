@@ -95,11 +95,11 @@ final class WorkspaceParsingTests: XCTestCase {
 
 /// The rule the folder browser now states out loud before a conversation
 /// starts. Exact match, and the nested case is the one that matters: the machine
-/// this was written against has both `~/workspace` and
-/// `~/workspace/invoice-service` registered.
+/// this was written against has both `~/code` and `~/code/invoice-service`
+/// registered.
 final class WorkspacePlacementTests: XCTestCase {
     private let registered = [
-        Workspace(id: "w1", path: "/Users/dev/code", title: "workspace", sessionIds: []),
+        Workspace(id: "w1", path: "/Users/dev/code", title: "code", sessionIds: []),
         Workspace(id: "w2", path: "/Users/dev/code/invoice-service", title: "Invoice service", sessionIds: []),
     ]
 
@@ -110,7 +110,7 @@ final class WorkspacePlacementTests: XCTestCase {
         )
     }
 
-    /// Prefix matching would name `~/workspace` for every conversation in the
+    /// Prefix matching would name `~/code` for every conversation in the
     /// nested folder, and every one of those names would be wrong.
     func testAFolderInsideAWorkspaceIsNotThatWorkspace() {
         XCTAssertEqual(
@@ -122,7 +122,7 @@ final class WorkspacePlacementTests: XCTestCase {
     func testATrailingSlashIsTheSameFolder() {
         XCTAssertEqual(
             WorkspacePlacement.resolve(path: "/Users/dev/code/", workspaces: registered, grouping: true),
-            .joins(workspaceId: "w1", title: "workspace")
+            .joins(workspaceId: "w1", title: "code")
         )
     }
 
