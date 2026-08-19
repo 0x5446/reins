@@ -42,8 +42,7 @@ final class TunnelTests: XCTestCase {
         try await waitForOnline(tunnel)
         let took = Date().timeIntervalSince(started)
 
-        let carrier = await tunnel.status
-        XCTAssertEqual(carrier, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
         XCTAssertLessThan(took, 2, "the relay waited for the local address to time out")
         await tunnel.stop()
     }
@@ -63,8 +62,7 @@ final class TunnelTests: XCTestCase {
         await tunnel.start()
         try await waitForOnline(tunnel)
 
-        let status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .lan, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .lan)
         XCTAssertEqual(board.dialledAddresses, ["192.168.1.9:61000"], "the relay was dialled anyway")
         await tunnel.stop()
     }
@@ -124,8 +122,7 @@ final class TunnelTests: XCTestCase {
         board.carrier(for: "relay.test:0")?.goQuiet()
 
         try await waitFor("a second handshake") { await mac.handshakes >= 2 }
-        let status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
         await tunnel.stop()
     }
 
@@ -207,8 +204,7 @@ final class TunnelTests: XCTestCase {
 
         let handshakes = await mac.handshakes
         XCTAssertEqual(handshakes, 1, "a live carrier was torn down by its own probe")
-        let status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
         await tunnel.stop()
     }
 
@@ -235,8 +231,7 @@ final class TunnelTests: XCTestCase {
 
         await tunnel.start()
         try await waitForOnline(tunnel)
-        var status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
 
         // The Mac becomes reachable locally, which is what joining the network
         // means from the app's side.
@@ -247,8 +242,7 @@ final class TunnelTests: XCTestCase {
             if case .online(.lan, _, _) = await tunnel.status { return true }
             return false
         }
-        status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .lan, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .lan)
         await tunnel.stop()
     }
 
@@ -270,8 +264,7 @@ final class TunnelTests: XCTestCase {
 
         await tunnel.start()
         try await waitForOnline(tunnel)
-        var status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .lan, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .lan)
 
         // Dies well inside the flap window.
         board.carrier(for: "192.168.1.9:61000")?.close("wifi dropped")
@@ -280,8 +273,7 @@ final class TunnelTests: XCTestCase {
             if case .online(.relay, _, _) = await tunnel.status { return true }
             return false
         }
-        status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
 
         // And it stays off it: an upgrade offered now is declined.
         let before = board.dialledAddresses.filter { $0 == "192.168.1.9:61000" }.count
@@ -417,8 +409,7 @@ final class TunnelTests: XCTestCase {
         await tunnel.start()
         try await waitForOnline(tunnel)
 
-        let status = await tunnel.status
-        XCTAssertEqual(status, .online(carrier: .relay, machine: "a-mac", harnessUp: true))
+        try await expectOnline(tunnel, .relay)
         XCTAssertEqual(
             board.dialledAddresses, ["relay.test:0"],
             "an address on no network of ours was dialled anyway"
@@ -469,16 +460,60 @@ final class TunnelTests: XCTestCase {
         )
     }
 
+    /// Assert the settled status by waiting for it, never by sampling.
+    ///
+    /// Sampling was the bug. Every one of these assertions used to read
+    /// `tunnel.status` into a local and compare the whole value, and the value
+    /// has a legitimate two-step transition — so roughly one run in five caught
+    /// it mid-step and failed on a `harnessUp` that was about to be true. It hit
+    /// a different test each time, because which test loses the race is a matter
+    /// of scheduling. Waiting for the state you mean cannot observe the state
+    /// before it.
+    /// - Parameters:
+    ///   - tunnel: the tunnel under test.
+    ///   - carrier: the path it must have settled on.
+    private func expectOnline(
+        _ tunnel: Tunnel,
+        _ carrier: Carrier,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        try await waitFor("the tunnel to settle online over \(carrier)", file: file, line: line) {
+            await tunnel.status == .online(carrier: carrier, machine: "a-mac", harnessUp: true)
+        }
+    }
+
+    /// Wait for online *and settled*, which are not the same instant.
+    ///
+    /// The handshake reply carries the machine name, so the tunnel goes online
+    /// the moment it lands — with `harnessUp: false`, because whether dsh
+    /// answers is not known until the ready frame arrives a moment later. That
+    /// window is real and correct, and a wait that returns inside it hands the
+    /// test a half-built status: this caught
+    /// `testWiFiAppearingMovesTheConnectionOffTheRelay` once in five runs,
+    /// asserting `harnessUp: true` against a value that was about to be true.
+    ///
+    /// The fake always reports dsh reachable, so waiting for `harnessUp` is
+    /// waiting for the ready frame — the second step, by the only part of the
+    /// status that distinguishes it.
     private func waitForOnline(_ tunnel: Tunnel) async throws {
         try await waitFor("the tunnel to come online") {
-            if case .online = await tunnel.status { return true }
+            if case .online(_, _, true) = await tunnel.status { return true }
             return false
         }
     }
 
+    /// - Parameters:
+    ///   - what: named in the failure, so a timeout says what never happened.
+    ///   - timeout: how long to keep asking.
+    ///   - file: the caller, so the failure lands on the assertion and not here.
+    ///   - line: likewise.
+    ///   - condition: polled until true.
     private func waitFor(
         _ what: String,
         timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line,
         _ condition: () async -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -486,7 +521,7 @@ final class TunnelTests: XCTestCase {
             if await condition() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTFail("timed out waiting for \(what)")
+        XCTFail("timed out waiting for \(what)", file: file, line: line)
     }
 
     private func collectSignals(_ tunnel: Tunnel) async -> Counter {
