@@ -29,6 +29,7 @@ import { exchangeOf } from './env.ts'
 import { deviceIdFor, mintNonce, verifyRegistration } from './identity.ts'
 import { MAX_CIRCUITS_PER_MACHINE, REGISTER_TIMEOUT_MS } from './limits.ts'
 import { MuxType, decodeMux, decodeText, encodeMux, encodeText, fromBase64Url } from './wire.ts'
+import { wake, type WakeTarget } from './apns.ts'
 
 /**
  * What each socket carries across a hibernation.
@@ -231,6 +232,32 @@ export class Switchboard extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: pair[0] })
   }
 
+  /**
+   * Ask APNs to ring a phone, and tell the Bridle if the token is dead.
+   *
+   * Reported back rather than logged, because the Bridle is the only place that
+   * can act on it: APNs says `BadDeviceToken` when an app has been reinstalled
+   * or restored onto a different phone, and a Bridle that never hears will keep
+   * ringing a number that no longer exists for as long as the pairing lasts.
+   * @param payload - the JSON `WakeRequest` the Bridle sent.
+   */
+  private async ring(payload: Uint8Array): Promise<void> {
+    let target: WakeTarget
+    try {
+      const parsed: unknown = JSON.parse(decodeText(payload))
+      const { token, environment, machine } = parsed as Partial<WakeTarget>
+      if (typeof token !== 'string' || (environment !== 'sandbox' && environment !== 'production')) return
+      target = { token, environment, ...(typeof machine === 'string' ? { machine } : {}) }
+    } catch {
+      return
+    }
+    const outcome = await wake(this.env, target)
+    if (outcome.ok || outcome.reason !== 'rejected') return
+    const bridle = this.bridleSocket()
+    if (bridle === undefined) return
+    bridle.send(encodeMux(MuxType.Wake, 0, encodeText(JSON.stringify({ token: target.token, dead: true }))))
+  }
+
   private forwardFromBridle(bytes: ArrayBuffer): void {
     let message
     try {
@@ -238,6 +265,12 @@ export class Switchboard extends DurableObject<Env> {
     } catch {
       // A Bridle that speaks a newer mux version will send frames this Relay
       // cannot classify; dropping them is better than dropping the machine.
+      return
+    }
+    // Before the circuit lookup, because a wake has no circuit — that it has
+    // nobody to talk to is the entire reason it was sent.
+    if (message.type === MuxType.Wake) {
+      this.ctx.waitUntil(this.ring(message.payload))
       return
     }
     const target = this.ctx.getWebSockets(`c:${String(message.circuit)}`)[0]

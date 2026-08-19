@@ -16,6 +16,8 @@ export const MuxType = {
   Data: 0x02,
   /** Either direction: the circuit ended; payload is a UTF-8 reason. */
   Close: 0x03,
+  /** Bridle to Relay: ring a phone that is not attached; circuit is 0. */
+  Wake: 0x04,
 } as const
 
 /** One {@link MuxType} value. */
@@ -58,7 +60,7 @@ export function decodeMux(bytes: ArrayBuffer): MuxMessage {
   if (bytes.byteLength < MUX_HEADER_LENGTH) throw new Error('relay frame is shorter than its header')
   const view = new DataView(bytes)
   const type = view.getUint8(0)
-  if (type !== MuxType.Open && type !== MuxType.Data && type !== MuxType.Close) {
+  if (type !== MuxType.Open && type !== MuxType.Data && type !== MuxType.Close && type !== MuxType.Wake) {
     throw new Error(`relay frame has unknown type ${String(type)}`)
   }
   return { type, circuit: view.getUint32(1), payload: new Uint8Array(bytes, MUX_HEADER_LENGTH) }

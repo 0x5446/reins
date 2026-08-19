@@ -34,6 +34,15 @@ export interface PairedPeer {
   pairedAt: number
   /** Epoch milliseconds of the most recent successful handshake. */
   lastSeen: number
+  /**
+   * Where to ring this device when it is not attached.
+   *
+   * Learned inside the Noise channel and kept here rather than at the Relay,
+   * so the Relay is handed a token only at the instant a push is sent and has
+   * no standing list of who can be reached. Absent until the app offers one,
+   * and removed when it withdraws it or APNs says it is dead.
+   */
+  push?: { token: string; environment: 'sandbox' | 'production' }
 }
 
 /** A pairing offer waiting to be claimed. */

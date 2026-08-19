@@ -95,6 +95,7 @@ export class TunnelSession {
   private channel: SecureChannel | undefined
   private readonly inflight = new Map<string, AbortController>()
   private unsubscribe: (() => void) | undefined
+  private detach: (() => void) | undefined
   private unwatchStatus: (() => void) | undefined
   private pingTimer: NodeJS.Timeout | undefined
   private lastSent = 0
@@ -148,6 +149,7 @@ export class TunnelSession {
     this.unsubscribe?.()
     this.unwatchStatus?.()
     if (this.pingTimer !== undefined) clearInterval(this.pingTimer)
+    this.detach?.()
     this.transport.close(reason)
     this.options.onClosed?.(reason)
   }
@@ -245,6 +247,10 @@ export class TunnelSession {
     })
     this.pingTimer = setInterval(() => { this.sendFrame({ t: 'ping', nonce: String(Date.now()) }) }, PING_INTERVAL_MS)
     this.pingTimer.unref()
+    // Counted once per session, not once per `ready`: a reconnecting app sends
+    // `hello` on a live tunnel and gets a second ready, and counting that would
+    // leave this machine believing a phone is listening long after it stopped.
+    this.detach ??= this.core.attach()
   }
 
   private handleFrame(frame: ClientFrame | ServerFrame): void {
@@ -262,6 +268,9 @@ export class TunnelSession {
       case 'resume':
         this.handleResume(frame.since)
         return
+      case 'wake':
+        this.rememberToken(frame.token, frame.environment ?? 'production')
+        return
       case 'hello':
         // The handshake payload already carried this; answering with a fresh
         // ready keeps a reconnecting app from having to special-case order.
@@ -277,6 +286,31 @@ export class TunnelSession {
         // unknown frame is what lets the protocol grow.
         return
     }
+  }
+
+  /**
+   * Record where this phone can be rung, or stop being able to ring it.
+   *
+   * Written against the authenticated peer and nothing else: the token arrives
+   * inside a channel whose far end has already proved it holds the private key
+   * this pairing was made with, so there is no way to register a token for
+   * somebody else's phone.
+   * @param token - the APNs device token, or null to withdraw.
+   * @param environment - which APNs host minted it.
+   */
+  private rememberToken(token: string | null, environment: 'sandbox' | 'production'): void {
+    const key = this.peerKey
+    if (key === undefined) return
+    const peer = findPeer(this.core.state, key)
+    if (peer === undefined) return
+    if (token === null) {
+      if (peer.push === undefined) return
+      delete peer.push
+    } else {
+      if (peer.push?.token === token && peer.push.environment === environment) return
+      peer.push = { token, environment }
+    }
+    this.core.save()
   }
 
   private handleResume(since: number): void {

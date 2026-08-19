@@ -324,6 +324,9 @@ export class RelayServer {
     }
   }
 
+  /** Every wake a Bridle has asked for, oldest first. Tests read this. */
+  readonly wakes: Record<string, unknown>[] = []
+
   private forwardFromBridle(machine: Machine, bytes: Buffer): void {
     let message
     try {
@@ -331,6 +334,18 @@ export class RelayServer {
     } catch {
       // A Bridle that speaks a newer mux version will send frames this Relay
       // cannot classify; dropping them is better than dropping the machine.
+      return
+    }
+    if (message.type === MuxType.Wake) {
+      // This Relay never rings anyone — it exists so the tests have a Relay,
+      // and pushing needs a signing key that belongs to a deployment rather
+      // than to a test. What it does is record the ask, which is the part a
+      // test can check: that the Bridle decided to ring, and whom.
+      try {
+        this.wakes.push(JSON.parse(message.payload.toString('utf8')) as Record<string, unknown>)
+      } catch {
+        // A malformed wake is the Bridle's problem, not a reason to drop it.
+      }
       return
     }
     const circuit = machine.circuits.get(message.circuit)

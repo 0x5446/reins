@@ -117,6 +117,36 @@ export interface EventFrame {
   frame: unknown
 }
 
+/**
+ * App to Bridle: where to knock when nobody is listening.
+ *
+ * The app posts its own notifications while it holds a tunnel, and that covers
+ * the case where someone is already looking at their phone. It does not cover
+ * the case this product exists for: the phone is in a pocket, iOS suspended the
+ * process an hour ago, and the agent has just stopped to ask whether it may
+ * delete something. Nothing local can fire, because nothing local is running.
+ *
+ * So the machine has to reach out, and the only thing that can wake a suspended
+ * iOS app is APNs. The token travels inside the Noise channel — the Relay
+ * carries it as ciphertext like everything else and learns it only at the
+ * moment a push is actually sent, from the Bridle, one wake at a time.
+ *
+ * `token: null` means stop: notifications were turned off, or this build no
+ * longer has a token to offer.
+ */
+export interface WakeFrame {
+  t: 'wake'
+  /** APNs device token, lowercase hex, or null to stop being woken. */
+  token: string | null
+  /**
+   * Which APNs host to use. A token from a development build is meaningless to
+   * the production host and vice versa, and the two fail differently — the
+   * wrong host answers `BadDeviceToken` rather than delivering nothing — so the
+   * app states which one minted it rather than leaving the sender to guess.
+   */
+  environment?: 'sandbox' | 'production'
+}
+
 /** App to Bridle: after a reconnect, replay everything past `since`. */
 export interface ResumeFrame {
   t: 'resume'
@@ -193,7 +223,7 @@ export interface FaultFrame {
 }
 
 /** Frames the app may send. */
-export type ClientFrame = HelloFrame | RequestFrame | CancelFrame | RespondFrame | ResumeFrame | PingFrame | PongFrame
+export type ClientFrame = HelloFrame | RequestFrame | CancelFrame | RespondFrame | ResumeFrame | WakeFrame | PingFrame | PongFrame
 
 /** Frames the Bridle may send. */
 export type ServerFrame = ReadyFrame | ResponseFrame | EventFrame | ResyncFrame | StatusFrame | PingFrame | PongFrame | FaultFrame

@@ -11,8 +11,15 @@
  *
  * Skipped unless REINS_WORKER_URL is set, because it needs a Worker somewhere:
  *
- *   npx wrangler dev --config relay-worker/wrangler.jsonc
+ *   npx wrangler dev --config relay-worker/wrangler.jsonc --var REINS_SWEEP_INTERVAL_MS:2000
  *   REINS_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
+ *
+ * The sweep interval is not optional. Two tests need a sweep to happen inside
+ * their lifetime rather than ten minutes later, and one of them needs it only
+ * sometimes — a Bridle's close usually reaches the Relay in milliseconds, and
+ * when it does not, the sweep is the only thing that retracts the row. Running
+ * without the override passes four times and fails the fifth, which is worse
+ * than failing every time.
  */
 
 import assert from 'node:assert/strict'
@@ -225,6 +232,12 @@ test('the census counts what is stored, not what it remembered', { skip, timeout
   // Polled here rather than with `waitFor`, which takes a synchronous
   // predicate: an async one returns a promise, every promise is truthy, and
   // the wait would pass without ever checking anything.
+  //
+  // Polled for thirty seconds rather than checked once because `stop()` does
+  // not wait for its own close to be delivered, and it usually arrives in
+  // milliseconds but is not guaranteed to arrive at all. When it does not, the
+  // sweep is what retracts the row — which is why this file's header insists on
+  // an interval short enough for one to happen here.
   const deadline = Date.now() + 30_000
   let after = await health()
   while (after.machines !== before && Date.now() < deadline) {
@@ -262,4 +275,45 @@ test('the sweep does not evict a machine that is still there', { skip, timeout: 
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Still Here')
+})
+
+test('a Relay with no push key survives being asked to ring a phone', { skip, timeout: TIMEOUT_MS }, async (t) => {
+  // Push is optional and this Worker has no APNs key, which is the state every
+  // Relay is in until someone configures one — including this one, right now.
+  // What must not happen is the machine paying for it: a control message the
+  // Relay cannot act on has to be a no-op, not a disconnect. The Bridle sends
+  // the wake as part of ordinary operation, so getting this wrong would take
+  // down every machine whose agent asked a question.
+  const agent = new FakeAgent()
+  const stack = await bridle(t, 'Worker Wake', agent)
+  await waitFor(() => agent.isPumping('mux'), TIMEOUT_MS, 'the Bridle to subscribe')
+
+  const invitation = stack.invite()
+  const phone = new ReinsPhone({ bundle: invitation.bundle, prefer: 'relay', name: 'Sleeper' })
+  await phone.connect()
+  phone.wake('b'.repeat(64), 'sandbox')
+  await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
+  phone.close()
+  await waitFor(() => stack.core.attached === 0, 5_000, 'the tunnel to be released')
+
+  // Nobody attached, so this rings — into a Relay that cannot ring anything.
+  agent.emit({
+    type: 'server-request',
+    rpcId: 'rpc-wake',
+    method: 'approval/requested',
+    payload: { type: 'approval/requested', sessionId: 's1', approvalId: 'a1', toolName: 'Bash' },
+  })
+
+  // Still there afterwards, and still usable — checked by actually using it,
+  // because a socket can stay open on a Relay that has stopped switching.
+  await new Promise((resolve) => { setTimeout(resolve, 1_000) })
+  const machine = await health()
+  assert.equal(machine.machines >= 1, true, 'the machine left the directory')
+
+  agent.answers.set('host.describe', { ok: true, value: { alive: true } })
+  const again = new ReinsPhone({ bundle: invitation.bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  t.after(() => { again.close() })
+  await again.connect()
+  const described = await again.call('host.describe', {})
+  assert.equal(described.ok, true, 'the circuit stopped working after an unanswerable wake')
 })

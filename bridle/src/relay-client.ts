@@ -63,6 +63,7 @@ export class RelayClient {
   private retry = RETRY_MIN_MS
   private state: RelayState = 'offline'
   private keepalive: NodeJS.Timeout | undefined
+  private unwatchWaiting: (() => void) | undefined
 
   /**
    * @param core - the machine being served.
@@ -87,12 +88,15 @@ export class RelayClient {
 
   /** Close the Relay socket and every tunnel on it. */
   stop(): void {
+    this.unwatchWaiting?.()
+    this.unwatchWaiting = undefined
     this.abort.abort()
     this.teardown('bridle is shutting down')
     this.socket?.close()
   }
 
   private async loop(): Promise<void> {
+    this.unwatchWaiting ??= this.core.onWaiting(() => { this.ringSleepers() })
     while (!this.abort.signal.aborted) {
       this.publish('connecting')
       const reason = await this.connectOnce()
@@ -217,9 +221,64 @@ export class RelayClient {
         session?.dispose(message.payload.length > 0 ? message.payload.toString('utf8') : 'phone disconnected')
         return
       }
+      case MuxType.Wake:
+        this.forgetDeadToken(message.payload)
+        return
       default:
         return
     }
+  }
+
+  /**
+   * Ring every paired phone, because none of them is listening.
+   *
+   * The condition is deliberately the crude one — nobody attached, over either
+   * transport — rather than anything cleverer about which phone belongs to
+   * whom. A machine is paired with a handful of devices at most, all of them
+   * the same person's, and the alternative is guessing which pocket they are
+   * in. Ringing a phone whose owner is already looking at another one costs a
+   * banner; guessing wrong costs the notification the feature exists for.
+   */
+  private ringSleepers(): void {
+    const socket = this.socket
+    if (socket === undefined || socket.readyState !== WebSocket.OPEN) return
+    if (this.core.attached > 0) return
+    for (const peer of this.core.state.peers) {
+      if (peer.push === undefined) continue
+      socket.send(encodeMux(MuxType.Wake, 0, Buffer.from(JSON.stringify({
+        token: peer.push.token,
+        environment: peer.push.environment,
+        machine: this.core.state.machineName,
+      }), 'utf8')))
+    }
+  }
+
+  /**
+   * Stop ringing a number that no longer exists.
+   *
+   * APNs answers `BadDeviceToken` for an app that was uninstalled, or restored
+   * onto a different phone, and the Relay passes that back because this is the
+   * only process that holds the token. Without it a revoked device would be
+   * rung on every request for as long as the pairing lasted.
+   * @param payload - the Relay's JSON reply.
+   */
+  private forgetDeadToken(payload: Buffer): void {
+    let token: unknown
+    try {
+      ({ token } = JSON.parse(payload.toString('utf8')) as { token?: unknown })
+    } catch {
+      return
+    }
+    if (typeof token !== 'string') return
+    let changed = false
+    for (const peer of this.core.state.peers) {
+      if (peer.push?.token !== token) continue
+      delete peer.push
+      changed = true
+    }
+    if (!changed) return
+    this.options.log?.('a phone stopped accepting notifications; it will be rung again when it reconnects')
+    this.core.save()
   }
 
   private teardown(reason: string): void {

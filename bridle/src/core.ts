@@ -61,6 +61,20 @@ export class BridleCore {
   private readonly waiting = new Map<string, unknown>()
 
   /**
+   * Live tunnels, counted rather than listed.
+   *
+   * The only question anyone asks of it is "is there anybody there", which
+   * decides whether a request that has stopped the agent needs a push to reach
+   * a phone or will be delivered over a socket that already exists. A count
+   * answers that; a list would invite someone to start addressing them
+   * individually, and the two transports create their sessions in different
+   * files.
+   */
+  private attachments = 0
+
+  private readonly waitingListeners = new Set<() => void>()
+
+  /**
    * The LAN addresses a phone can dial this machine on right now, best first.
    *
    * A function, not an array, and that is the whole point. The first version
@@ -95,6 +109,40 @@ export class BridleCore {
     return [...this.waiting.values()]
   }
 
+  /** Whether any phone currently holds a tunnel, over either transport. */
+  get attached(): number {
+    return this.attachments
+  }
+
+  /**
+   * Note a live tunnel.
+   * @returns a function that forgets it; safe to call more than once.
+   */
+  attach(): () => void {
+    this.attachments += 1
+    let released = false
+    return (): void => {
+      if (released) return
+      released = true
+      this.attachments -= 1
+    }
+  }
+
+  /**
+   * Watch for the agent stopping to ask something.
+   *
+   * Fires only when a request *starts* waiting, not when one is answered and
+   * not on the replay a newly attached phone receives — the listener exists so
+   * something can go and fetch a person, and a person who is already looking
+   * at the screen does not need fetching twice.
+   * @param listener - called after the request has been recorded.
+   * @returns a function that detaches the listener.
+   */
+  onWaiting(listener: () => void): () => void {
+    this.waitingListeners.add(listener)
+    return (): void => { this.waitingListeners.delete(listener) }
+  }
+
   /**
    * Note a request that has stopped the agent, or forget one that was answered.
    * @param frame - a mux frame, verbatim.
@@ -105,7 +153,20 @@ export class BridleCore {
     const sessionId = payload?.sessionId
     if (typeof type !== 'string' || typeof sessionId !== 'string') return
     if (type === 'approval/requested' || type === 'question/requested') {
-      this.waiting.set(`${type}:${sessionId}`, frame)
+      const key = `${type}:${sessionId}`
+      // Already known means dsh re-sent it, which happens whenever this Bridle
+      // resubscribes. Ringing again would wake someone for a question they
+      // have already been woken for.
+      if (this.waiting.has(key)) return
+      this.waiting.set(key, frame)
+      for (const listener of this.waitingListeners) {
+        try {
+          listener()
+        } catch {
+          // Same reasoning as every other listener here: one bad subscriber
+          // must not stop the rest, and must not stop the event fold.
+        }
+      }
       return
     }
     // Answered — by this phone, another one, or the browser on the machine
