@@ -32,10 +32,30 @@ struct SessionListView: View {
     @State private var groupName = ""
     @State private var deletingGroup: SessionGroup?
 
+    /// Where the most recently touched conversation is, if any.
+    ///
+    /// Most *recent* rather than most *used*, which is what the folder browser
+    /// ranks its shortcuts by. The two answer different questions: the browser
+    /// is showing places worth offering, this is guessing where the next
+    /// conversation belongs — and the honest guess is wherever the last one
+    /// was. A blank conversation counts; it was still a deliberate choice of
+    /// folder even if nothing was said in it.
+    private var lastFolder: String? { lastFolderIn(session.sessions) }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             content
-            NewButton { picking = true }
+            NewButton(
+                lastFolder: lastFolder,
+                resume: { folder in
+                    Task {
+                        if let id = await session.createSession(cwd: folder, preset: nil) {
+                            path.append(id)
+                        }
+                    }
+                },
+                browse: { picking = true }
+            )
                 .padding(Metrics.gutter)
                 .opacity(session.harnessReachable ? 1 : 0.4)
                 .disabled(!session.harnessReachable)
@@ -609,11 +629,29 @@ struct SessionRow: View {
 }
 
 /// The one action on this screen.
+///
+/// Tapping continues where the last conversation was, because that is almost
+/// always where the next one belongs: people work in one folder for days at a
+/// time, and making them confirm it every time is a question with a foregone
+/// answer. Holding offers the folder browser for the times it is not.
+///
+/// No setting behind this. A stored "default folder" would be a second thing to
+/// keep true — one that goes stale the day the folder is renamed, and that
+/// nobody would think to look at when new conversations started appearing in
+/// the wrong place. The last folder used is already known and cannot go stale
+/// in a way the conversation list does not already show.
 struct NewButton: View {
-    let action: () -> Void
+    /// Where the last conversation was, or nil on a machine with none yet.
+    let lastFolder: String?
+    /// Start one straight away in `lastFolder`.
+    let resume: (String) -> Void
+    /// Open the browser.
+    let browse: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if let lastFolder { resume(lastFolder) } else { browse() }
+        } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
@@ -621,8 +659,54 @@ struct NewButton: View {
                 .background(Palette.accent, in: Circle())
                 .shadow(color: Palette.accent.opacity(0.35), radius: 12, y: 4)
         }
-        .accessibilityLabel("New conversation")
+        .accessibilityLabel(lastFolder == nil ? "New conversation" : "New conversation in \(folderName(lastFolder ?? ""))")
+        // The escape hatch, and the only place the destination is stated before
+        // it is used. A long press is where iOS puts the alternative to a
+        // button's obvious action, and the menu says the folder out loud so the
+        // shortcut is discoverable rather than merely present.
+        .contextMenu {
+            if let lastFolder {
+                Button {
+                    resume(lastFolder)
+                } label: {
+                    Label("Continue in \(folderName(lastFolder))", systemImage: "arrow.turn.down.right")
+                }
+            }
+            Button {
+                browse()
+            } label: {
+                Label("Choose a folder…", systemImage: "folder")
+            }
+        }
     }
+}
+
+/// Where the next conversation should start, given the ones that exist.
+///
+/// Most *recent* rather than most *used*, which is what the folder browser
+/// ranks its shortcuts by. The two answer different questions: the browser is
+/// offering places worth going, this is guessing where the next conversation
+/// belongs — and the honest guess is wherever the last one was. A blank
+/// conversation counts, because choosing its folder was still a choice.
+///
+/// Subagent sessions are excluded: their folder is the agent's own bookkeeping
+/// rather than somewhere a person decided to work, and letting one win would
+/// move the button's destination with nobody having touched it.
+/// - Parameter sessions: every conversation the machine knows about.
+/// - Returns: the folder, or nil when there is nothing to continue.
+func lastFolderIn(_ sessions: [SessionSummary]) -> String? {
+    sessions
+        .filter { !$0.isSubagent }
+        .max { $0.updatedAt < $1.updatedAt }?
+        .cwd
+}
+
+/// The last path component, which is what a folder is called to a person.
+/// - Parameter path: an absolute path on the machine.
+/// - Returns: the folder's own name, or the path when it has no components.
+func folderName(_ path: String) -> String {
+    let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+    return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
 }
 
 /// A transient failure, shown over whatever is on screen and dismissed by tapping

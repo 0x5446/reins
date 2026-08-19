@@ -487,3 +487,79 @@ final class GroupFoldsTests: XCTestCase {
         XCTAssertFalse(GroupFolds(machineId: "m1", defaults: suite).isOpen(SessionGroup.ungroupedId, unlessRemembered: true))
     }
 }
+
+// MARK: - Where the next conversation starts
+
+/// The `+` button continues where the last conversation was, so this decides
+/// where. Getting it wrong is not a crash — it is a conversation quietly
+/// started in the wrong folder, which is only noticed after the agent has run
+/// something there.
+final class LastFolderTests: XCTestCase {
+    /// Built through the same parser the wire feeds, so a row that changes
+    /// shape breaks this too rather than leaving it testing a fiction.
+    private func summary(_ id: String, cwd: String?, at seconds: TimeInterval, subagent: Bool = false) -> SessionSummary {
+        var row: [String: JSONValue] = [
+            "sessionId": .string(id),
+            "updatedAt": .number(seconds * 1000),
+            "running": .bool(false),
+            "blank": .bool(false),
+        ]
+        if let cwd { row["cwd"] = .string(cwd) }
+        // `origin`, not `parentSessionId` — the parser reads the former, and
+        // the first version of this fixture set the latter and quietly produced
+        // a row that was not a subagent at all.
+        if subagent { row["origin"] = .string("subagent") }
+        guard let parsed = SessionSummary(.object(row)) else {
+            XCTFail("the fixture no longer parses as a session row")
+            return SessionSummary(.object(["sessionId": .string(id), "updatedAt": .number(0)]))!
+        }
+        return parsed
+    }
+
+    func testTheMostRecentlyTouchedConversationDecides() {
+        let sessions = [
+            summary("a", cwd: "/Users/dev/code/one", at: 100),
+            summary("b", cwd: "/Users/dev/code/two", at: 300),
+            summary("c", cwd: "/Users/dev/code/three", at: 200),
+        ]
+        XCTAssertEqual(lastFolderIn(sessions), "/Users/dev/code/two")
+    }
+
+    /// Most recent, not most used. The folder browser ranks its shortcuts by
+    /// count because it is offering places worth going; this is guessing where
+    /// the next conversation belongs, and one visit an hour ago beats four from
+    /// last week.
+    func testFrequencyDoesNotOverrideRecency() {
+        let sessions = [
+            summary("a", cwd: "/Users/dev/code/old", at: 100),
+            summary("b", cwd: "/Users/dev/code/old", at: 110),
+            summary("c", cwd: "/Users/dev/code/old", at: 120),
+            summary("d", cwd: "/Users/dev/code/new", at: 500),
+        ]
+        XCTAssertEqual(lastFolderIn(sessions), "/Users/dev/code/new")
+    }
+
+    /// A subagent's session is the agent's own bookkeeping and its folder is
+    /// not a place a person chose. Letting it win would move the button's
+    /// destination without anyone having done anything.
+    func testASubagentsFolderIsNotWhereYouWereWorking() {
+        let sessions = [
+            summary("a", cwd: "/Users/dev/code/mine", at: 100),
+            summary("sub", cwd: "/tmp/agent-scratch", at: 900, subagent: true),
+        ]
+        XCTAssertEqual(lastFolderIn(sessions), "/Users/dev/code/mine")
+    }
+
+    /// A fresh machine has nowhere to continue, and the button has to fall back
+    /// to the browser rather than starting somewhere arbitrary.
+    func testNoConversationsMeansNoDestination() {
+        XCTAssertNil(lastFolderIn([SessionSummary]()))
+        XCTAssertNil(lastFolderIn([summary("a", cwd: String?.none, at: 100)]))
+    }
+
+    func testTheFolderIsNamedByItsLastComponent() {
+        XCTAssertEqual(folderName("/Users/dev/code/invoice-service"), "invoice-service")
+        XCTAssertEqual(folderName("/Users/dev/code/invoice-service/"), "invoice-service")
+        XCTAssertEqual(folderName("/"), "/")
+    }
+}
