@@ -6,6 +6,11 @@ import SwiftUI
 struct ReinsApp: App {
     @State private var model = AppModel()
     @State private var lock = AppLock()
+    // The one thing SwiftUI cannot see: `didRegisterForRemoteNotifications` is
+    // an UIApplicationDelegate callback with no SwiftUI equivalent, and it is
+    // how iOS hands back the token that lets a machine reach this phone when
+    // the app is not running.
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -21,6 +26,7 @@ struct ReinsApp: App {
                     model.open(url: url)
                 }
                 .task {
+                    PushDelegate.registrar = model.push
                     #if DEBUG
                     // A seam for the UI tests, and only for them.
                     //

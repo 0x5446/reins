@@ -236,6 +236,12 @@ public actor Tunnel {
     /// — including from an old Bridle that never will, which keeps the bundle
     /// copy in use rather than discarding addresses that may still be right.
     private var learnedDirect: [String]?
+    /// The APNs token to hand the machine, or nil once one has been withdrawn.
+    private var wakeToken: String?
+    /// Which APNs host minted `wakeToken`.
+    private var wakeEnvironment = "production"
+    /// Whether iOS has answered at all yet. See `sendWakeToken`.
+    private var wakeTokenKnown = false
 
     private var continuation: AsyncStream<TunnelSignal>.Continuation?
     private(set) public var status: TunnelStatus = .idle {
@@ -384,6 +390,34 @@ public actor Tunnel {
         let id = "c\(counter)"
         let frame = RequestFrame(id: id, method: method, payload: payload)
         return try await withRequest(id: id) { try self.write(frame) }
+    }
+
+    /// Offer, or withdraw, somewhere to be woken when this app is not running.
+    ///
+    /// Held rather than sent-and-forgotten: the tunnel it would go down does
+    /// not exist yet at the moment iOS hands over a token, and will be replaced
+    /// several times a day afterwards. The machine is told on every `ready`.
+    /// - Parameters:
+    ///   - token: the APNs device token as lowercase hex, or nil to stop being
+    ///     woken — which is what turning notifications off looks like.
+    ///   - environment: which APNs host minted it. Decided by whoever asked
+    ///     iOS for the token, because it is a fact about how this build was
+    ///     signed and not one the tunnel could work out.
+    public func offerWake(token: String?, environment: String) {
+        guard !wakeTokenKnown || token != wakeToken || environment != wakeEnvironment else { return }
+        wakeToken = token
+        wakeEnvironment = environment
+        wakeTokenKnown = true
+        sendWakeToken()
+    }
+
+    private func sendWakeToken() {
+        guard case .online = status else { return }
+        // Nothing to say yet is different from having withdrawn: before iOS
+        // answers, a nil would tell the machine to forget a token it already
+        // has and stop ringing a phone that still wants to be rung.
+        guard wakeTokenKnown else { return }
+        try? write(WakeFrame(token: wakeToken, environment: wakeEnvironment))
     }
 
     /// Answer an approval or a question.
@@ -926,6 +960,11 @@ public actor Tunnel {
             continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host, direct: ready.direct))
             continuation?.yield(.harness(reachable: ready.dshReachable, detail: nil))
             try? write(ResumeFrame(since: highestSeq))
+            // Re-offered on every ready rather than once, because the machine
+            // is what stores it and a machine can be reinstalled, restored from
+            // a backup, or simply be a different one. Sending it again costs a
+            // frame that the Bridle drops when nothing changed.
+            sendWakeToken()
             // After the status is settled, so the guard inside sees the live
             // carrier rather than the one being replaced.
             if learned { considerUpgrade() }

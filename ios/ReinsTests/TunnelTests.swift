@@ -549,3 +549,100 @@ actor Counter {
     private(set) var count = 0
     func bump() { count += 1 }
 }
+
+// MARK: - Being woken
+
+extension TunnelTests {
+    /// The machine has to be told where to ring, and told again every time the
+    /// tunnel is rebuilt — which is several times a day. A token handed over
+    /// once would only work until the next reconnect, and the failure is
+    /// silent: nothing errors, the push simply never arrives.
+    func testTheTokenIsOfferedAgainOnEveryReconnect() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+
+        var timings = TunnelTimings()
+        timings.silenceLimit = 0.3
+        timings.livenessCheck = 0.05
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: timings)
+
+        await tunnel.start()
+        try await expectOnline(tunnel, .relay)
+        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        try await waitFor("the machine to be told where to ring") { await mac.wakes.count == 1 }
+
+        // The socket dies the way they actually die: still open, delivering
+        // nothing, until the watchdog replaces it.
+        board.carrier(for: "relay.test:0")?.goQuiet()
+        try await waitFor("a second handshake") { await mac.handshakes >= 2 }
+        try await waitFor("the new tunnel to say it again") { await mac.wakes.count >= 2 }
+
+        let seen = await mac.wakes
+        XCTAssertEqual(seen.last?.token, "abc123")
+        XCTAssertEqual(seen.last?.environment, "sandbox")
+        await tunnel.stop()
+    }
+
+    /// Turning notifications off has to reach the machine, or it goes on
+    /// ringing a phone that will not show the banner.
+    func testWithdrawingTheTokenIsSent() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: TunnelTimings())
+
+        await tunnel.start()
+        try await expectOnline(tunnel, .relay)
+        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        try await waitFor("the token") { await mac.wakes.count == 1 }
+        await tunnel.offerWake(token: String?.none, environment: "sandbox")
+        try await waitFor("the withdrawal") { await mac.wakes.count == 2 }
+
+        let seen = await mac.wakes
+        XCTAssertNil(seen.last?.token, "the machine was never told to stop")
+        await tunnel.stop()
+    }
+
+    /// Silence before iOS answers, because a nil sent then does not mean "stop
+    /// ringing me" — it means "I have not asked yet", and the machine cannot
+    /// tell the two apart. Sending it would retract a token from a previous
+    /// launch that is still perfectly good.
+    func testNothingIsSentBeforeTheSystemAnswers() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: TunnelTimings())
+
+        await tunnel.start()
+        try await expectOnline(tunnel, .relay)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let seen = await mac.wakes
+        XCTAssertTrue(seen.isEmpty, "offered a token nobody had asked iOS for yet")
+        await tunnel.stop()
+    }
+
+    /// The same value twice is not worth a frame; a changed one is.
+    func testOnlyChangesAreSent() async throws {
+        let mac = FakeBridle()
+        let board = TestSwitchboard()
+        board.route("relay.test:0", to: .machine(mac))
+        let tunnel = make(bundle: mac.bundle(direct: nil), board: board, timings: TunnelTimings())
+
+        await tunnel.start()
+        try await expectOnline(tunnel, .relay)
+        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        try await waitFor("the token") { await mac.wakes.count == 1 }
+        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let repeated = await mac.wakes.count
+        XCTAssertEqual(repeated, 1, "said the same thing twice")
+
+        // A reinstall mints a new token, and the machine has to hear about it.
+        await tunnel.offerWake(token: "def456", environment: "sandbox")
+        try await waitFor("the new token") { await mac.wakes.count == 2 }
+        let latest = await mac.wakes.last?.token
+        XCTAssertEqual(latest, "def456")
+        await tunnel.stop()
+    }
+}

@@ -14,6 +14,17 @@
 	  a notification service extension — would need in order to share the
 	  identity, so it is worth stating rather than inheriting.
 	-->
+	<!--
+	  Which APNs host will issue this build's tokens. Xcode rewrites the value
+	  to match the profile it signs with — `development` for a device build,
+	  `production` for a distribution one — so what is written here is only the
+	  default for the case where it does not.
+
+	  Without the key there is no token at all: registering returns an error
+	  rather than a device token, and the machine has nowhere to ring.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)ai.novabox.reins</string>

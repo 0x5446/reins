@@ -146,6 +146,9 @@ actor FakeBridle {
     private(set) var served: [LoopbackCarrier] = []
     private(set) var resumedFrom: [Int] = []
     private(set) var handshakes = 0
+    /// Every `wake` frame received, oldest first: `(token, environment)` with a
+    /// nil token for a withdrawal.
+    private(set) var wakes: [(token: String?, environment: String)] = []
 
     private var channels: [ObjectIdentifier: SecureChannel] = [:]
     private var head = 0
@@ -190,6 +193,8 @@ actor FakeBridle {
                 switch value["t"]?.stringValue {
                 case "resume":
                     resumedFrom.append(value["since"]?.intValue ?? 0)
+                case "wake":
+                    wakes.append((value["token"]?.stringValue, value["environment"]?.stringValue ?? ""))
                 case "ping":
                     // As the real Bridle does — the app's foreground probe
                     // counts on this answer, and a fake that swallows pings

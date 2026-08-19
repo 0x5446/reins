@@ -360,6 +360,27 @@ key 在 App Store Connect → Users and Access → Integrations 生成，`.p8` *
 
 构建号默认取 `git rev-list --count HEAD`——单调递增，不用记上次传到几。
 
+### 推送（APNs）
+
+推送要四个值，全都配上才生效，缺一个 Relay 就不叫醒任何人 —— 其余功能不受影响。
+
+```sh
+npx wrangler secret put REINS_APNS_KEY --config relay-worker/wrangler.jsonc   # .p8 全文，粘进去
+npx wrangler secret put REINS_APNS_KEY_ID --config relay-worker/wrangler.jsonc
+npx wrangler secret put REINS_APNS_TEAM_ID --config relay-worker/wrangler.jsonc
+npx wrangler secret put REINS_APNS_TOPIC --config relay-worker/wrangler.jsonc  # ai.novabox.reins
+```
+
+密钥在 https://developer.apple.com/account/resources/authkeys/list 建，勾 **Apple Push Notifications service (APNs)**。`.p8` **只能下载一次**。
+
+四个都用 `secret` 而不是 `var`：`.p8` 是私钥，另外三个虽然不是秘密，但放一起才不会有人下次只 rotate 一半。
+
+**为什么签名在 Relay 而不在 Bridle。** APNs 只收开发者密钥签的推送。那把密钥不能塞进跑在别人笔记本上的 Bridle —— 否则每个用户都握着能推给所有其他用户的钥匙。所以 Relay 签，Relay 也因此成了唯一会知道 device token 的组件。
+
+**它不会知道推送的内容。** Bridle 只发 token 和机器名，横幅上的字是 `relay-worker/src/apns.ts` 里的常量。`WakeRequest` 里没有能放正文的字段，所以这不是"承诺不看"，是没有东西可看。手机醒来后自己开隧道取内容，本地发通知 —— 那句话既没经过 Relay，也没到过苹果。
+
+**用 alert 不用 silent。** `content-available` 是更诱人的设计（醒来、取、发真实文案），但 iOS 把静默推送当可丢弃的：限流、低电量模式下丢、app 被划掉后干脆不送。"能删掉这个吗"不能等系统心情好了再送。
+
 ### 提审时会被问到的
 
 - **相机权限**：扫配对二维码。`INFOPLIST_KEY_NSCameraUsageDescription` 里已经写清了用途。

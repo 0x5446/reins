@@ -162,6 +162,35 @@ public struct ResumeFrame: TunnelFrame {
     }
 }
 
+/// Where to knock when this app is not running.
+///
+/// The notifications this app posts itself only fire while it holds a tunnel,
+/// and it usually does not: iOS suspends a backgrounded app within minutes and
+/// the socket goes with it. Everything the agent asks after that reaches a
+/// machine that is waiting on someone who was never told — which is the case
+/// the app exists for, since being elsewhere is the point.
+///
+/// The token goes to the machine, inside the Noise channel, and no further: the
+/// Relay is handed it one wake at a time, at the moment a push is sent, and is
+/// never told what the push is about. A `nil` token withdraws it, which is what
+/// notifications being switched off in Settings looks like from here.
+public struct WakeFrame: TunnelFrame {
+    public let t = "wake"
+    /// APNs device token as lowercase hex, or nil to stop being woken.
+    public let token: String?
+    /// Which APNs host minted it; a token is meaningless to the other one.
+    public let environment: String
+
+    public init(token: String?, environment: String) {
+        self.token = token
+        self.environment = environment
+    }
+
+    var members: [(String, JSONValue?)] {
+        [("t", .string(t)), ("token", token.map { JSONValue.string($0) } ?? .null), ("environment", .string(environment))]
+    }
+}
+
 /// Liveness question, app to Bridle. The Bridle answers with a pong carrying
 /// the same nonce — any frame at all proves the carrier, but asking forces an
 /// answer out of a connection that would otherwise be silently dead for the

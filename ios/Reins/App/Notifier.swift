@@ -34,9 +34,12 @@ public final class Notifier {
 
     /// Ask once, at the moment the first machine pairs — not at launch, where
     /// the question has no context and gets refused.
-    public func requestPermission() async {
-        guard let center else { return }
-        _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+    /// - Returns: whether notifications may now be posted, which also decides
+    ///   whether it is worth asking iOS for a push token.
+    @discardableResult
+    public func requestPermission() async -> Bool {
+        guard let center else { return false }
+        return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
     public func approval(_ request: ApprovalRequest, machine: String, title: String) {

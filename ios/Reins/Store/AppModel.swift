@@ -34,6 +34,8 @@ public final class AppModel {
     public var isNew: Bool { machines.isEmpty }
 
     public let notifier: Notifier
+    /// Where iOS says this phone can be reached; see `Push.swift`.
+    public let push: PushRegistrar
     public let clientVersion: String
 
     private var identity: StaticKeyPair?
@@ -50,6 +52,7 @@ public final class AppModel {
         self.defaults = defaults
         self.clientVersion = clientVersion ?? AppModel.bundleVersion
         self.notifier = notifier ?? Notifier()
+        self.push = PushRegistrar()
         deviceName = defaults.string(forKey: Keys.deviceName) ?? AppModel.defaultDeviceName
         #if DEBUG
         // A UI test seam. The welcome flow only exists for a device that has
@@ -63,6 +66,15 @@ public final class AppModel {
         #endif
         machines = AppModel.loadMachines(defaults)
         loadIdentity()
+        // Last, because the closure captures self and everything stored has to
+        // exist before it can. iOS answers whenever it likes, usually long
+        // before any machine is connected, so the answer is kept and handed to
+        // whichever session exists at the time rather than delivered to one
+        // that has to be there to catch it.
+        push.onAnswer = { [weak self] token in
+            guard let self, let session = self.active else { return }
+            self.offer(token: token, to: session)
+        }
     }
 
     /// Read the identity, or record why it could not be read.
@@ -112,6 +124,10 @@ public final class AppModel {
         // *now*. Persisted so the next cold start dials the Mac where it is,
         // not where it was on pairing day — a Mac that moved to a hotspot or
         // an office network would otherwise be relay-only forever.
+        // Told once here and again on every later answer. The tunnel re-sends
+        // it on each `ready` of its own accord, because the machine is what
+        // stores it and a tunnel is replaced several times a day.
+        if push.answered { offer(token: push.token, to: session) }
         session.learnedDirect = { [weak self] addresses in
             guard let self, let index = self.machines.firstIndex(where: { $0.id == machineId }) else { return }
             guard self.machines[index].direct != addresses else { return }
@@ -159,7 +175,16 @@ public final class AppModel {
         }
         persist()
         connect(to: machine.id)
-        Task { await notifier.requestPermission() }
+        Task {
+            // Only after someone has said yes. Registering without permission
+            // yields a token that can wake nothing, and the machine would go on
+            // ringing it for as long as the pairing lasted.
+            if await notifier.requestPermission() { push.register() }
+        }
+    }
+
+    private func offer(token: String?, to session: MachineSession) {
+        Task { await session.tunnel.offerWake(token: token, environment: PushEnvironment.current) }
     }
 
     /// Claim a typed short code and pair with what comes back.
