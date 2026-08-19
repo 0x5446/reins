@@ -341,12 +341,33 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 
 **一个决策卡三件事**：TestFlight、推送、上架的共同前置都是这 $99。
 
+付费会员是**另一个 team**，不是把个人 team 升级。个人 team 会继续以免费身份存在，`AVKUVD4FPN` 就是它——`isFreeProvisioningTeam: true`。所以 `REINS_TEAM_ID` 在付费之后要换成新的那个 10 位 id，用旧的会一路签到导出才报错。
+
+### 用 API key 发布，不要用 Xcode 登录
+
+`ios/release.sh` 做归档、导出、校验、上传，认证走 App Store Connect API key：
+
+```sh
+REINS_TEAM_ID=<付费 team id> \
+ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> \
+ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<key id>.p8 \
+ios/release.sh
+```
+
+key 在 App Store Connect → Users and Access → Integrations 生成，`.p8` **只能下载一次**。选 API key 而不是在 Xcode 里登 Apple ID，是因为 key 不需要有人在键盘前回双因素验证码，重装机器也不失效，还能单独吊销。
+
+`.gitignore` 拦了 `*.p8`、`*.mobileprovision`、`*.certSigningRequest`。
+
+构建号默认取 `git rev-list --count HEAD`——单调递增，不用记上次传到几。
+
 ### 提审时会被问到的
 
 - **相机权限**：扫配对二维码。`INFOPLIST_KEY_NSCameraUsageDescription` 里已经写清了用途。
 - **本地网络权限**：同 Wi-Fi 直连电脑。`INFOPLIST_KEY_NSLocalNetworkUsageDescription` 说明了为什么。
 - **ATS 例外**：`NSAllowsLocalNetworking: true`。直连是局域网内的明文 WebSocket，里面搬的全是 Noise 密文——底下再套一层 TLS 是给一个没人能签发证书的名字做认证，没有意义。走 Relay 的路径是 `wss`，没有例外。
-- **加密出口合规**：用了非豁免加密（ChaCha20-Poly1305、X25519）。走标准的 App Store 加密声明流程。
+- **加密出口合规**：`ITSAppUsesNonExemptEncryption: true` 已写进 Info.plist。这是实话——app 用 CryptoKit 实现 Noise（Curve25519 + ChaCha20-Poly1305）加密用户输入，不属于苹果列出的任何一项豁免（非医疗、非仅认证、非版权保护、非 56 位以下）。填 false 能少答一道题，但那是在出口声明上说假话。代价是 App Store Connect 会问一次是否按大众市场自分类（ECCN 5D992.c，是），随之而来的是每年一次给 BIS 的自分类报告。不阻塞任何构建。
+- **隐私清单**：`ios/Reins/PrivacyInfo.xcprivacy`。不追踪、不收集、无第三方 SDK；唯一需要声明理由的 API 是 `UserDefaults`，理由码 `CA92.1`（本 app 自己的数据，不用于追踪）。
+- **后台模式**：一个都不声明。曾经写着 `remote-notification` 却没有一行注册推送的代码，那是 Guideline 2.5.4 的直接拒审理由。做推送时连同实现一起加回来。
 
 ### 发布关键路径
 
@@ -357,10 +378,14 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 | 1 | 版本协商落地 | 新旧双向互通测试通过 | — ✅ 已完成 |
 | 2 | 部署 Relay | `deployed.test.js` 打公网地址全绿 | — ✅ 已完成 |
 | 3 | 写 `/help` 与 `/privacy` | 隐私页说清 Relay 能观测到什么 | — ✅ 已完成 |
-| 4 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 人工确认 |
-| 5 | 购买 Developer Program | 账号可签发 APNs key | **$99** |
-| 6 | TestFlight 外测 | 一个非自己的设备装上并完成一次配对 | 5 |
-| 7 | 提交审核 | 加密出口声明、权限说明齐备 | 6 |
+| 4 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 只差打 tag |
+| 5 | 购买 Developer Program | 账号可签发 APNs key | — ✅ 已完成 |
+| 6 | 签 Paid Applications 协议 | ASC → Business → Agreements 显示 Active | 人工 |
+| 7 | 建 ASC API key | `ios/release.sh` 能跑到上传 | 人工 |
+| 8 | TestFlight 外测 | 一个非自己的设备装上并完成一次配对 | 6、7 |
+| 9 | 提交审核 | 加密出口声明、隐私清单、权限说明齐备 | 8 |
+
+第 9 项的三样都已就位，见上一节。
 
 ### 如果一直不买那 $99
 

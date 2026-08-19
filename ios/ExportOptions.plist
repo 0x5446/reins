@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  How the archive becomes something App Store Connect will accept.
+
+  `app-store-connect` is the only method that matters here — TestFlight and the
+  App Store are the same upload, and which one a build reaches is decided in
+  App Store Connect afterwards rather than at export time.
+
+  Signing is left automatic so Xcode creates and renews the distribution
+  certificate and profile itself. Doing it by hand means a checked-in profile
+  that expires a year later on a day nobody is expecting it.
+
+  `uploadSymbols` sends the dSYM so a crash report names a function instead of
+  an address. Nothing about the app's contents leaves with it.
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>AVKUVD4FPN</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>export</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>

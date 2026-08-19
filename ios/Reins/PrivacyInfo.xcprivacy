@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  What this app does with data, in the form Apple requires.
+
+  The answers are short because the app is: it collects nothing, tracks
+  nothing, links to no third-party SDK, and talks to exactly one server —
+  a relay that carries ciphertext it cannot read, addressed to a Mac the
+  person paired themselves. There is no analytics, no crash reporter, no
+  advertising identifier, and nothing that leaves the device except the
+  tunnel.
+
+  UserDefaults is the one API here that Apple wants a reason for. It holds
+  the paired machines and the per-machine display settings, on this device,
+  for this app. CA92.1 is exactly that case.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

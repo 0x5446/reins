@@ -49,8 +49,18 @@ targets:
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
-        UIBackgroundModes:
-          - remote-notification
+        # Declared true because it is true. The app implements Noise over
+        # CryptoKit — Curve25519 and ChaCha20-Poly1305 — to encrypt what a
+        # person types to their own machine, which is not any of the exemptions
+        # Apple lists: not medical, not authentication-only, not copy
+        # protection, not under 56-bit. Answering false here would be a false
+        # statement on an export declaration to save one question per upload.
+        #
+        # What it costs: App Store Connect asks once per app whether the
+        # encryption is self-classified as mass market (ECCN 5D992.c), which
+        # this is, and that carries an annual self-classification report to BIS.
+        # Nothing blocks a build.
+        ITSAppUsesNonExemptEncryption: true
         CFBundleURLTypes:
           - CFBundleURLName: ai.novabox.reins.pair
             CFBundleURLSchemes:

@@ -31,3 +31,11 @@ bridle.json
 
 # macOS
 .DS_Store
+
+# Signing material. A .p8 is a private key App Store Connect will not reissue
+# and a .mobileprovision embeds one; neither belongs in a repo that is about to
+# be public, and both are easy to `git add -A` by accident.
+*.p8
+AuthKey_*.p8
+*.mobileprovision
+*.certSigningRequest
