@@ -235,10 +235,9 @@ export class ReinsPhone {
   /**
    * Offer, or withdraw, somewhere to be rung when this phone is not attached.
    * @param token - the APNs device token, or null to stop being rung.
-   * @param environment - which APNs host minted it.
    */
-  wake(token: string | null, environment: 'sandbox' | 'production' = 'sandbox'): void {
-    this.send({ t: 'wake', token, environment })
+  wake(token: string | null): void {
+    this.send({ t: 'wake', token })
   }
 
   /**

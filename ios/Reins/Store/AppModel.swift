@@ -52,7 +52,7 @@ public final class AppModel {
         self.defaults = defaults
         self.clientVersion = clientVersion ?? AppModel.bundleVersion
         self.notifier = notifier ?? Notifier()
-        self.push = PushRegistrar()
+        self.push = PushDelegate.registrar
         deviceName = defaults.string(forKey: Keys.deviceName) ?? AppModel.defaultDeviceName
         #if DEBUG
         // A UI test seam. The welcome flow only exists for a device that has
@@ -176,15 +176,29 @@ public final class AppModel {
         persist()
         connect(to: machine.id)
         Task {
-            // Only after someone has said yes. Registering without permission
-            // yields a token that can wake nothing, and the machine would go on
-            // ringing it for as long as the pairing lasted.
-            if await notifier.requestPermission() { push.register() }
+            // Ask first: registering without permission yields a token that can
+            // wake nothing, and the machine would ring it for as long as the
+            // pairing lasted. `refresh` then reads the answer back out of the
+            // system rather than trusting the return value, which is the same
+            // path every later launch takes.
+            await notifier.requestPermission()
+            await push.refresh()
         }
     }
 
     private func offer(token: String?, to session: MachineSession) {
-        Task { await session.tunnel.offerWake(token: token, environment: PushEnvironment.current) }
+        Task { await session.tunnel.offerWake(token: token) }
+    }
+
+    /// Bring iOS, this app and the machine back into agreement about push.
+    ///
+    /// Called at launch and on every return to the foreground. Doing it only at
+    /// pairing was the feature quietly not working at all for anyone who had
+    /// already paired, and gave someone who refused the prompt no second
+    /// chance after allowing it in Settings.
+    public func refreshPush() {
+        guard !machines.isEmpty else { return }
+        Task { await push.refresh() }
     }
 
     /// Claim a typed short code and pair with what comes back.

@@ -291,7 +291,7 @@ test('a Relay with no push key survives being asked to ring a phone', { skip, ti
   const invitation = stack.invite()
   const phone = new ReinsPhone({ bundle: invitation.bundle, prefer: 'relay', name: 'Sleeper' })
   await phone.connect()
-  phone.wake('b'.repeat(64), 'sandbox')
+  phone.wake('b'.repeat(64))
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
   phone.close()
   await waitFor(() => stack.core.attached === 0, 5_000, 'the tunnel to be released')

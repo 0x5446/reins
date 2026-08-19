@@ -17,17 +17,32 @@
  * notification with the real words — which never crossed the Relay and never
  * reached Apple.
  *
- * Push is optional. A Relay with no key configured refuses to wake anyone and
- * says so once; every other function is unaffected.
+ * **Which host, and why nobody is asked.** A token is minted against either the
+ * development or the production APNs host and is meaningless to the other. The
+ * first version had the app work out which, by reading `aps-environment` out of
+ * its own embedded provisioning profile, and pass the answer down through four
+ * layers. That is a guess dressed as a fact — a Release build signed for
+ * development is a sandbox token wearing a production badge — and it was
+ * carried by three components that have no use for it. Apple already answers
+ * the question: the wrong host replies `BadDeviceToken`. So this tries
+ * production and falls back to sandbox, which costs one extra round trip for
+ * development builds and nothing at all for the App Store, where every token is
+ * a production token and the fallback never runs.
+ *
+ * **A refusal is not a death sentence.** Everything that is not a 200 used to
+ * come back as `rejected`, and the Switchboard told the Bridle to forget the
+ * token — so a rate limit, an expired signing key, or an Apple outage would
+ * permanently delete a perfectly good address. Only Apple saying the device is
+ * gone means the device is gone.
+ *
+ * Push is optional. A Relay with no key configured refuses to wake anyone;
+ * every other function is unaffected.
  */
 
 import type { Env } from './env.ts'
 
-/** APNs hosts, by the environment that minted the token. */
-const HOSTS = {
-  production: 'https://api.push.apple.com',
-  sandbox: 'https://api.sandbox.push.apple.com',
-} as const
+/** APNs hosts. Production first — see the header. */
+const HOSTS = ['https://api.push.apple.com', 'https://api.sandbox.push.apple.com'] as const
 
 /**
  * How long a signed APNs token is reused.
@@ -39,28 +54,51 @@ const HOSTS = {
 const JWT_LIFETIME_MS = 40 * 60 * 1000
 
 /** The only words the Relay is able to say. */
-const ALERT_TITLE = 'Reins'
 const ALERT_BODY = 'Your agent is waiting on you.'
 
 /** What a caller needs to ring one phone. */
 export interface WakeTarget {
   token: string
-  environment: 'sandbox' | 'production'
+  /** Shown after the body, so a person with two Macs knows which one stopped. */
   machine?: string
 }
 
-/** Why a wake did not happen, or that it did. */
+/**
+ * Why a wake did not happen, or that it did.
+ *
+ * `dead` is separated from `refused` because only one of them is safe to act
+ * on: the Bridle deletes the token it holds when it hears `dead`, and hearing
+ * it for a rate limit would throw away a working address.
+ */
 export type WakeOutcome =
   | { ok: true }
-  | { ok: false; reason: 'unconfigured' | 'rejected' | 'unreachable'; detail?: string }
+  /** Apple says this device is gone. The token should be forgotten. */
+  | { ok: false; reason: 'dead'; detail: string }
+  /** Apple refused for some other reason. Keep the token; something is wrong here. */
+  | { ok: false; reason: 'refused'; detail: string }
+  /** No key, or a key that will not load. Nothing can be sent at all. */
+  | { ok: false; reason: 'unconfigured'; detail: string }
+  /** APNs could not be reached. */
+  | { ok: false; reason: 'unreachable'; detail: string }
 
 /** A signed provider token and when it stops being reused. */
 interface CachedJwt {
   value: string
   mintedAt: number
+  /** Which key it was signed with, so a rotated key is not reused stale. */
+  keyId: string
 }
 
 let cached: CachedJwt | undefined
+/**
+ * The signing currently in flight.
+ *
+ * Without this, every request that arrives while the cache is cold mints its
+ * own token — and Apple rejects a provider that mints more than one per twenty
+ * minutes. The cold-start case is exactly the one where several arrive at once,
+ * because a Worker that has just woken is a Worker that had a queue.
+ */
+let minting: Promise<string> | undefined
 
 /**
  * Send one content-free push.
@@ -74,14 +112,20 @@ export async function wake(env: Env, target: WakeTarget, now: number = Date.now(
   const keyId = env.REINS_APNS_KEY_ID
   const teamId = env.REINS_APNS_TEAM_ID
   const topic = env.REINS_APNS_TOPIC
-  if (!key || !keyId || !teamId || !topic) return { ok: false, reason: 'unconfigured' }
-  if (!/^[0-9a-f]{64,200}$/u.test(target.token)) return { ok: false, reason: 'rejected', detail: 'malformed token' }
+  if (!key && !keyId && !teamId && !topic) return { ok: false, reason: 'unconfigured', detail: 'push is not configured' }
+  // Some but not all is a different thing from none, and has to be loud: it is
+  // a deployment someone meant to finish, and every push silently disappears
+  // until they do.
+  if (!key || !keyId || !teamId || !topic) {
+    return { ok: false, reason: 'unconfigured', detail: 'push is half-configured; some APNs settings are missing' }
+  }
+  if (!/^[0-9a-f]{64,200}$/u.test(target.token)) return { ok: false, reason: 'dead', detail: 'malformed token' }
 
   let jwt: string
   try {
     jwt = await providerToken(key, keyId, teamId, now)
   } catch (error) {
-    return { ok: false, reason: 'unconfigured', detail: describe(error) }
+    return { ok: false, reason: 'unconfigured', detail: `APNs key will not load: ${describe(error)}` }
   }
 
   // `alert`, not `content-available`. A silent push is the tempting design —
@@ -92,45 +136,72 @@ export async function wake(env: Env, target: WakeTarget, now: number = Date.now(
   const body = JSON.stringify({
     aps: {
       alert: {
-        title: ALERT_TITLE,
+        title: 'Reins',
         body: target.machine === undefined ? ALERT_BODY : `${ALERT_BODY} · ${target.machine}`,
       },
       sound: 'default',
       'interruption-level': 'time-sensitive',
     },
   })
-
-  let response: Response
-  try {
-    response = await fetch(`${HOSTS[target.environment]}/3/device/${target.token}`, {
-      method: 'POST',
-      headers: {
-        authorization: `bearer ${jwt}`,
-        'apns-topic': topic,
-        'apns-push-type': 'alert',
-        'apns-priority': '10',
-        // A wake that arrives an hour late is worse than one that never
-        // arrives: the person opens the app to find the question already
-        // answered or the agent long since given up.
-        'apns-expiration': String(Math.floor(now / 1000) + 300),
-      },
-      body,
-    })
-  } catch (error) {
-    return { ok: false, reason: 'unreachable', detail: describe(error) }
+  const headers = {
+    authorization: `bearer ${jwt}`,
+    'apns-topic': topic,
+    'apns-push-type': 'alert',
+    'apns-priority': '10',
+    // A wake that arrives an hour late is worse than one that never arrives:
+    // the person opens the app to find the question already answered or the
+    // agent long since given up.
+    'apns-expiration': String(Math.floor(now / 1000) + 300),
   }
 
-  if (response.status === 200) return { ok: true }
-  // A token goes stale when the app is reinstalled or restored to a new phone.
-  // APNs says so precisely, and the Bridle holding that token is the only place
-  // that can forget it — so the reason travels back rather than being swallowed.
-  const detail = await response.text().catch(() => '')
-  return { ok: false, reason: 'rejected', detail: `${String(response.status)} ${detail}`.trim() }
+  let last: Extract<WakeOutcome, { ok: false }> = { ok: false, reason: 'unreachable', detail: 'no host was tried' }
+  for (const host of HOSTS) {
+    let response: Response
+    try {
+      response = await fetch(`${host}/3/device/${target.token}`, { method: 'POST', headers, body })
+    } catch (error) {
+      last = { ok: false, reason: 'unreachable', detail: describe(error) }
+      continue
+    }
+    if (response.status === 200) return { ok: true }
+    last = classify(response.status, await response.text().catch(() => ''))
+    // `BadDeviceToken` from production is the ordinary answer for a development
+    // token, so it is the one refusal worth asking the other host about. Every
+    // other refusal means the same thing on both and asking twice would only
+    // double the load on an Apple that is already unhappy.
+    if (last.reason !== 'dead' || !last.detail.includes('BadDeviceToken')) return last
+  }
+  return last
 }
 
 /** Drop the cached provider token. Only a test needs this. */
 export function forgetProviderToken(): void {
   cached = undefined
+  minting = undefined
+}
+
+/**
+ * Decide what an APNs refusal means for the token.
+ * @param status - the HTTP status.
+ * @param payload - the response body, which carries Apple's `reason`.
+ * @returns a `dead` outcome only when Apple says the device is gone.
+ */
+function classify(status: number, payload: string): Extract<WakeOutcome, { ok: false }> {
+  let reason = ''
+  try {
+    reason = String((JSON.parse(payload) as { reason?: unknown }).reason ?? '')
+  } catch {
+    // Apple answers JSON; anything else is a proxy or an outage page, and
+    // either way it is not Apple telling us the device is gone.
+  }
+  const detail = `${String(status)} ${reason || payload}`.trim()
+  // 410 is unambiguous: the app was uninstalled. `BadDeviceToken` is not — it
+  // is also what the wrong host says about a perfectly live device — so it is
+  // only fatal after both hosts have said it, which the loop in `wake` decides.
+  if (status === 410 || reason === 'Unregistered' || reason === 'BadDeviceToken') {
+    return { ok: false, reason: 'dead', detail }
+  }
+  return { ok: false, reason: 'refused', detail }
 }
 
 /**
@@ -142,8 +213,19 @@ export function forgetProviderToken(): void {
  * @returns a compact ES256 JWT.
  */
 async function providerToken(pem: string, keyId: string, teamId: string, now: number): Promise<string> {
-  if (cached !== undefined && now - cached.mintedAt < JWT_LIFETIME_MS) return cached.value
+  if (cached !== undefined && cached.keyId === keyId && now - cached.mintedAt < JWT_LIFETIME_MS) return cached.value
+  minting ??= sign(pem, keyId, teamId, now).finally(() => { minting = undefined })
+  return await minting
+}
 
+/**
+ * @param pem - the `.p8` contents.
+ * @param keyId - the key's id, which goes in the header.
+ * @param teamId - the team's id, which goes in the claims.
+ * @param now - current epoch milliseconds.
+ * @returns the signed token, also placed in the cache.
+ */
+async function sign(pem: string, keyId: string, teamId: string, now: number): Promise<string> {
   const key = await crypto.subtle.importKey(
     'pkcs8',
     pkcs8(pem),
@@ -160,7 +242,7 @@ async function providerToken(pem: string, keyId: string, teamId: string, now: nu
     new TextEncoder().encode(signed),
   )
   const value = `${signed}.${base64url(new Uint8Array(signature))}`
-  cached = { value, mintedAt: now }
+  cached = { value, mintedAt: now, keyId }
   return value
 }
 

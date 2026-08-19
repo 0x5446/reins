@@ -14,6 +14,23 @@ import { EventLog } from './tunnel/event-log.ts'
 import { loadState, reinsHome, saveState, statePath, staticKeys, type BridleState } from './identity.ts'
 import type { StaticKeyPair } from '@reins/protocol'
 
+/**
+ * What makes one pending request distinguishable from another.
+ *
+ * `rpcId` is what dsh routes an answer by, so it is unique per request and
+ * stable across the re-sends dsh performs for new subscribers. The approval or
+ * question id is the fallback for a frame shaped differently.
+ * @param frame - a mux frame, verbatim.
+ * @returns a comparable identity, or undefined when the frame carries none.
+ */
+function identityOf(frame: unknown): string | undefined {
+  const outer = frame as { rpcId?: unknown; payload?: { approvalId?: unknown; id?: unknown } }
+  if (typeof outer.rpcId === 'string') return outer.rpcId
+  if (typeof outer.payload?.approvalId === 'string') return outer.payload.approvalId
+  if (typeof outer.payload?.id === 'string') return outer.payload.id
+  return undefined
+}
+
 /** Current dsh reachability as the core last observed it. */
 export interface DshStatus {
   reachable: boolean
@@ -154,10 +171,18 @@ export class BridleCore {
     if (typeof type !== 'string' || typeof sessionId !== 'string') return
     if (type === 'approval/requested' || type === 'question/requested') {
       const key = `${type}:${sessionId}`
-      // Already known means dsh re-sent it, which happens whenever this Bridle
-      // resubscribes. Ringing again would wake someone for a question they
-      // have already been woken for.
-      if (this.waiting.has(key)) return
+      // The same request or a different one? dsh re-sends everything pending to
+      // each new subscriber, and this Bridle resubscribes whenever dsh
+      // restarts, so a repeat is usually a replay and ringing again would wake
+      // someone for a question they were already woken for an hour ago.
+      //
+      // Usually, but not always. A downlink that drops can lose the `resolved`
+      // event, and then a genuinely new question for the same session looks
+      // exactly like a replay of the old one — nobody is rung, and the phone
+      // shows the stale card. So the identity of the request decides, not the
+      // session it belongs to.
+      const identity = identityOf(frame)
+      if (this.waiting.has(key) && identityOf(this.waiting.get(key)) === identity) return
       this.waiting.set(key, frame)
       for (const listener of this.waitingListeners) {
         try {

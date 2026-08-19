@@ -282,6 +282,16 @@ Noise 明文即一个 JSON 对象，UTF-8 编码。所有帧有字符串字段 `
 | `method` | string | 方法名，如 `session.prompt` |
 | `payload` | any | 方法载荷 |
 
+**`hello`** — 重新要一份 `ready`
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `t` | `"hello"` | |
+| `version` | number | app 期望的隧道版本 |
+| `client` | string | 客户端构建串，`bridle status` 里显示 |
+
+同样的内容握手载荷里已经带过一次（§3.3）。这里再发一次，是为了让重连的 app 不必区分"新隧道"和"复用的隧道" —— 两种情况都以收到 `ready` 结束。Bridle 收到后**必须**重发 `ready`，**禁止**因此重置事件序号。
+
 **`cancel`** — 放弃在途请求
 
 | `t` = `"cancel"` | `id` = 要放弃的请求 id |
@@ -302,11 +312,10 @@ Bridle **必须**中止对应的上游请求。未知 id **必须**静默忽略�
 |---|---|---|
 | `t` | `"wake"` | |
 | `token` | string \| null | APNs device token（小写 hex）。`null` = 别再叫我 |
-| `environment` | `"sandbox"` \| `"production"` | 哪个 APNs 主机签发的，可选，缺省 `production` |
 
 App **应当**在每次 `ready` 之后重发一次：token 存在机器上，而机器会被重装、被还原、被换掉。Bridle 对无变化的重发**必须**静默丢弃。
 
-`environment` 由 app 签名所用描述文件里的 `aps-environment` 决定，不是由编译配置决定 —— 两者不一致时推送静默不到达，没有任何报错。
+帧里**没有** APNs 环境字段。token 由沙盒还是生产主机签发，是苹果自己会回答的问题（错主机返回 `BadDeviceToken`），Relay 先试生产再退沙盒。早期版本让 app 读自己描述文件里的 `aps-environment` 再逐层传下来 —— 那是把猜测当事实，而且猜错时推送静默不到达、没有任何报错。
 
 **`pong`** — 存活应答
 
@@ -408,7 +417,7 @@ u32 circuit （大端）
 `Wake` 的 circuit 恒为 `0` —— 没有 circuit 正是发它的原因。
 
 ```
-WakeRequest = { token: string, environment: "sandbox" | "production", machine?: string }
+WakeRequest = { token: string, machine?: string }
 ```
 
 Relay 收到 `Wake` 后向 APNs 发一条**固定文案**的通知。文案是 Relay 代码里的常量，`WakeRequest` **没有**可以放正文的字段 —— 这不是"Relay 承诺不看"，是**没有东西可看**。手机醒来后自己开隧道去机器上取内容，本地发通知。
@@ -416,6 +425,10 @@ Relay 收到 `Wake` 后向 APNs 发一条**固定文案**的通知。文案是 R
 `machine` 不是新泄露的信息：Relay 的目录里本来就存着机器名（`GET /v1/machine/:id` 就是答它）。
 
 Relay 没配 APNs 密钥时，`Wake` **必须**是 no-op，**禁止**因此断开机器。
+
+反向的 `{ token, dead: true }` **只在**苹果明确说设备已消失时发送（HTTP 410 `Unregistered`，或两个主机都回 `BadDeviceToken`）。限流、鉴权失败、苹果 5xx、配置不全 —— 一律**禁止**回传 `dead`：Bridle 收到就会删 token，而那些都是临时故障，删掉的是一个好地址。
+
+Bridle **禁止**在注册完成前发送 `Wake`：Relay 对注册前的二进制帧的处理是断开连接。振铃时机若不满足，**应当**记住并在注册完成后补发 —— `onWaiting` 只触发一次，丢了就是永久丢了。
 
 未知 type **必须**拒绝（而非忽略）——这一层是二进制且长度定死，未知类型意味着解析错位。
 

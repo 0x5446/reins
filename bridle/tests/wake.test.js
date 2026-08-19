@@ -15,7 +15,14 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BridleCore } from '@reins/bridle'
+import { BridleCore, TunnelSession } from '@reins/bridle'
+import { NoiseInitiator, TUNNEL_PROLOGUE, generateKeyPair } from '@reins/protocol'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+/** One phone's long-term identity, shared by the tests that need a handshake. */
+const appKeys = generateKeyPair()
 
 /** A dsh mux frame, shaped as the wire carries it. */
 function frame(type, sessionId, extra = {}) {
@@ -28,13 +35,14 @@ function frame(type, sessionId, extra = {}) {
 }
 
 /** A core whose dsh never answers; only the bookkeeping is under test. */
-function core() {
+function core(overrides = {}) {
   const pumps = []
   const machine = new BridleCore(
     {
       version: 1,
       deviceId: 'd',
       privateKey: Buffer.alloc(32).toString('base64url'),
+      ...overrides,
       signingKey: Buffer.alloc(64).toString('base64url'),
       machineName: 'a-mac',
       relayUrl: '',
@@ -128,4 +136,99 @@ test('a listener that throws does not stop the fold', async () => {
   assert.equal(reached, true, 'one bad listener silenced the next')
   assert.equal(machine.pendingRequests.length, 1, 'the request was lost with the exception')
   machine.stop()
+})
+
+test('a new question in a session that already asked one is not mistaken for a replay', async () => {
+  const { machine, feed } = core()
+  await machine.start()
+  let rings = 0
+  machine.onWaiting(() => { rings += 1 })
+
+  feed(frame('question/requested', 's1', { questions: [{ id: 'q1', question: 'which?' }] }))
+  assert.equal(rings, 1)
+
+  // The downlink dropped and the `resolved` event was lost with it, so the old
+  // request is still recorded. A genuinely new question for the same session
+  // then looks exactly like the re-send dsh performs for new subscribers —
+  // and keying only on the session meant nobody was rung and the phone showed
+  // the stale card.
+  const asked = {
+    type: 'server-request',
+    rpcId: 'rpc-question/requested-s1-second',
+    method: 'question/requested',
+    payload: { type: 'question/requested', sessionId: 's1', questions: [{ id: 'q2', question: 'and now?' }] },
+  }
+  feed(asked)
+  assert.equal(rings, 2, 'a new question was swallowed as a replay')
+  assert.deepEqual(machine.pendingRequests, [asked], 'the phone would still be shown the old question')
+  machine.stop()
+})
+
+test('the same request arriving twice still rings once', async () => {
+  const { machine, feed } = core()
+  await machine.start()
+  let rings = 0
+  machine.onWaiting(() => { rings += 1 })
+  const asked = frame('approval/requested', 's1', { approvalId: 'a1', toolName: 'Bash' })
+  feed(asked)
+  feed(asked)
+  feed(asked)
+  assert.equal(rings, 1, 'dsh re-sending its pending list woke someone again')
+  machine.stop()
+})
+
+test('a handshake whose ready frame cannot be sent leaves nobody counted as listening', async () => {
+  // A real REINS_HOME, because the handshake re-reads the state file before
+  // deciding whether this peer is paired — `bridle pair` and `bridle revoke`
+  // run in other processes and have to take effect on the next handshake. An
+  // in-memory peer is wiped by that re-read, which made the first version of
+  // this test refuse the handshake and pass without exercising anything.
+  const home = mkdtempSync(join(tmpdir(), 'reins-wake-'))
+  const previous = process.env.REINS_HOME
+  process.env.REINS_HOME = home
+  // A real key pair, not the all-zero one the other tests use: those never
+  // reach the cryptography, and an all-zero X25519 scalar cannot complete a
+  // handshake.
+  const { machine } = core({ privateKey: generateKeyPair().privateKey.toString('base64url') })
+  await machine.start()
+  machine.state.peers.push({
+    key: appKeys.publicKey.toString('base64url'),
+    name: 'a-phone',
+    pairedAt: 0,
+    lastSeen: 0,
+  })
+  machine.save()
+
+  // Fails on the ready frame, not on the handshake reply. That is the shape of
+  // the real failure: a socket that dies in the millisecond between the two,
+  // which is what a phone walking out of range mid-handshake looks like.
+  let sends = 0
+  let closedWhy
+  const session = new TunnelSession(machine, {
+    send: () => {
+      sends += 1
+      if (sends > 1) throw new Error('socket closed')
+    },
+    close: () => {},
+  }, { version: 'test/0', onClosed: (why) => { closedWhy = why } })
+
+  const initiator = new NoiseInitiator(appKeys, machine.keys.publicKey, TUNNEL_PROLOGUE)
+  const hello = initiator.writeMessage(Buffer.from(JSON.stringify({ versions: [1], name: 'a-phone', client: 't' }), 'utf8'))
+  session.receive(hello)
+
+  // Guards the test itself. Without this it passes for the wrong reason: a
+  // refused handshake never reaches the code under test, and never counts an
+  // attachment either.
+  assert.equal(sends, 2, `the handshake did not complete (${String(closedWhy)}), so nothing below was exercised`)
+
+  // The count has to be back to zero. It used to be taken at the *end* of the
+  // handshake, after the ready frame — and `sendFrame` swallows a transport
+  // failure by disposing the session and returning normally, so the rest of the
+  // handshake ran anyway and took an attachment nothing could release. The
+  // machine then believed a phone was listening forever, and every wake from
+  // that moment on was suppressed.
+  assert.equal(machine.attached, 0, 'a dead session is counted as a listener; push is silenced from here on')
+  machine.stop()
+  if (previous === undefined) delete process.env.REINS_HOME
+  else process.env.REINS_HOME = previous
 })

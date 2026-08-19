@@ -64,6 +64,10 @@ export class RelayClient {
   private state: RelayState = 'offline'
   private keepalive: NodeJS.Timeout | undefined
   private unwatchWaiting: (() => void) | undefined
+  /** A wake is owed but the Relay was not ready to carry it. */
+  private wakeWanted = false
+  /** Whether the current socket has finished registering. */
+  private registered = false
 
   /**
    * @param core - the machine being served.
@@ -119,6 +123,7 @@ export class RelayClient {
       const settle = (reason: string): void => {
         if (settled) return
         settled = true
+        this.registered = false
         clearTimeout(registerTimer)
         if (this.keepalive !== undefined) clearInterval(this.keepalive)
         this.abort.signal.removeEventListener('abort', onAbort)
@@ -151,9 +156,13 @@ export class RelayClient {
           }
           if (control.t === 'registered') {
             registered = true
+            this.registered = true
             this.retry = RETRY_MIN_MS
             this.publish('online')
             this.options.log?.(`relay online as ${this.core.state.deviceId}`)
+            // Anything that stopped the agent while the Relay was down is owed
+            // a ring, and this is the first moment one can be sent.
+            this.flushWake()
             return
           }
           settle(control.message ?? 'relay refused the connection')
@@ -240,14 +249,48 @@ export class RelayClient {
    * banner; guessing wrong costs the notification the feature exists for.
    */
   private ringSleepers(): void {
-    const socket = this.socket
-    if (socket === undefined || socket.readyState !== WebSocket.OPEN) return
     if (this.core.attached > 0) return
+    // Remembered rather than dropped. `onWaiting` fires once, at the instant
+    // the agent stops, and the Relay is quite often not ready at that instant —
+    // it is offline, or reconnecting, or the socket is open but the
+    // registration handshake has not finished. The first version returned
+    // silently in all three cases, and because the request stays in `waiting`
+    // and is therefore deduped, that one chance was the only chance: the person
+    // was never told, ever.
+    this.wakeWanted = true
+    this.flushWake()
+  }
+
+  /**
+   * Send any wake that is owed, if the Relay can take it.
+   *
+   * Gated on `registered`, not merely on the socket being open. A binary frame
+   * that arrives before the registration handshake completes is not ignored by
+   * the Relay — it closes the connection with `data before registration`, so
+   * ringing a phone during that window would knock the machine off the Relay
+   * entirely.
+   */
+  private flushWake(): void {
+    const socket = this.socket
+    if (!this.registered || socket === undefined || socket.readyState !== WebSocket.OPEN) return
+    if (this.core.attached > 0) {
+      // Somebody arrived while we were waiting for the Relay. They will see it
+      // on screen, so the reason to ring has gone.
+      this.wakeWanted = false
+      return
+    }
+    if (!this.wakeWanted) return
+    this.wakeWanted = false
+    // By endpoint, not by peer. One phone can hold two pairings — `bridle
+    // revoke` is manual and a phone that re-pairs after a reset arrives with a
+    // fresh device identity but the same APNs token — and ringing per peer
+    // would then buzz it twice for one question.
+    const rung = new Set<string>()
     for (const peer of this.core.state.peers) {
-      if (peer.push === undefined) continue
+      if (peer.push === undefined || rung.has(peer.push)) continue
+      rung.add(peer.push)
       socket.send(encodeMux(MuxType.Wake, 0, Buffer.from(JSON.stringify({
-        token: peer.push.token,
-        environment: peer.push.environment,
+        token: peer.push,
         machine: this.core.state.machineName,
       }), 'utf8')))
     }
@@ -272,7 +315,7 @@ export class RelayClient {
     if (typeof token !== 'string') return
     let changed = false
     for (const peer of this.core.state.peers) {
-      if (peer.push?.token !== token) continue
+      if (peer.push !== token) continue
       delete peer.push
       changed = true
     }

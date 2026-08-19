@@ -140,6 +140,13 @@ const vectors = {
   frames: [
     { frame: { t: 'req', id: 'p1', method: 'session.list', payload: {} }, encoded: encodeFrame({ t: 'req', id: 'p1', method: 'session.list', payload: {} }).toString('base64') },
     { frame: { t: 'resume', since: 12 }, encoded: encodeFrame({ t: 'resume', since: 12 }).toString('base64') },
+    // Both shapes of `wake`, because the withdrawal is the one an
+    // implementation is most likely to get wrong: a `null` that JSON.stringify
+    // keeps and a Swift optional that would silently drop the key are not the
+    // same frame, and the difference is a machine that goes on ringing a phone
+    // which asked to be left alone.
+    { frame: { t: 'wake', token: 'a1b2c3' }, encoded: encodeFrame({ t: 'wake', token: 'a1b2c3' }).toString('base64') },
+    { frame: { t: 'wake', token: null }, encoded: encodeFrame({ t: 'wake', token: null }).toString('base64') },
   ],
 }
 

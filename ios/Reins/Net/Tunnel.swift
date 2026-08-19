@@ -238,8 +238,6 @@ public actor Tunnel {
     private var learnedDirect: [String]?
     /// The APNs token to hand the machine, or nil once one has been withdrawn.
     private var wakeToken: String?
-    /// Which APNs host minted `wakeToken`.
-    private var wakeEnvironment = "production"
     /// Whether iOS has answered at all yet. See `sendWakeToken`.
     private var wakeTokenKnown = false
 
@@ -400,13 +398,9 @@ public actor Tunnel {
     /// - Parameters:
     ///   - token: the APNs device token as lowercase hex, or nil to stop being
     ///     woken — which is what turning notifications off looks like.
-    ///   - environment: which APNs host minted it. Decided by whoever asked
-    ///     iOS for the token, because it is a fact about how this build was
-    ///     signed and not one the tunnel could work out.
-    public func offerWake(token: String?, environment: String) {
-        guard !wakeTokenKnown || token != wakeToken || environment != wakeEnvironment else { return }
+    public func offerWake(token: String?) {
+        guard !wakeTokenKnown || token != wakeToken else { return }
         wakeToken = token
-        wakeEnvironment = environment
         wakeTokenKnown = true
         sendWakeToken()
     }
@@ -417,7 +411,7 @@ public actor Tunnel {
         // answers, a nil would tell the machine to forget a token it already
         // has and stop ringing a phone that still wants to be rung.
         guard wakeTokenKnown else { return }
-        try? write(WakeFrame(token: wakeToken, environment: wakeEnvironment))
+        try? write(WakeFrame(token: wakeToken))
     }
 
     /// Answer an approval or a question.

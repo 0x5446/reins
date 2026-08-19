@@ -94,6 +94,20 @@
         "since": 12
       },
       "encoded": "eyJ0IjoicmVzdW1lIiwic2luY2UiOjEyfQ=="
+    },
+    {
+      "frame": {
+        "t": "wake",
+        "token": "a1b2c3"
+      },
+      "encoded": "eyJ0Ijoid2FrZSIsInRva2VuIjoiYTFiMmMzIn0="
+    },
+    {
+      "frame": {
+        "t": "wake",
+        "token": null
+      },
+      "encoded": "eyJ0Ijoid2FrZSIsInRva2VuIjpudWxsfQ=="
     }
   ]
 }

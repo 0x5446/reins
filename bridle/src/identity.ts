@@ -40,9 +40,12 @@ export interface PairedPeer {
    * Learned inside the Noise channel and kept here rather than at the Relay,
    * so the Relay is handed a token only at the instant a push is sent and has
    * no standing list of who can be reached. Absent until the app offers one,
-   * and removed when it withdraws it or APNs says it is dead.
+   * and removed when it withdraws it or Apple says the device is gone.
+   *
+   * Just the token: which APNs host minted it is Apple's question to answer,
+   * not something three components should carry around.
    */
-  push?: { token: string; environment: 'sandbox' | 'production' }
+  push?: string
 }
 
 /** A pairing offer waiting to be claimed. */

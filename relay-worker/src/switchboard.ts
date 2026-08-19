@@ -245,17 +245,28 @@ export class Switchboard extends DurableObject<Env> {
     let target: WakeTarget
     try {
       const parsed: unknown = JSON.parse(decodeText(payload))
-      const { token, environment, machine } = parsed as Partial<WakeTarget>
-      if (typeof token !== 'string' || (environment !== 'sandbox' && environment !== 'production')) return
-      target = { token, environment, ...(typeof machine === 'string' ? { machine } : {}) }
+      const { token, machine } = parsed as Partial<WakeTarget>
+      if (typeof token !== 'string') return
+      target = { token, ...(typeof machine === 'string' ? { machine } : {}) }
     } catch {
       return
     }
     const outcome = await wake(this.env, target)
-    if (outcome.ok || outcome.reason !== 'rejected') return
-    const bridle = this.bridleSocket()
-    if (bridle === undefined) return
-    bridle.send(encodeMux(MuxType.Wake, 0, encodeText(JSON.stringify({ token: target.token, dead: true }))))
+    if (outcome.ok) return
+    // Only Apple saying the device is gone travels back, because that is the
+    // only answer the Bridle can act on — and acting on the others would be
+    // destructive. Everything that is not a 200 used to come back as one
+    // undifferentiated refusal, so a rate limit or an expired signing key made
+    // the Bridle permanently delete a working address.
+    if (outcome.reason === 'dead') {
+      this.bridleSocket()?.send(encodeMux(MuxType.Wake, 0, encodeText(JSON.stringify({ token: target.token, dead: true }))))
+      return
+    }
+    // Said out loud rather than swallowed. A push that fails leaves no trace
+    // anywhere else: nothing errors, no user sees anything, the phone simply
+    // stays quiet. A half-finished deployment or an expired key would be
+    // invisible until someone noticed they had stopped being notified.
+    console.error(`reins-relay: wake failed (${outcome.reason}): ${outcome.detail}`)
   }
 
   private forwardFromBridle(bytes: ArrayBuffer): void {

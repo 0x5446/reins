@@ -198,6 +198,17 @@ export class TunnelSession {
     const { message, channel } = this.responder.writeMessage(Buffer.from(JSON.stringify(reply), 'utf8'))
     this.channel = channel
     this.transport.send(message)
+    // Counted here, before `afterHandshake` sends anything.
+    //
+    // It used to be counted at the *end* of `afterHandshake`, which was a slow
+    // way to permanently disable push for a machine: `sendFrame` catches a
+    // transport failure by calling `dispose()` and then returning normally, so
+    // a failed ready frame left `afterHandshake` running to completion — and
+    // the attach it then took could never be released, because dispose had
+    // already come and gone while `detach` was still undefined. One bad
+    // handshake and the core believed a phone was listening forever, which
+    // silences every wake from then on.
+    this.detach ??= this.core.attach()
     this.options.onAuthenticated?.(remoteStatic, name)
     this.afterHandshake()
   }
@@ -214,6 +225,7 @@ export class TunnelSession {
   }
 
   private afterHandshake(): void {
+    if (this.closed) return
     const status = this.core.dshStatus
     this.sendFrame({
       t: 'ready',
@@ -242,15 +254,14 @@ export class TunnelSession {
     for (const request of this.core.pendingRequests) {
       this.sendFrame({ t: 'ev', seq: 0, stream: 'mux', frame: request })
     }
+    // The ready frame may have failed to send, which disposes the session.
+    // Registering listeners and timers on a corpse leaks both.
+    if (this.closed) return
     this.unwatchStatus = this.core.onDshStatus((next: DshStatus) => {
       this.sendFrame({ t: 'status', dshReachable: next.reachable, ...(next.detail === undefined ? {} : { detail: next.detail }) })
     })
     this.pingTimer = setInterval(() => { this.sendFrame({ t: 'ping', nonce: String(Date.now()) }) }, PING_INTERVAL_MS)
     this.pingTimer.unref()
-    // Counted once per session, not once per `ready`: a reconnecting app sends
-    // `hello` on a live tunnel and gets a second ready, and counting that would
-    // leave this machine believing a phone is listening long after it stopped.
-    this.detach ??= this.core.attach()
   }
 
   private handleFrame(frame: ClientFrame | ServerFrame): void {
@@ -269,7 +280,7 @@ export class TunnelSession {
         this.handleResume(frame.since)
         return
       case 'wake':
-        this.rememberToken(frame.token, frame.environment ?? 'production')
+        this.rememberToken(frame.token)
         return
       case 'hello':
         // The handshake payload already carried this; answering with a fresh
@@ -296,9 +307,8 @@ export class TunnelSession {
    * this pairing was made with, so there is no way to register a token for
    * somebody else's phone.
    * @param token - the APNs device token, or null to withdraw.
-   * @param environment - which APNs host minted it.
    */
-  private rememberToken(token: string | null, environment: 'sandbox' | 'production'): void {
+  private rememberToken(token: string | null): void {
     const key = this.peerKey
     if (key === undefined) return
     const peer = findPeer(this.core.state, key)
@@ -307,8 +317,8 @@ export class TunnelSession {
       if (peer.push === undefined) return
       delete peer.push
     } else {
-      if (peer.push?.token === token && peer.push.environment === environment) return
-      peer.push = { token, environment }
+      if (peer.push === token) return
+      peer.push = token
     }
     this.core.save()
   }

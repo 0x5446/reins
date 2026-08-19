@@ -569,7 +569,7 @@ extension TunnelTests {
 
         await tunnel.start()
         try await expectOnline(tunnel, .relay)
-        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        await tunnel.offerWake(token: "abc123")
         try await waitFor("the machine to be told where to ring") { await mac.wakes.count == 1 }
 
         // The socket dies the way they actually die: still open, delivering
@@ -579,8 +579,7 @@ extension TunnelTests {
         try await waitFor("the new tunnel to say it again") { await mac.wakes.count >= 2 }
 
         let seen = await mac.wakes
-        XCTAssertEqual(seen.last?.token, "abc123")
-        XCTAssertEqual(seen.last?.environment, "sandbox")
+        XCTAssertEqual(seen.last, "abc123")
         await tunnel.stop()
     }
 
@@ -594,13 +593,13 @@ extension TunnelTests {
 
         await tunnel.start()
         try await expectOnline(tunnel, .relay)
-        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        await tunnel.offerWake(token: "abc123")
         try await waitFor("the token") { await mac.wakes.count == 1 }
-        await tunnel.offerWake(token: String?.none, environment: "sandbox")
+        await tunnel.offerWake(token: String?.none)
         try await waitFor("the withdrawal") { await mac.wakes.count == 2 }
 
         let seen = await mac.wakes
-        XCTAssertNil(seen.last?.token, "the machine was never told to stop")
+        XCTAssertEqual(seen.last, String?.none, "the machine was never told to stop")
         await tunnel.stop()
     }
 
@@ -631,17 +630,17 @@ extension TunnelTests {
 
         await tunnel.start()
         try await expectOnline(tunnel, .relay)
-        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        await tunnel.offerWake(token: "abc123")
         try await waitFor("the token") { await mac.wakes.count == 1 }
-        await tunnel.offerWake(token: "abc123", environment: "sandbox")
+        await tunnel.offerWake(token: "abc123")
         try await Task.sleep(nanoseconds: 150_000_000)
         let repeated = await mac.wakes.count
         XCTAssertEqual(repeated, 1, "said the same thing twice")
 
         // A reinstall mints a new token, and the machine has to hear about it.
-        await tunnel.offerWake(token: "def456", environment: "sandbox")
+        await tunnel.offerWake(token: "def456")
         try await waitFor("the new token") { await mac.wakes.count == 2 }
-        let latest = await mac.wakes.last?.token
+        let latest = await mac.wakes.last
         XCTAssertEqual(latest, "def456")
         await tunnel.stop()
     }

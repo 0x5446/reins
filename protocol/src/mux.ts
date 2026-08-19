@@ -44,8 +44,6 @@ export const MUX_HEADER_LENGTH = 5
 export interface WakeRequest {
   /** APNs device token, lowercase hex. */
   token: string
-  /** Which APNs host minted it. */
-  environment: 'sandbox' | 'production'
   /**
    * Machine name, for the one line the person sees.
    *

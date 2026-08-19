@@ -7,104 +7,107 @@
 /// waiting on a person who was never told. Being elsewhere is the premise of
 /// the product, so that is the common case.
 ///
-/// A token is only asked for after someone has said yes to notifications, and
-/// it goes to the paired machine inside the Noise channel. The Relay is handed
-/// it one wake at a time, at the moment a push is sent, and is never told what
-/// the push is about — the words in the banner come from a constant on the
-/// Relay, and the real ones are written locally after the app reconnects.
+/// The token goes to the paired machine inside the Noise channel. The Relay is
+/// handed it one wake at a time, at the moment a push is sent, and is never
+/// told what the push is about — the words in the banner come from a constant
+/// on the Relay, and the real ones are written locally after the app
+/// reconnects.
+///
+/// No APNs environment is worked out here. The first version read
+/// `aps-environment` out of the app's own embedded provisioning profile and
+/// passed the answer down through every layer, which is a guess dressed as a
+/// fact: a Release build signed for development is a sandbox token wearing a
+/// production badge, and both directions of that mistake fail identically —
+/// nothing delivered, no error anywhere. Apple answers the question itself by
+/// refusing the wrong host, so the Relay tries both and nobody has to guess.
 
 import Foundation
 import UIKit
 import UserNotifications
-
-/// Which APNs host will accept the tokens this build is issued.
-///
-/// Read from the provisioning profile the app was signed with rather than
-/// derived from the build configuration, because the build configuration is not
-/// what decides it: `aps-environment` comes from the profile, so a Release
-/// build signed for development is a sandbox token wearing a production badge.
-/// The two fail the same way — nothing is delivered, no error anywhere — which
-/// makes a guess here the most expensive kind of wrong.
-public enum PushEnvironment {
-    /// `sandbox` or `production`, as APNs names them.
-    public static let current: String = readFromProfile() ?? "production"
-
-    private static func readFromProfile() -> String? {
-        // Absent on the Simulator, which cannot receive a push anyway, and
-        // absent from an App Store build — which is the one case where the
-        // fallback is right, because App Store distribution is always
-        // production.
-        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: url),
-              // A CMS envelope with a plist inside. Rather than decode the
-              // signature, find the plist between its own markers: the payload
-              // is ASCII XML and the markers cannot appear in the binary
-              // wrapper around it.
-              let text = String(data: data, encoding: .isoLatin1),
-              let start = text.range(of: "<?xml"),
-              let end = text.range(of: "</plist>")
-        else { return nil }
-        let plist = String(text[start.lowerBound..<end.upperBound])
-        guard let bytes = plist.data(using: .isoLatin1),
-              let parsed = try? PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any],
-              let entitlements = parsed["Entitlements"] as? [String: Any],
-              let environment = entitlements["aps-environment"] as? String
-        else { return nil }
-        // Apple spells it `development`; APNs spells the host `sandbox`.
-        return environment == "development" ? "sandbox" : "production"
-    }
-}
 
 /// Holds the device token iOS hands back, for whoever is connected at the time.
 ///
 /// A separate object because the two events have nothing to do with each other:
 /// iOS answers whenever it feels like it, often before any machine is
 /// connected, and a tunnel is established and torn down several times a day
-/// afterwards. Each side reads the latest state of the other rather than trying
-/// to be present at the right moment.
+/// afterwards.
 @MainActor
-@Observable
 public final class PushRegistrar {
-    /// The token, or nil while iOS has not answered or permission was refused.
+    /// The token, or nil while iOS has not answered.
     public private(set) var token: String?
-    /// Whether iOS has answered at all, either way.
+    /// Whether iOS has answered at all — a `nil` token before it has is "not
+    /// asked yet", which is a different thing from "do not ring me".
     public private(set) var answered = false
 
     /// Called on every answer, so whoever is connected can pass it on.
-    ///
-    /// A callback rather than something to observe, because there is exactly
-    /// one interested party and the interesting moment is the transition. An
-    /// observer would also fire on the launch where nothing changed.
     public var onAnswer: ((String?) -> Void)?
 
-    public init() {}
+    /// Injectable so a test does not need a real notification centre.
+    private let authorized: @Sendable () async -> Bool
+    private let ask: @MainActor () -> Void
 
-    /// Ask iOS for a token. Safe to call repeatedly; iOS answers each time.
+    /// - Parameters:
+    ///   - authorized: whether notifications may currently be posted.
+    ///   - ask: hands the request to the system.
+    public init(
+        authorized: (@Sendable () async -> Bool)? = nil,
+        ask: (@MainActor () -> Void)? = nil,
+    ) {
+        self.authorized = authorized ?? {
+            let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            // `.notDetermined` is nobody having been asked yet, which is not a
+            // refusal — the pairing flow asks, and until then there is nothing
+            // to register and nothing to withdraw.
+            return status != .denied && status != .notDetermined
+        }
+        self.ask = ask ?? { UIApplication.shared.registerForRemoteNotifications() }
+    }
+
+    /// Bring the machine's idea of this phone up to date.
     ///
-    /// Only worth calling once notifications have been allowed — registering
-    /// without permission returns a token that can wake nothing, and the
-    /// machine would ring it forever.
-    public func register() {
-        UIApplication.shared.registerForRemoteNotifications()
+    /// Called at every launch and every return to the foreground, not once at
+    /// pairing. Registering only at pairing was the whole feature quietly not
+    /// working: a phone that paired before this shipped never registers, and
+    /// someone who refuses the prompt and later allows it in Settings never
+    /// gets a second chance. Neither failure says anything — the app looks
+    /// fine and simply never buzzes.
+    public func refresh() async {
+        if await authorized() {
+            ask()
+            return
+        }
+        // Explicitly switched off in Settings. This is the trigger the
+        // withdrawal path exists for; without it the machine goes on ringing a
+        // phone that shows nothing.
+        withdraw()
     }
 
     /// iOS answered.
     /// - Parameter data: the raw token bytes.
     public func accept(_ data: Data) {
-        token = data.map { String(format: "%02x", $0) }.joined()
+        let hex = data.map { String(format: "%02x", $0) }.joined()
         answered = true
-        onAnswer?(token)
+        guard hex != token else { return }
+        token = hex
+        onAnswer?(hex)
     }
 
-    /// iOS refused, or the device cannot register.
+    /// iOS could not issue a token.
     ///
-    /// Recorded rather than retried: the usual causes are a Simulator, a device
-    /// with no network at launch, or an app whose entitlement is missing, and
-    /// none of them is fixed by asking again immediately. The next launch asks
-    /// again, which is the right cadence.
-    public func refuse() {
-        token = nil
+    /// The token already on the machine is left alone. Registration fails for
+    /// reasons that have nothing to do with the phone still being reachable —
+    /// no network at launch is the common one — and an earlier version treated
+    /// that as "stop ringing me", deleting a perfectly good address on the Mac
+    /// because the phone happened to boot in a lift.
+    public func failed() {
         answered = true
+    }
+
+    /// Notifications are off. Tell the machine to stop.
+    private func withdraw() {
+        answered = true
+        guard token != nil else { return }
+        token = nil
         onAnswer?(nil)
     }
 }
@@ -113,21 +116,26 @@ public final class PushRegistrar {
 ///
 /// SwiftUI has no other way to see `didRegisterForRemoteNotifications`: it is
 /// an `UIApplicationDelegate` callback and there is no `onReceive` for it.
+///
+/// The registrar it forwards to is created here and read by the model, rather
+/// than assigned into a nil slot by a view task. The other way round, a token
+/// that arrived before the view ran was dropped on the floor with nothing to
+/// say so.
 public final class PushDelegate: NSObject, UIApplicationDelegate {
-    /// Set before the app finishes launching.
-    @MainActor public static var registrar: PushRegistrar?
+    /// Created before anything can call back into it.
+    @MainActor public static let registrar = PushRegistrar()
 
     public func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data,
     ) {
-        Task { @MainActor in PushDelegate.registrar?.accept(deviceToken) }
+        Task { @MainActor in PushDelegate.registrar.accept(deviceToken) }
     }
 
     public func application(
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error,
     ) {
-        Task { @MainActor in PushDelegate.registrar?.refuse() }
+        Task { @MainActor in PushDelegate.registrar.failed() }
     }
 }

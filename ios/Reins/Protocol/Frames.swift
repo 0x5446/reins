@@ -174,20 +174,28 @@ public struct ResumeFrame: TunnelFrame {
 /// Relay is handed it one wake at a time, at the moment a push is sent, and is
 /// never told what the push is about. A `nil` token withdraws it, which is what
 /// notifications being switched off in Settings looks like from here.
+///
+/// No APNs environment travels with it. Which host minted a token is Apple's
+/// question to answer — it refuses the wrong one with `BadDeviceToken` — and an
+/// earlier version had this app read `aps-environment` out of its own
+/// provisioning profile and pass a guess down through every layer.
+///
+/// The `null` is written out rather than omitted. An absent key means "no
+/// change"; a present null means "stop ringing me", and dropping it the way an
+/// optional normally would leaves a machine ringing a phone that asked to be
+/// left alone. The cross-implementation vectors carry both shapes for exactly
+/// this reason.
 public struct WakeFrame: TunnelFrame {
     public let t = "wake"
     /// APNs device token as lowercase hex, or nil to stop being woken.
     public let token: String?
-    /// Which APNs host minted it; a token is meaningless to the other one.
-    public let environment: String
 
-    public init(token: String?, environment: String) {
+    public init(token: String?) {
         self.token = token
-        self.environment = environment
     }
 
     var members: [(String, JSONValue?)] {
-        [("t", .string(t)), ("token", token.map { JSONValue.string($0) } ?? .null), ("environment", .string(environment))]
+        [("t", .string(t)), ("token", token.map { JSONValue.string($0) } ?? .null)]
     }
 }
 

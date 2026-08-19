@@ -131,20 +131,21 @@ export interface EventFrame {
  * carries it as ciphertext like everything else and learns it only at the
  * moment a push is actually sent, from the Bridle, one wake at a time.
  *
- * `token: null` means stop: notifications were turned off, or this build no
- * longer has a token to offer.
+ * `token: null` means stop: someone turned notifications off in Settings, which
+ * the app notices when it next comes to the foreground.
+ *
+ * No APNs environment travels with it. A token is minted against either the
+ * development or the production host and is meaningless to the other, and an
+ * earlier version had the app read `aps-environment` out of its own embedded
+ * provisioning profile and pass the answer down through every layer. That is a
+ * guess dressed as a fact — a Release build signed for development is a sandbox
+ * token wearing a production badge — and Apple already answers the question by
+ * refusing the wrong host with `BadDeviceToken`. The Relay tries both.
  */
 export interface WakeFrame {
   t: 'wake'
   /** APNs device token, lowercase hex, or null to stop being woken. */
   token: string | null
-  /**
-   * Which APNs host to use. A token from a development build is meaningless to
-   * the production host and vice versa, and the two fail differently — the
-   * wrong host answers `BadDeviceToken` rather than delivering nothing — so the
-   * app states which one minted it rather than leaving the sender to guess.
-   */
-  environment?: 'sandbox' | 'production'
 }
 
 /** App to Bridle: after a reconnect, replay everything past `since`. */

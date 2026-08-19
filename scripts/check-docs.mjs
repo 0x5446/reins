@@ -142,12 +142,46 @@ expect(swiftPrologue === prologue,
 
 // --- Frame kinds the docs enumerate ------------------------------------------
 
+const FRAME_KINDS = ['hello', 'req', 'res', 'cancel', 'respond', 'resume', 'wake', 'ev', 'resync', 'status', 'ping', 'pong', 'fault', 'ready']
 const documentedFrames = new Set(
-  [...protocolDoc.matchAll(/\*\*`(req|res|cancel|respond|resume|ev|resync|status|ping|pong|fault|ready)`\*\*/g)]
-    .map(match => match[1]),
+  [...protocolDoc.matchAll(/\*\*`([a-z]+)`\*\*/g)].map(match => match[1]),
 )
-for (const kind of ['req', 'res', 'cancel', 'respond', 'resume', 'ev', 'resync', 'status', 'ping', 'pong', 'fault', 'ready']) {
+for (const kind of FRAME_KINDS) {
   expect(documentedFrames.has(kind), `protocol.md §4 没有描述 \`${kind}\` 帧`)
+}
+
+// Every frame the two implementations define is one the docs know about. The
+// list above is hand-written and would otherwise rot the moment someone adds a
+// frame without touching it — which is exactly what happened with `wake`.
+const tsKinds = [...read('protocol/src/frames.ts').matchAll(/^\s{2}t: '([a-z]+)'$/gm)].map(m => m[1])
+const swiftKinds = [...read('ios/Reins/Protocol/Frames.swift').matchAll(/^\s{4}public let t = "([a-z]+)"$/gm)].map(m => m[1])
+for (const kind of new Set([...tsKinds, ...swiftKinds])) {
+  expect(FRAME_KINDS.includes(kind), `\`${kind}\` 帧存在于源码，但 check-docs 的清单里没有`)
+}
+for (const kind of swiftKinds) {
+  expect(tsKinds.includes(kind), `Swift 定义了 \`${kind}\` 帧，TypeScript 没有 —— 两份协议已漂移`)
+}
+
+// --- The two copies of the Relay wire format ---------------------------------
+//
+// `protocol/src/mux.ts` is the definition; `relay-worker/src/wire.ts` is a
+// second copy, because a Cloudflare Worker cannot import the Node package. A
+// value that drifts between them is not a crash — the Relay silently drops the
+// frame it no longer recognises — so it is checked mechanically rather than
+// left to whoever remembers.
+
+const muxOf = (path) => Object.fromEntries(
+  [...read(path).matchAll(/^\s{2}([A-Z][a-zA-Z]*): (0x[0-9a-f]{2}),$/gm)].map(m => [m[1], m[2]]),
+)
+const muxDefinition = muxOf('protocol/src/mux.ts')
+const muxCopy = muxOf('relay-worker/src/wire.ts')
+expect(Object.keys(muxDefinition).length > 0, 'protocol/src/mux.ts 里没解析出任何 MuxType')
+for (const [name, value] of Object.entries(muxDefinition)) {
+  expect(muxCopy[name] === value,
+    `MuxType.${name} 漂移了：protocol/src/mux.ts 是 ${value}，relay-worker/src/wire.ts 是 ${String(muxCopy[name])}`)
+}
+for (const name of Object.keys(muxCopy)) {
+  expect(name in muxDefinition, `relay-worker/src/wire.ts 定义了 MuxType.${name}，protocol/src/mux.ts 没有`)
 }
 
 // --- Projections the fold doc claims are unfolded ----------------------------

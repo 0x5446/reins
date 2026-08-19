@@ -234,6 +234,8 @@ final class ParityTests: XCTestCase {
                 ).encoded()
             case "resume":
                 encoded = try ResumeFrame(since: frame["since"]?.intValue ?? 0).encoded()
+            case "wake":
+                encoded = try WakeFrame(token: frame["token"]?.stringValue).encoded()
             default:
                 return XCTFail("unhandled frame kind in vectors")
             }

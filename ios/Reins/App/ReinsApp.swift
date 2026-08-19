@@ -26,7 +26,6 @@ struct ReinsApp: App {
                     model.open(url: url)
                 }
                 .task {
-                    PushDelegate.registrar = model.push
                     #if DEBUG
                     // A seam for the UI tests, and only for them.
                     //
@@ -42,12 +41,17 @@ struct ReinsApp: App {
                     }
                     #endif
                     model.restoreLastConnection()
+                    model.refreshPush()
                 }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
                 model.enteredForeground()
+                // Notifications can be switched off in Settings while the app
+                // is away, and the only way to find out is to look on the way
+                // back in.
+                model.refreshPush()
                 lock.didBecomeActive()
             case .background, .inactive:
                 model.enteredBackground()

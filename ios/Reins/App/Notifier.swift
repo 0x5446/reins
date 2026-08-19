@@ -5,11 +5,15 @@
 /// when you look, and a notification for each would train people to ignore all of
 /// them.
 ///
-/// These are LOCAL notifications, posted by the app while it holds a live tunnel.
-/// There is no push service, so there is no third party to tell that your agent
-/// wants to run `rm`, and nothing to register a device token with. The cost is
-/// that a suspended app posts nothing until iOS next runs it; the benefit is that
-/// the design has no server-side knowledge of your machine at all.
+/// These are LOCAL notifications, posted by the app while it holds a live
+/// tunnel — which is the case where someone is already looking at their phone,
+/// and the words in them are the real ones because they never left the device.
+///
+/// A suspended app holds no tunnel and posts nothing, and that gap is what
+/// `Push.swift` covers: the machine has the Relay ring this phone, the app
+/// wakes, reconnects, and then posts one of these. The push itself carries a
+/// fixed sentence and no detail, so the third party in the path is still never
+/// told that your agent wants to run `rm`.
 
 import Foundation
 import UserNotifications
