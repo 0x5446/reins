@@ -15,16 +15,26 @@
 	  identity, so it is worth stating rather than inheriting.
 	-->
 	<!--
-	  Which APNs host will issue this build's tokens. Xcode rewrites the value
-	  to match the profile it signs with — `development` for a device build,
-	  `production` for a distribution one — so what is written here is only the
-	  default for the case where it does not.
+	  Push is commented out until the paid membership activates.
 
-	  Without the key there is no token at all: registering returns an error
-	  rather than a device token, and the machine has nowhere to ring.
+	  `aps-environment` is a paid-team capability, and asking for it on a free
+	  personal team does not degrade — it fails the build outright, with
+	  "provisioning profile doesn't include the aps-environment entitlement".
+	  So adding it took the app off the phone entirely, in exchange for nothing:
+	  there is no APNs key yet either, so no push could have been delivered.
+
+	  Everything else in the push path ships and is inert. The app asks iOS for
+	  a token, iOS refuses because there is no entitlement, `PushRegistrar`
+	  records the refusal without withdrawing anything, and the Bridle simply
+	  has no token to ring.
+
+	  To turn it on: put the two lines back, let Xcode regenerate the profile
+	  against the paid team, and set the four REINS_APNS_* secrets on the Relay
+	  (docs/deployment.md).
+
+	  <key>aps-environment</key>
+	  <string>development</string>
 	-->
-	<key>aps-environment</key>
-	<string>development</string>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)ai.novabox.reins</string>
