@@ -42,7 +42,7 @@ interface MachineRow {
   circuits: number
 }
 
-/** Running totals, kept incrementally so `/healthz` is never a table scan. */
+/** What the stored rows add up to, counted fresh each time. */
 interface Counts {
   machines: number
   circuits: number
@@ -104,6 +104,20 @@ export class Exchange extends DurableObject<Env> {
     // Overridable so a test can force a sweep without waiting ten minutes.
     this.sweepInterval = positiveInt(env.REINS_SWEEP_INTERVAL_MS, SWEEP_INTERVAL_MS)
     this.maxCircuits = positiveInt(env.REINS_MAX_CIRCUITS, DEFAULT_MAX_CIRCUITS)
+    // Armed here because this is the one place guaranteed to run.
+    //
+    // The first attempt armed it in `register`, which never fired: a Relay
+    // whose machines all registered before this shipped registers no more of
+    // them, so the alarm the orphans were waiting for was never set. Arming it
+    // from each entry point instead worked, but only because `/healthz` happens
+    // to be polled, and it put a write inside a read. A constructor runs on
+    // every wake and asks for nothing in return.
+    //
+    // An Exchange holding nothing arms an alarm that finds nothing and does not
+    // re-arm, so an idle Relay costs one alarm, once.
+    ctx.blockConcurrencyWhile(async () => {
+      if (await ctx.storage.getAlarm() === null) await ctx.storage.setAlarm(Date.now() + this.sweepInterval)
+    })
   }
 
   /**
@@ -156,8 +170,6 @@ export class Exchange extends DurableObject<Env> {
       }))
     }
     await this.ctx.storage.put(`m:${deviceId}`, { switchboard, name, version, since: Date.now(), circuits: 0 } satisfies MachineRow)
-    const alarm = await this.ctx.storage.getAlarm()
-    if (alarm === null) await this.ctx.storage.setAlarm(Date.now() + this.sweepInterval)
     return { ok: true }
   }
 
