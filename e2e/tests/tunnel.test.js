@@ -55,6 +55,22 @@ function finished(events, sessionId) {
 }
 
 /**
+ * What the harness said when it could not reach its model.
+ *
+ * On the host stream rather than the session's, because it is a fact about the
+ * machine rather than about the conversation.
+ * @param {Array<{frame: unknown}>} events - everything the phone has seen.
+ * @returns {string | undefined} the message, or undefined when nothing failed.
+ */
+function agentError(events) {
+  for (const event of events) {
+    const payload = event.frame?.payload
+    if (payload?.type === 'host/agent-error') return String(payload.message ?? 'no detail')
+  }
+  return undefined
+}
+
+/**
  * The assistant's visible text for a session, assembled the way the app does.
  * @param {Array<{frame: unknown}>} events - everything the phone has seen.
  * @param {string} sessionId - the session of interest.
@@ -113,6 +129,14 @@ test('a phone pairs, reaches the harness through the relay, and gets a real mode
   assert.equal(prompted.ok, true, JSON.stringify(prompted))
 
   await waitFor(() => finished(events, sessionId), MODEL_TIMEOUT_MS, 'the model to finish its turn')
+
+  // Said before the assertion below, because an empty reply is what a provider
+  // outage, an expired key and a spent quota all look like from here — and
+  // "expected PONG, got \"\"" sends whoever sees it looking for a parsing bug
+  // in this file. Cost an hour once, against a plan that had run out of tokens.
+  const failure = agentError(events)
+  assert.equal(failure, undefined, `the harness could not reach its model: ${String(failure)}`)
+
   const reply = assistantText(events, sessionId)
   assert.match(reply.toUpperCase(), /PONG/u, `expected the model to answer PONG, got ${JSON.stringify(reply)}`)
 
