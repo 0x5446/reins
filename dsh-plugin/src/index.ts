@@ -55,7 +55,7 @@ export interface BridlePluginConfig {
 }
 
 /** The version reported to a paired app; overridden by the build. */
-const VERSION = '0.1.0'
+const VERSION = '0.1.1'
 
 /**
  * Cordis entry point.
