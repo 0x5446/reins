@@ -22,6 +22,9 @@ jobs:
   node:
     name: node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    # A hang here used to mean six hours of a runner doing nothing. Everything
+    # in this job takes well under a minute.
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +54,16 @@ jobs:
       # and question round trip against the fake agent, the wait-for-a-phone
       # path, and waking a phone that is not running. The rest of e2e/ wants a
       # harness serving locally and would skip here, turning a hollow run green.
+      #
+      # REINS_E2E_DSH_URL points at a closed port on purpose. These three files
+      # drive a FakeAgent and never dial a harness, but `startStack` still
+      # insists on having a harness URL and will go looking for one when it is
+      # not given a value. On a runner that scan is the slowest thing in the
+      # job and, the first time this ran, it did not come back at all. Naming a
+      # dead address skips it and changes nothing else.
       - name: end to end, the parts that stand alone
+        env:
+          REINS_E2E_DSH_URL: http://127.0.0.1:9
         run: >
           node --test --test-concurrency=1
           e2e/tests/approval.test.js
@@ -63,6 +75,7 @@ jobs:
     # macOS minutes are free on public repositories, which is the only reason
     # this job is affordable at all.
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
