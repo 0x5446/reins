@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/0x5446/reins/blob/main/SECURITY.md
+    about: Do not open an issue. SECURITY.md says where to send it and what happens next.
+  - name: Where the app is
+    url: https://reins.novabox.ai/get
+    about: Not on the App Store yet. This page says what that means and how to build it.

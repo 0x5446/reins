@@ -1,0 +1,99 @@
+# What a pull request has to survive.
+#
+# Two jobs, because the repository has two toolchains and neither can check the
+# other. What is deliberately absent is explained at the bottom — a CI file that
+# quietly omits a suite reads the same as one that never had it.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is what package.json claims to support, so 22 is what gets tested;
+        # an engines field nothing runs against is a guess. 24 is what the
+        # maintainer develops on.
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs exactly what the
+      # lockfile pins and fails when the lockfile and the manifest disagree.
+      - run: npm ci
+
+      # Builds all five workspaces, runs check:docs, then the unit tests.
+      # check:docs reads ios/Reins/Protocol/Frames.swift, ios/Reins/Store/
+      # Conversation.swift and relay-worker/src/wire.ts, so this job needs a
+      # full checkout even though it never compiles either of them.
+      - run: npm test
+
+      # The end-to-end files that need nothing but this machine: the approval
+      # and question round trip against the fake agent, the wait-for-a-phone
+      # path, and waking a phone that is not running. The rest of e2e/ wants a
+      # harness serving locally and would skip here, turning a hollow run green.
+      - name: end to end, the parts that stand alone
+        run: >
+          node --test --test-concurrency=1
+          e2e/tests/approval.test.js
+          e2e/tests/waiting.test.js
+          e2e/tests/wake.test.js
+
+  ios:
+    name: ios
+    # macOS minutes are free on public repositories, which is the only reason
+    # this job is affordable at all.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Xcode project is generated from ios/project.yml and is not
+      # committed, so this is a hard dependency, not a nicety.
+      - run: brew install xcodegen
+
+      # run-tests.sh picks the newest iPhone simulator that exists on the
+      # machine rather than naming one, because that list differs between Xcode
+      # versions and between a laptop and a runner. Set REINS_SIM to pin it.
+      - run: npm run test:ios
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: ios/build/Reins.xcresult
+          retention-days: 7
+
+# Not here, and why:
+#
+#   relay-worker/tests/worker.test.js needs `wrangler dev` and a workerd
+#   download, and relay-worker is not a workspace so it has no lockfile —
+#   the job would be the least reproducible thing in the repository, guarding
+#   eleven tests. The wire format it shares with protocol/src/mux.ts is already
+#   compared by check:docs above, and the worker itself is exercised in its
+#   deployed form by .github/workflows/deployed.yml.
+#
+#   e2e/tests/{cli,direct,security,tunnel}.test.js need a DeepSeek Harness
+#   serving on the machine. Installing one on a runner is possible; getting it
+#   to answer with a real model is not, and a harness that boots but cannot
+#   think would make some of those tests fail rather than skip.
+#
+#   ios/run-ui-tests.sh needs a booted simulator and a paired Bridle.

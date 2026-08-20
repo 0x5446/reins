@@ -1,0 +1,51 @@
+# The suite that talks to what is actually running.
+#
+# Every other test in this repository runs against loopback. A tunnel that
+# refuses WebSocket upgrades, a proxy that buffers the stream into uselessness,
+# a capacity ceiling set wrong, a redirect rule someone deleted — loopback finds
+# none of it. `docs/deployment.md` is blunt about this: do not drop this suite
+# and expect the others to cover for it.
+#
+# It is not a pull-request gate. A red X here means production is unwell, not
+# that the change is bad, and blocking a contributor's patch on the maintainer's
+# DNS would be the wrong signal.
+
+name: deployed
+
+on:
+  schedule:
+    # Once a day. This is a liveness check, not a monitor; anything that needs
+    # to page someone needs something other than GitHub Actions.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      # The tests that need a real harness on the far end skip here. What is
+      # left still covers the parts only a real deployment can break: the
+      # handshake through the edge, streaming downstream, and the relay
+      # forgetting a phone that hangs up.
+      - name: the relay that is actually serving
+        env:
+          REINS_E2E_RELAY_URL: wss://reins-relay.novabox.ai
+        run: node --test --test-concurrency=1 e2e/tests/deployed.test.js
+
+      # The four pages the app links to, and the installer redirect. A 404
+      # behind the app's Privacy button is also a rejected App Store submission.
+      - name: the pages the app links to
+        run: node --test e2e/tests/site.test.js

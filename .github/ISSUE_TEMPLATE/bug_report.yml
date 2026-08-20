@@ -1,0 +1,81 @@
+name: Bug report
+description: Something behaves differently from how it is described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else: **do not paste a transcript, a diff, a command the
+        agent ran, or the contents of `~/.reins/bridle.json`.** That file holds
+        this machine's private key. Redact freely — a report with the interesting
+        parts removed is still useful, and one that leaks a key is not recoverable.
+
+        If this is a security problem, close this and read
+        [SECURITY.md](https://github.com/0x5446/reins/blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: piece
+    attributes:
+      label: Which piece
+      description: Best guess is fine. "I do not know" is a legitimate answer.
+      options:
+        - The iPhone app
+        - Bridle (the process on the Mac)
+        - The relay
+        - The installer
+        - The documentation
+        - I do not know
+    validations:
+      required: true
+
+  - type: dropdown
+    id: path
+    attributes:
+      label: How was it connected
+      description: |
+        The app races a local-network connection against the relay, and a lot of
+        bugs only exist on one of the two. Settings → Diagnostics shows which
+        one won.
+      options:
+        - Local network (same Wi-Fi)
+        - Relay
+        - It changed while this was happening
+        - Not connected at all
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `bridle status` and `bridle doctor`
+      description: |
+        Both are designed to be safe to paste — they print no keys and no
+        conversation content. Skip if the bug is app-only.
+      render: text
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Bridle version (top line of `bridle status`), macOS, Node, iOS.
+      placeholder: bridle 0.1.0, macOS 26.2, node 22.14, iOS 18.5
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: |
+        If it happens every time, say what to do. If it happened once, say what
+        was going on around it — a network change, a reconnect, a long-running
+        turn. Intermittent reports are still worth filing; say that they are.

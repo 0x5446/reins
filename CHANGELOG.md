@@ -1,0 +1,79 @@
+# Changelog
+
+What changed between releases, from the point of view of someone using it. The
+commit log has the rest.
+
+Versions are the tags `install.sh` can install. `REINS_REF` in that script names
+the one it installs by default, so a release here and a change to that line are
+the same decision.
+
+## Unreleased
+
+Everything below is on `main` and is not in the tag the installer pins.
+
+- **Conversations resume where they left off.** Reopening a session starts at the
+  last thing said rather than at the top.
+- **A model that declines to answer says so.** The transcript used to show the
+  space where a reply would have been.
+- **Push notifications work on a phone that is not running.** The membership that
+  gates the entitlement is live, so the wake path is enabled rather than
+  commented out. The push itself carries no content — the phone opens its own
+  tunnel and asks the machine what happened, and posts a local notification with
+  the real words.
+- **`bridle` says when the running process is older than the code on disk.** An
+  update that never restarted used to look like a bug in the new code.
+- Repository scaffolding for being public: `SECURITY.md` with the threat model
+  and a disclosure process, `CONTRIBUTING.md`, a code of conduct, issue and pull
+  request templates, and CI.
+
+## 0.1.0 — 2026-08-19
+
+The first tag anyone can install from.
+
+`install.sh` had always pointed at this name and it had never existed, so the one
+line the app tells people to paste would have failed at the clone the moment this
+repository went public. A tag rather than a branch, because `main` moves and an
+installer that follows it installs whatever was pushed most recently — onto a
+machine that is about to be handed the same authority as its own shell.
+
+**Pairing.** A QR code in the terminal, or an 8-character short code for when the
+camera is not an option. One-time tokens. No accounts, no server address to type,
+no password.
+
+**One tunnel, everything through it.** A single
+`Noise_IK_25519_ChaChaPoly_SHA256` channel carries every interaction with the
+harness. The relay switches sealed frames by circuit number and holds no key
+material. The protocol is implemented twice, in TypeScript and in Swift, and
+pinned to itself by deterministic test vectors.
+
+**Reachability without configuration.** Bridle dials out, so there is nothing to
+open on the router. On a shared network the app talks to the Mac directly; the
+two paths are raced with the relay given a head start delay, and the local one
+wins. Tailscale addresses are found automatically, and `--advertise` covers a
+tunnel hostname the machine cannot discover for itself.
+
+**Reading and driving.** The event log folds into a transcript on the phone —
+diffs, terminal output, file reads, to-do lists, and reasoning as it arrives.
+Sessions grouped by workspace with anything waiting on you above everything else.
+Approvals and questions, including the ones raised while nobody was attached.
+Model and reasoning-effort pickers, slash commands, subagents, a trace view, and
+what the session cost.
+
+**Resume without gaps.** Reconnecting replays what was missed from a ring buffer.
+When the buffer cannot cover the gap the machine says so and the phone refetches,
+rather than silently rendering a transcript that is missing a piece.
+
+**Waking a phone that is not running,** without telling anyone what it is about.
+
+**The app locks itself,** because a paired phone that is unlocked in someone
+else's hands is a shell with no further challenge. Face ID, Touch ID, or a
+passcode, on launch and after an idle timeout, and the screen is covered the
+moment the app stops being frontmost.
+
+**Two relays, one wire format.** A Node process and a Cloudflare Worker on
+Durable Objects. The public relay runs the Worker; the same acceptance suite runs
+against both.
+
+**Identity backup.** `bridle backup` and `bridle restore`, encrypted under a
+passphrase, because a machine that loses its static key is indistinguishable from
+an impostor to every phone paired with it.
