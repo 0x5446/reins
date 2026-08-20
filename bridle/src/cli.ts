@@ -8,7 +8,7 @@
  * for the days after that.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -356,6 +356,56 @@ async function restore(options: Options): Promise<void> {
   say('Restored. Restart the bridle for it to take effect.')
 }
 
+/**
+ * Whether the running process predates the code sitting on disk.
+ *
+ * Node caches a module for the life of the process, and a Bridle that runs as
+ * a dsh plugin is started once and left for days. So a rebuild changes the
+ * files and changes nothing about what is actually serving phones — and the
+ * two disagree silently, because an old Bridle handles a new frame exactly as
+ * the protocol says it should: it does not recognise it and ignores it
+ * (docs/protocol.md §4.3).
+ *
+ * Cost a day of debugging once. A phone was sending its push token, a Bridle
+ * from thirty hours earlier was dropping it on the floor, and every layer
+ * looked correct in isolation — the app sent, the tunnel carried, the machine
+ * received. Nothing was broken except which build was in memory.
+ * @param startedAt - epoch milliseconds the running process wrote at startup.
+ * @returns a human-readable build time when the disk is newer, else undefined.
+ */
+function builtAfter(startedAt: number): string | undefined {
+  const lib = dirname(fileURLToPath(import.meta.url))
+  let newest = 0
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.name.endsWith('.js')) newest = Math.max(newest, statSync(full).mtimeMs)
+    }
+  }
+  try {
+    walk(lib)
+  } catch (error) {
+    // Only a missing or unreadable tree is tolerated — an installation that
+    // does not look like a build cannot be judged, and guessing would cry wolf
+    // on every status.
+    //
+    // Narrow on purpose. The first version caught everything, and what it
+    // caught was a ReferenceError from two functions this file had never
+    // imported: the check silently reported "nothing stale" for every run,
+    // which is precisely the failure it exists to prevent. A feature built to
+    // expose silent failure is the last place to swallow one.
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EACCES') throw error
+    return undefined
+  }
+  // A minute of slack: the process writes `startedAt` a moment after the files
+  // it loaded were stamped, and a rebuild that happens to land in that window
+  // is the one case where the two are genuinely the same code.
+  if (newest <= startedAt + 60_000) return undefined
+  return new Date(newest).toLocaleString()
+}
+
 async function status(): Promise<void> {
   const state = loadState()
   const runtime = readRuntime()
@@ -367,6 +417,10 @@ async function status(): Promise<void> {
     say('bridle    not running · start it with "bridle start"')
   } else {
     say(`bridle    running (pid ${String(runtime.pid)}, ${VERSION}) · ${String(runtime.attached)} attached`)
+    const stale = builtAfter(runtime.startedAt)
+    if (stale !== undefined) {
+      say(`          ⚠ running code from before ${stale} — restart to pick up the build on disk`)
+    }
     say(`relay     ${runtime.relayState} · ${runtime.relayUrl}`)
     if (runtime.direct.length > 0) say(`local     ${runtime.direct.join(', ')}`)
   }
