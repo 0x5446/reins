@@ -155,7 +155,13 @@ export async function wake(env: Env, target: WakeTarget, now: number = Date.now(
   }
 
   let last: Extract<WakeOutcome, { ok: false }> = { ok: false, reason: 'unreachable', detail: 'no host was tried' }
+  // Whether production itself called the token bad, as opposed to never having
+  // been asked. Sandbox says `BadDeviceToken` about every production token
+  // there is, so its answer only means anything once production has agreed.
+  let productionRefusedToken = false
+
   for (const host of HOSTS) {
+    const isProduction = host === HOSTS[0]
     let response: Response
     try {
       response = await fetch(`${host}/3/device/${target.token}`, { method: 'POST', headers, body })
@@ -164,12 +170,30 @@ export async function wake(env: Env, target: WakeTarget, now: number = Date.now(
       continue
     }
     if (response.status === 200) return { ok: true }
-    last = classify(response.status, await response.text().catch(() => ''))
+    const outcome = classify(response.status, await response.text().catch(() => ''))
+    const badToken = outcome.reason === 'dead' && outcome.detail.includes('BadDeviceToken')
+
     // `BadDeviceToken` from production is the ordinary answer for a development
     // token, so it is the one refusal worth asking the other host about. Every
-    // other refusal means the same thing on both and asking twice would only
+    // other refusal means the same thing on both, and asking twice would only
     // double the load on an Apple that is already unhappy.
-    if (last.reason !== 'dead' || !last.detail.includes('BadDeviceToken')) return last
+    if (isProduction && badToken) {
+      productionRefusedToken = true
+      last = outcome
+      continue
+    }
+
+    // Sandbox refusing a token that production never got to see proves nothing
+    // — and reporting it as `dead` would have the Bridle delete a working
+    // address over one network blip. The previous version did exactly that:
+    // production `fetch` threw, the loop fell through to sandbox, and sandbox's
+    // routine refusal of a live production token was returned as a death
+    // certificate. The comment above already claimed both hosts had to agree;
+    // nothing was recording whether they had.
+    if (badToken && !productionRefusedToken) {
+      return { ok: false, reason: 'refused', detail: `${outcome.detail} (production was never reached)` }
+    }
+    return outcome
   }
   return last
 }

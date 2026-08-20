@@ -104,9 +104,19 @@ public final class PushRegistrar {
     }
 
     /// Notifications are off. Tell the machine to stop.
+    ///
+    /// Announced whenever the system says no, not only when this object
+    /// remembers handing a token out. The token lives in memory and the machine
+    /// keeps it on disk, so after a relaunch the two disagree: `token` is nil
+    /// again while the Mac still holds one and goes on ringing a phone that
+    /// shows nothing. Guarding on `token != nil` meant the withdrawal fired
+    /// exactly once — in the session where notifications were switched off —
+    /// and never again, which is the session least likely to be running.
+    ///
+    /// Saying it twice is free: the Bridle drops a withdrawal for a peer that
+    /// has no token.
     private func withdraw() {
         answered = true
-        guard token != nil else { return }
         token = nil
         onAnswer?(nil)
     }

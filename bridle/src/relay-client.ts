@@ -64,8 +64,6 @@ export class RelayClient {
   private state: RelayState = 'offline'
   private keepalive: NodeJS.Timeout | undefined
   private unwatchWaiting: (() => void) | undefined
-  /** A wake is owed but the Relay was not ready to carry it. */
-  private wakeWanted = false
   /** Whether the current socket has finished registering. */
   private registered = false
 
@@ -100,7 +98,7 @@ export class RelayClient {
   }
 
   private async loop(): Promise<void> {
-    this.unwatchWaiting ??= this.core.onWaiting(() => { this.ringSleepers() })
+    this.unwatchWaiting ??= this.core.onWaitingChanged(() => { this.ringSleepers() })
     while (!this.abort.signal.aborted) {
       this.publish('connecting')
       const reason = await this.connectOnce()
@@ -249,15 +247,6 @@ export class RelayClient {
    * banner; guessing wrong costs the notification the feature exists for.
    */
   private ringSleepers(): void {
-    if (this.core.attached > 0) return
-    // Remembered rather than dropped. `onWaiting` fires once, at the instant
-    // the agent stops, and the Relay is quite often not ready at that instant —
-    // it is offline, or reconnecting, or the socket is open but the
-    // registration handshake has not finished. The first version returned
-    // silently in all three cases, and because the request stays in `waiting`
-    // and is therefore deduped, that one chance was the only chance: the person
-    // was never told, ever.
-    this.wakeWanted = true
     this.flushWake()
   }
 
@@ -273,14 +262,22 @@ export class RelayClient {
   private flushWake(): void {
     const socket = this.socket
     if (!this.registered || socket === undefined || socket.readyState !== WebSocket.OPEN) return
-    if (this.core.attached > 0) {
-      // Somebody arrived while we were waiting for the Relay. They will see it
-      // on screen, so the reason to ring has gone.
-      this.wakeWanted = false
-      return
-    }
-    if (!this.wakeWanted) return
-    this.wakeWanted = false
+    // Asked of the core rather than remembered from the moment the agent
+    // stopped, because a remembered answer and the truth drift apart in both
+    // directions.
+    //
+    // A boolean set when the agent stopped was wrong twice. It was never set at
+    // all if somebody happened to be attached at that instant — so a question
+    // asked while you were looking at your phone, and left unanswered when you
+    // put it down, rang nobody, ever. And it stayed set through a Relay outage
+    // even if the question was answered in the browser meanwhile, so the Relay
+    // coming back produced a notification about something already dealt with.
+    //
+    // The fact it was copying already exists and is kept current: the core's
+    // pending list, which `approval/resolved` and `question/resolved` remove
+    // from. Deriving costs a property read.
+    if (this.core.attached > 0) return
+    if (this.core.pendingRequests.length === 0) return
     // By endpoint, not by peer. One phone can hold two pairings — `bridle
     // revoke` is manual and a phone that re-pairs after a reset arrives with a
     // fresh device identity but the same APNs token — and ringing per peer
@@ -307,12 +304,19 @@ export class RelayClient {
    */
   private forgetDeadToken(payload: Buffer): void {
     let token: unknown
+    let dead: unknown
     try {
-      ({ token } = JSON.parse(payload.toString('utf8')) as { token?: unknown })
+      ({ token, dead } = JSON.parse(payload.toString('utf8')) as { token?: unknown; dead?: unknown })
     } catch {
       return
     }
-    if (typeof token !== 'string') return
+    // Both fields, not just the address. The Relay sends this shape to say one
+    // specific thing — Apple reports the device gone — and a later Relay that
+    // learns to say something else about a token over the same message type
+    // would otherwise be read as a deletion order by every Bridle already
+    // deployed. Requiring the claim to be made explicitly is what lets that
+    // message type grow.
+    if (typeof token !== 'string' || dead !== true) return
     let changed = false
     for (const peer of this.core.state.peers) {
       if (peer.push !== token) continue

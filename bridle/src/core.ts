@@ -137,27 +137,50 @@ export class BridleCore {
    */
   attach(): () => void {
     this.attachments += 1
+    this.waitingChanged()
     let released = false
     return (): void => {
       if (released) return
       released = true
       this.attachments -= 1
+      // The moment that used to be missed: the last phone leaves while a
+      // question it never answered is still outstanding.
+      this.waitingChanged()
     }
   }
 
   /**
-   * Watch for the agent stopping to ask something.
+   * Watch for any change to whether somebody needs fetching.
    *
-   * Fires only when a request *starts* waiting, not when one is answered and
-   * not on the replay a newly attached phone receives — the listener exists so
-   * something can go and fetch a person, and a person who is already looking
-   * at the screen does not need fetching twice.
-   * @param listener - called after the request has been recorded.
+   * Not "a request arrived" — that was the first version and it was the wrong
+   * event. Whether a phone should be rung is a *state*, standing on two facts
+   * that both move: something is waiting on a person, and nobody is attached to
+   * be told. A listener fired only when the first became true was wrong in both
+   * directions. Asked while the phone was in someone's hand, no ring was ever
+   * owed, so putting the phone down without answering left the machine waiting
+   * in silence forever. And a ring owed while the Relay was down was still owed
+   * when it returned, even if the question had been answered in the browser
+   * meanwhile.
+   *
+   * So this fires whenever either fact changes and the listener decides again.
+   * @param listener - called after the change is recorded.
    * @returns a function that detaches the listener.
    */
-  onWaiting(listener: () => void): () => void {
+  onWaitingChanged(listener: () => void): () => void {
     this.waitingListeners.add(listener)
     return (): void => { this.waitingListeners.delete(listener) }
+  }
+
+  /** Tell every listener the answer may have changed. */
+  private waitingChanged(): void {
+    for (const listener of this.waitingListeners) {
+      try {
+        listener()
+      } catch {
+        // Same reasoning as every other listener here: one bad subscriber must
+        // not stop the rest, and must not stop the event fold.
+      }
+    }
   }
 
   /**
@@ -196,8 +219,13 @@ export class BridleCore {
     }
     // Answered — by this phone, another one, or the browser on the machine
     // itself. Whoever it was, nobody should be asked again.
-    if (type === 'approval/resolved') this.waiting.delete(`approval/requested:${sessionId}`)
-    if (type === 'question/resolved') this.waiting.delete(`question/requested:${sessionId}`)
+    // Answered — by this phone, another one, or the browser on the machine
+    // itself. A listener re-deciding whether to ring has to hear this too:
+    // an owed ring that was never sent because the Relay was down must not
+    // survive the answer.
+    const answered = (type === 'approval/resolved' && this.waiting.delete(`approval/requested:${sessionId}`))
+      || (type === 'question/resolved' && this.waiting.delete(`question/requested:${sessionId}`))
+    if (answered) this.waitingChanged()
   }
 
   /**

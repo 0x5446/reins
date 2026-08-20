@@ -115,3 +115,66 @@ final class PresetAndPluginTests: XCTestCase {
         XCTAssertNil(entries[1].phase, "a null phase must come through as absence, not the string \"null\"")
     }
 }
+
+// MARK: - Telling the machine where to ring, and where not to
+
+/// `PushRegistrar` decides three things and each of them has a way to be wrong
+/// quietly: whether to ask iOS at all, whether a refusal means "stop ringing
+/// me", and whether the machine ever hears that it should stop.
+@MainActor
+final class PushRegistrarTests: XCTestCase {
+    /// A registrar with the system stubbed out.
+    private func registrar(authorized: Bool, asked: @escaping () -> Void = {}) -> PushRegistrar {
+        PushRegistrar(authorized: { authorized }, ask: { asked() })
+    }
+
+    func testAnAuthorizedPhoneAsksTheSystemForAToken() async {
+        var asks = 0
+        let push = registrar(authorized: true) { asks += 1 }
+        await push.refresh()
+        XCTAssertEqual(asks, 1)
+    }
+
+    /// The one that mattered. The token lives in memory; the machine keeps it
+    /// on disk. After a relaunch the two disagree — this object has forgotten
+    /// the token while the Mac is still holding one and still ringing a phone
+    /// that shows nothing. Guarding the withdrawal on "did I hand one out"
+    /// meant it fired only in the session where notifications were switched
+    /// off, which is the session least likely to still be running.
+    func testARefusalIsAnnouncedEvenWithNoTokenInMemory() async {
+        var announced: [String?] = []
+        let push = registrar(authorized: false)
+        push.onAnswer = { announced.append($0) }
+
+        await push.refresh()
+
+        XCTAssertEqual(announced.count, 1, "a fresh launch with notifications off told the machine nothing")
+        XCTAssertNil(announced[0])
+    }
+
+    func testATokenIsAnnouncedOnceAndNotRepeated() {
+        var announced: [String?] = []
+        let push = registrar(authorized: true)
+        push.onAnswer = { announced.append($0) }
+
+        push.accept(Data([0xab, 0xcd]))
+        push.accept(Data([0xab, 0xcd]))
+
+        XCTAssertEqual(announced.compactMap { $0 }, ["abcd"], "the same token was sent twice")
+    }
+
+    /// Registration fails for reasons that say nothing about whether the phone
+    /// is still reachable — no network at launch being the common one. Treating
+    /// that as a withdrawal deleted a working address on the Mac because the
+    /// phone happened to boot in a lift.
+    func testAFailedRegistrationLeavesTheMachineAlone() {
+        var announced: [String?] = []
+        let push = registrar(authorized: true)
+        push.onAnswer = { announced.append($0) }
+
+        push.failed()
+
+        XCTAssertTrue(announced.isEmpty, "a transient failure told the machine to forget the token")
+        XCTAssertTrue(push.answered, "the app must still know iOS has answered")
+    }
+}

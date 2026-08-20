@@ -68,7 +68,7 @@ test('a request that stops the agent says so, once', async () => {
   const { machine, feed } = core()
   await machine.start()
   let rings = 0
-  machine.onWaiting(() => { rings += 1 })
+  machine.onWaitingChanged(() => { rings += 1 })
 
   feed(frame('approval/requested', 's1', { approvalId: 'a1', toolName: 'Bash' }))
   assert.equal(rings, 1)
@@ -81,14 +81,47 @@ test('a request that stops the agent says so, once', async () => {
   machine.stop()
 })
 
-test('answering does not ring anyone', async () => {
+test('answering says so too, because a ring owed can stop being owed', async () => {
   const { machine, feed } = core()
   await machine.start()
   feed(frame('question/requested', 's1', { questions: [{ id: 'q', question: 'which?' }] }))
-  let rings = 0
-  machine.onWaiting(() => { rings += 1 })
+  let changes = 0
+  machine.onWaitingChanged(() => { changes += 1 })
+
+  // The listener is not "somebody asked", it is "whether anyone needs fetching
+  // may have changed". An answer changes it: a Bridle that noted a ring while
+  // the Relay was down must not still send it once the question is settled.
   feed(frame('question/resolved', 's1'))
-  assert.equal(rings, 0)
+  assert.equal(changes, 1)
+  assert.equal(machine.pendingRequests.length, 0, 'the answer did not clear the request')
+  machine.stop()
+})
+
+test('an answer to something nobody asked changes nothing', async () => {
+  const { machine, feed } = core()
+  await machine.start()
+  let changes = 0
+  machine.onWaitingChanged(() => { changes += 1 })
+  feed(frame('question/resolved', 's-never-asked'))
+  assert.equal(changes, 0, 'a resolve for an unknown session woke the listener')
+  machine.stop()
+})
+
+test('a phone arriving and leaving both change the answer', async () => {
+  const { machine, feed } = core()
+  await machine.start()
+  feed(frame('approval/requested', 's1', { approvalId: 'a1', toolName: 'Bash' }))
+  let changes = 0
+  machine.onWaitingChanged(() => { changes += 1 })
+
+  // Attaching means the person can be told on screen; detaching while the
+  // request still stands is the moment a ring becomes owed. Missing the second
+  // one left a machine waiting in silence after somebody put their phone down
+  // without answering.
+  const release = machine.attach()
+  assert.equal(changes, 1, 'attaching did not re-open the question')
+  release()
+  assert.equal(changes, 2, 'the last phone leaving went unnoticed')
   machine.stop()
 })
 
@@ -96,14 +129,15 @@ test('a question asked after one was answered rings again', async () => {
   const { machine, feed } = core()
   await machine.start()
   let rings = 0
-  machine.onWaiting(() => { rings += 1 })
+  machine.onWaitingChanged(() => { rings += 1 })
   feed(frame('question/requested', 's1', { questions: [{ id: 'q', question: 'which?' }] }))
   feed(frame('question/resolved', 's1'))
   // Same session, new question. The dedupe is against a request still
   // outstanding, not against the session ever having asked one — otherwise a
   // conversation would be silent after its first question.
   feed(frame('question/requested', 's1', { questions: [{ id: 'q2', question: 'and now?' }] }))
-  assert.equal(rings, 2)
+  // Three changes: asked, answered, asked again.
+  assert.equal(rings, 3)
   machine.stop()
 })
 
@@ -128,9 +162,9 @@ test('attachments are counted, and released once however often they are dropped'
 test('a listener that throws does not stop the fold', async () => {
   const { machine, feed } = core()
   await machine.start()
-  machine.onWaiting(() => { throw new Error('the relay socket had just closed') })
+  machine.onWaitingChanged(() => { throw new Error('the relay socket had just closed') })
   let reached = false
-  machine.onWaiting(() => { reached = true })
+  machine.onWaitingChanged(() => { reached = true })
 
   feed(frame('approval/requested', 's1', { approvalId: 'a1', toolName: 'Edit' }))
   assert.equal(reached, true, 'one bad listener silenced the next')
@@ -142,7 +176,7 @@ test('a new question in a session that already asked one is not mistaken for a r
   const { machine, feed } = core()
   await machine.start()
   let rings = 0
-  machine.onWaiting(() => { rings += 1 })
+  machine.onWaitingChanged(() => { rings += 1 })
 
   feed(frame('question/requested', 's1', { questions: [{ id: 'q1', question: 'which?' }] }))
   assert.equal(rings, 1)
@@ -168,7 +202,7 @@ test('the same request arriving twice still rings once', async () => {
   const { machine, feed } = core()
   await machine.start()
   let rings = 0
-  machine.onWaiting(() => { rings += 1 })
+  machine.onWaitingChanged(() => { rings += 1 })
   const asked = frame('approval/requested', 's1', { approvalId: 'a1', toolName: 'Bash' })
   feed(asked)
   feed(asked)

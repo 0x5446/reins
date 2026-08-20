@@ -200,3 +200,70 @@ test('one phone holding two pairings is rung once, not twice', { timeout: 60_000
   await new Promise((resolve) => { setTimeout(resolve, 400) })
   assert.equal(stack.relay.wakes.length, 1, 'the same handset was buzzed once per pairing')
 })
+
+test('a question answered while the relay was down does not ring afterwards', { timeout: 60_000 }, async (t) => {
+  // The other half of remembering. A Bridle that noted "somebody is owed a
+  // ring" at the moment the agent stopped, and paid it when the Relay came
+  // back, would buzz a phone about a question its owner had already answered
+  // in the browser — and the notification would open a card that is no longer
+  // there. The decision has to be re-derived, not replayed.
+  const first = new RelayServer({ port: 0, host: '127.0.0.1' })
+  const port = await first.listen()
+  const relayUrl = `http://127.0.0.1:${port}`
+
+  const agent = new FakeAgent()
+  const stack = await startStack({ agent, machineName: 'Answered Mac', noDirect: true, relayUrl })
+  t.after(() => stack.stop())
+  await stack.waitForRelay(20_000)
+  await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
+
+  const phone = new ReinsPhone(stack.invite())
+  await phone.connect()
+  phone.wake(TOKEN)
+  await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
+  phone.close()
+  await waitFor(() => stack.core.attached === 0, 5_000, 'the tunnel to be released')
+
+  await first.close()
+  await waitFor(() => stack.relayClient.connectionState !== 'online', 15_000, 'the relay to go down')
+
+  agent.emit(approval('s1', 'a1'))
+  // Answered on the machine itself, which is what the browser two feet away is
+  // for. dsh reports it on the same stream, and the Bridle stops holding it.
+  agent.emit(request('approval/resolved', 's1'))
+  await waitFor(() => stack.core.pendingRequests.length === 0, 5_000, 'the request to be cleared')
+
+  const second = new RelayServer({ port, host: '127.0.0.1' })
+  await second.listen()
+  t.after(() => second.close())
+  await waitFor(() => stack.relayClient.connectionState === 'online', 30_000, 'the relay to come back')
+
+  await new Promise((resolve) => { setTimeout(resolve, 800) })
+  assert.equal(second.wakes.length, 0, 'rang about a question that was already answered')
+})
+
+test('a question asked while somebody was attached rings once they leave', { timeout: 60_000 }, async (t) => {
+  // Edge-triggered was wrong in this direction too. Asking while the phone is
+  // in your hand meant no ring was ever owed — so putting the phone down
+  // without answering left the machine waiting silently, forever.
+  const agent = new FakeAgent()
+  const stack = await startStack({ agent, machineName: 'Watched Then Away', noDirect: true })
+  t.after(() => stack.stop())
+  await stack.waitForRelay(20_000)
+  await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
+
+  const phone = new ReinsPhone(stack.invite())
+  await phone.connect()
+  phone.wake(TOKEN)
+  await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
+
+  // Asked while they are looking at it. Nothing should ring yet.
+  agent.emit(approval('s1', 'a1'))
+  await new Promise((resolve) => { setTimeout(resolve, 400) })
+  assert.equal(stack.relay.wakes.length, 0, 'rang a phone that was holding the tunnel')
+
+  // They put the phone down without answering. The machine is still waiting.
+  phone.close()
+  await waitFor(() => stack.core.attached === 0, 5_000, 'the tunnel to be released')
+  await waitFor(() => stack.relay.wakes.length > 0, 10_000, 'the machine to ring once nobody is watching')
+})

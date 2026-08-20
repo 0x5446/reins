@@ -234,7 +234,26 @@ struct SettingsView: View {
                 Row(label: "dsh", value: info.version)
                 Row(label: "Folder", value: Format.path(info.cwd, home: info.cwd), mono: true)
             }
-            Row(label: "Its fingerprint", value: session.machine.fingerprint, mono: true)
+            // The one check a person can perform, so it says how.
+            //
+            // A six-digit confirmation number used to sit further down this
+            // screen in large type, with a line telling people to compare it
+            // against what their Mac prints. The Mac has never printed it:
+            // `confirmationNumber` is called in this app and nowhere else. A
+            // number nobody can check is worse than no number, because whoever
+            // cannot find its twin concludes they are looking in the wrong
+            // place and pairs anyway.
+            //
+            // This one exists on both ends. A relay that swapped the machine's
+            // key in a short-code bundle cannot make the two agree, because it
+            // does not hold the machine's private key.
+            VStack(alignment: .leading, spacing: 4) {
+                Row(label: "Its fingerprint", value: session.machine.fingerprint, mono: true)
+                Text("Your Mac prints this on the `identity` line of `bridle pair` and `bridle status`. If it differs, forget this Mac and pair again.")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Button {
                 showingDiagnostics = true
             } label: {
@@ -258,36 +277,6 @@ struct SettingsView: View {
                 }
             }
             .foregroundStyle(.primary)
-            if let confirmation = session.confirmation {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Confirmation number")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                    Text(confirmation)
-                        .font(.system(size: 26, weight: .semibold, design: .monospaced))
-                        .kerning(3)
-                    // Points at the fingerprint, not at itself.
-                    //
-                    // This used to say the Mac prints the same six digits
-                    // after `bridle pair`. It does not, and never has:
-                    // `confirmationNumber` is called in this app and nowhere
-                    // else, so the check it invited could not be performed —
-                    // which is worse than not offering one, because somebody
-                    // who cannot find the number assumes they are looking in
-                    // the wrong place rather than that it is absent.
-                    //
-                    // The fingerprint above proves the same thing and does
-                    // exist on both sides: `bridle pair` prints it and so does
-                    // `bridle status`. Two channel bindings would be one more
-                    // than the pairing screen can explain, and this is the one
-                    // that rotted.
-                    Text("Compare the fingerprint above with the `identity` line your Mac prints — `bridle pair` shows it, and so does `bridle status`. If they differ, forget this Mac and pair again.")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 2)
-            }
         } header: {
             Text("Connection")
         } footer: {
