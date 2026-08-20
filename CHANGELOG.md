@@ -7,9 +7,7 @@ Versions are the tags `install.sh` can install. `REINS_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
-## Unreleased
-
-Everything below is on `main` and is not in the tag the installer pins.
+## 0.1.1 — 2026-08-20
 
 - **Conversations resume where they left off.** Reopening a session starts at the
   last thing said rather than at the top.
@@ -25,6 +23,17 @@ Everything below is on `main` and is not in the tag the installer pins.
 - Repository scaffolding for being public: `SECURITY.md` with the threat model
   and a disclosure process, `CONTRIBUTING.md`, a code of conduct, issue and pull
   request templates, and CI.
+- **The app stops promising a check the Mac never offered.** Pairing told you to
+  compare six digits against something `bridle pair` has never printed. It points
+  at the key fingerprint instead, which both ends do show and which catches the
+  same substitution.
+- **Four purpose strings were missing from every build.** `INFOPLIST_KEY_*` build
+  settings are ignored when a target ships its own `Info.plist`, so scanning a
+  pairing code terminated the app rather than asking for the camera, and direct
+  connections on the local network failed with no prompt and no error.
+- **Continuing a conversation no longer starts with a folder picker.** The button
+  opens where the last one was; hold it to choose somewhere else.
+- An app icon.
 
 ## 0.1.0 — 2026-08-19
 

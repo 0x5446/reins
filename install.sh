@@ -28,7 +28,7 @@ REPO="${REINS_REPO:-https://github.com/0x5446/reins.git}"
 # is whatever was pushed most recently — including a push made thirty seconds
 # ago by someone who should not have been able to make it. A tag is a name for
 # one commit, and a release is a decision rather than a side effect of merging.
-REF="${REINS_REF:-v0.1.0}"
+REF="${REINS_REF:-v0.1.1}"
 SRC_DIR="${REINS_SRC:-$HOME/.reins/src}"
 
 # Colour only when a human is watching. Piped output stays plain.
