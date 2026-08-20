@@ -97,15 +97,28 @@ if [ "$UPLOAD" = 0 ]; then
   exit 0
 fi
 
+# `--p8-file-path` rather than letting altool hunt for the key. Without it the
+# only way altool finds an AuthKey_<id>.p8 is by scanning four fixed
+# directories — ./private_keys, ~/private_keys, ~/.private_keys, and
+# ~/.appstoreconnect/private_keys — so a $ASC_KEY_PATH pointing anywhere else
+# passed the existence check above and then failed at upload with
+# "Failed to load AuthKey file. (-43)", naming four paths the caller never
+# mentioned. Xcode 26's altool takes the path directly; say it.
+AUTH=(
+  --api-key "$ASC_KEY_ID"
+  --api-issuer "$ASC_ISSUER_ID"
+  --p8-file-path "$ASC_KEY_PATH"
+)
+
 # Validate before upload. The same checks run server-side afterwards, but they
 # run in a queue and report by email; here they report in twenty seconds.
 xcrun altool --validate-app \
   --type ios --file "$IPA" \
-  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+  "${AUTH[@]}"
 
 xcrun altool --upload-app \
   --type ios --file "$IPA" \
-  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+  "${AUTH[@]}"
 
 echo "release: build $BUILD uploaded. Processing takes a few minutes before"
 echo "         it appears in TestFlight."

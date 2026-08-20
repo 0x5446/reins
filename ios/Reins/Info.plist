@@ -38,7 +38,19 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Reins uses the camera to scan the pairing code your Mac shows.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Reins can ask for Face ID before showing your conversations, so a found phone does not open them.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Reins connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Reins attaches photos you pick to a message.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>

@@ -194,10 +194,51 @@
 <h2>Notifications</h2>
 
 <p>
-  Push notifications are <strong>not implemented</strong>. When they are, they
-  will require sending an Apple device token to the relay and associating it
-  with a machine, and the notification body will not contain your content. This
-  page will be updated before that ships, not after.
+  When your agent stops to ask you something and the app is not running, the
+  machine has the relay ring your phone. Only Apple can wake a suspended iOS
+  app, and Apple only accepts a push signed with a developer key, so the relay
+  is the one part of this that signs — and therefore the one part that learns a
+  device token.
+</p>
+
+<p>
+  <strong>The push carries no content.</strong> The words in the banner are a
+  fixed sentence written into the relay's source, and the message the machine
+  sends the relay has no field an agent's question could go in. There is
+  nothing to leak rather than a promise not to look. Your phone wakes, opens
+  its own encrypted tunnel to your machine, asks what happened, and writes the
+  real notification locally — text that never crossed the relay and never
+  reached Apple.
+</p>
+
+<p>What this does mean, stated plainly:</p>
+
+<ul>
+  <li>
+    The relay learns your <strong>device token</strong> at the moment a push is
+    sent. It is handed over one wake at a time by your machine and is not
+    stored.
+  </li>
+  <li>
+    <strong>Apple sees the machine's display name.</strong> The banner reads
+    “Your agent is waiting on you · <em>name</em>”, so that someone with two
+    Macs knows which one stopped. That name, the timing, and your device token
+    are what Apple's push service handles.
+  </li>
+  <li>
+    Apple's push service therefore knows <em>that</em> a machine wanted your
+    attention, and when. It does not know what about.
+  </li>
+  <li>
+    Your machine rings every phone you have paired with it that has
+    notifications switched on — it does not try to guess which one you are
+    holding.
+  </li>
+</ul>
+
+<p>
+  Turning notifications off in iOS Settings is enough to stop it: the app
+  notices on its next launch and tells the machine to forget the token.
 </p>
 
 <h2>Children</h2>

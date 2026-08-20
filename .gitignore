@@ -39,3 +39,11 @@ bridle.json
 AuthKey_*.p8
 *.mobileprovision
 *.certSigningRequest
+
+# Working notes that are not part of the product: competitive research, the
+# App Store submission dossier, the open-sourcing audit. They quote other
+# people's pricing and positioning, name unreleased plans, and go stale the
+# week they are written — none of which belongs in a public repository.
+/GTM.md
+/APPSTORE.md
+/OPENSOURCE.md

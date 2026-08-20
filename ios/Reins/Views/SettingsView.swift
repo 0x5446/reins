@@ -266,7 +266,22 @@ struct SettingsView: View {
                     Text(confirmation)
                         .font(.system(size: 26, weight: .semibold, design: .monospaced))
                         .kerning(3)
-                    Text("Your Mac shows the same six digits after `bridle pair`. If they differ, forget this Mac and pair again.")
+                    // Points at the fingerprint, not at itself.
+                    //
+                    // This used to say the Mac prints the same six digits
+                    // after `bridle pair`. It does not, and never has:
+                    // `confirmationNumber` is called in this app and nowhere
+                    // else, so the check it invited could not be performed —
+                    // which is worse than not offering one, because somebody
+                    // who cannot find the number assumes they are looking in
+                    // the wrong place rather than that it is absent.
+                    //
+                    // The fingerprint above proves the same thing and does
+                    // exist on both sides: `bridle pair` prints it and so does
+                    // `bridle status`. Two channel bindings would be one more
+                    // than the pairing screen can explain, and this is the one
+                    // that rotted.
+                    Text("Compare the fingerprint above with the `identity` line your Mac prints — `bridle pair` shows it, and so does `bridle status`. If they differ, forget this Mac and pair again.")
                         .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

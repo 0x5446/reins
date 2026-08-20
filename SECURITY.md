@@ -206,15 +206,29 @@ misreading the specification the same way.
 Things that are wrong, or weaker than they look, that are worth knowing before
 you spend time on them.
 
-**The short-code path currently trusts the relay.** Pairing by QR code is
-immune to a hostile relay, because the code itself carries the machine's public
-key. The short-code path is not: the relay holds the pairing bundle and could
-substitute a key of its own. The designed defence is the six-digit confirmation
-number both ends derive from the handshake hash — if they match, there is nobody
-in the middle. The app computes and shows it. **The Bridle does not.** So there
-is nothing on the Mac to compare against, and the app's instruction to compare
-cannot be followed. Until that is fixed, treat short-code pairing as trusting
-whoever runs the relay for the duration of the pairing, and prefer the QR code.
+**The short-code path depends on you comparing a fingerprint.** Pairing by QR
+code is immune to a hostile relay, because the code itself carries the machine's
+public key. The short-code path is not: the relay holds the pairing bundle and
+could substitute a key of its own.
+
+What catches that is the key fingerprint. The Mac prints it — `bridle pair` and
+`bridle status` both show it on the `identity` line — and the app shows the
+fingerprint of the key it actually received. A relay that swapped the key cannot
+make those agree, because it does not hold the machine's private key. If they
+match, you are talking to the machine; if they differ, forget it and pair again.
+
+**This check is not automatic.** Nothing refuses a connection on your behalf, so
+a short-code pairing where nobody looks is a short-code pairing that trusts the
+relay. The QR code needs no such discipline.
+
+There is a second, unimplemented defence worth naming so that nobody looks for
+it: a six-digit confirmation number derived from the handshake hash, which would
+also bind the check to that particular session rather than only to the key.
+`confirmationNumber` exists in `protocol/src/pairing.ts` and is called by the app
+and nowhere else — the Bridle never computes it. Until an August 2026 fix the
+app told people to compare it against something the Mac has never printed, which
+was worse than offering nothing: it sent them looking for a number that was not
+there. The app now points at the fingerprint instead.
 
 **The short code is 8 characters from a 28-character alphabet** — about 38.5 bits
 — with a small modulo bias toward the first four letters. It is single-use and

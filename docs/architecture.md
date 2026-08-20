@@ -13,7 +13,8 @@
 - 可达性阶梯：§7
 - 两个入口，一份核心：§8
 - iOS 端：§9
-- 待建子系统（推送 §10、定时 §11、多 agent §12、trace §13）
+- 推送：§10
+- 待建子系统（定时 §11、多 agent §12、trace §13）
 - 版本协商（**已修订**）：§14
 - 版本兼容：§14
 - 测试策略：§15
@@ -383,94 +384,69 @@ AppModel        设备身份、已配对机器列表、当前连接的机器（�
 
 ---
 
-## 10. 待建：推送
+## 10. 推送
 
-**这是品类第一痛点。**当前只有本地通知，app 被挂起后连接即断。
+**已实现并在真机跑通**（2026-08-20）。app 被挂起后隧道即断，此后 agent 每次停下来提问都落在一台没人告知的机器上——而"人在别处"正是这个产品的前提，所以这是常态而非边缘情况。
 
-> **关于"付费支点"**：早期版本称推送是"唯一有说服力的付费支点"。那是一个**未经验证的商业假设**，不是结论，文档不该把它写成结论。反面证据是硬的：品类价格众数为 0，Happy Coder 免费送托管中继，Terragon 收费后因规模不足关服，而中继边际成本实测只有每用户每月 $0.004–0.011。
->
-> 所以正确的表述是：**推送是最有可能被付费的东西，但这需要验证而不是假设。**验证方式是发布后观察激活率、推送使用率、以及有没有人主动问怎么付钱——在有这些数据之前，不建订阅系统。第一阶段全部免费也是基于这一点，不只是为了增长。
-
-### 10.1 难点一：Relay 必须保持内容盲
-
-如果 Relay 直接发一条带文字的 APNs 告警，它就读到了通知内容——违反 §2。
-
-**解法：APNs 的 `mutable-content` + Notification Service Extension（NSE）。**Relay 搬的是不透明 blob，NSE 在设备上解密后才成为可见文字。
-
-### 10.2 难点二：NSE 拿不到隧道密钥（早期设计在这里是错的）
-
-早期设计写"NSE 从 Keychain 共享组取密钥解密"。**这行不通。**
-
-Bridle 加密告警用的是隧道密钥，而隧道密钥是每连接临时派生、只存在于内存、连接断开即失效的（§5.2）。推送恰恰发生在 **app 已经挂起、隧道已经断掉**的时候——那把密钥此刻不存在，NSE 无从取起。把它持久化更糟：等于把前向保密扔掉。
-
-**解法：一把独立的、长期的推送密钥，与 Noise 通道完全无关。**
+### 10.1 实际做法
 
 ```
-配对时（或首次注册推送时）：
-  app 生成 X25519 推送密钥对 + 一个 keyId
-  私钥存入 app 与 NSE 共享的 Keychain access group
-       accessibility = afterFirstUnlockThisDeviceOnly
-       （必须是 afterFirstUnlock 而不是 whenUnlocked——
-         通知到达时设备通常是锁屏的，NSE 仍需读到它）
-  公钥 + keyId 经隧道送给 Bridle
-
-发通知时：
-  Bridle 用 sealed box 封给该公钥：
-       临时 X25519 密钥对 → DH(临时私钥, 推送公钥) → HKDF → ChaCha20-Poly1305
-       线上 = 临时公钥(32) ‖ 密文 ‖ 标签(16)
-  这套原语两端都已有（node:crypto / CryptoKit），不引入新依赖
+app 拿到 APNs token → 经 Noise 隧道发 wake 帧给 Bridle，每次 ready 重发
+Bridle 存进 PairedPeer.push
+dsh 发 approval/requested 或 question/requested → core.onWaiting 触发
+Bridle 检查 core.attached === 0（两种传输都没人）→ MuxType.Wake 让 Relay 振铃
+Relay 用 APNs 密钥签 ES256 JWT，发一条固定文案的 alert 推送
+手机醒来 → 自己开隧道 → 取内容 → 发本地通知
 ```
 
-`keyId` 让轮换可行：Bridle 同时保留新旧两把公钥一段宽限期，通知里带 keyId，NSE 据此选私钥。
+横幅上的字是 `relay-worker/src/apns.ts` 里的常量。`WakeRequest` 结构里**没有**可以放正文的字段——这不是"Relay 承诺不看"，是**没有东西可看**。
 
-### 10.3 载荷预算与降级
+### 10.2 放弃了 NSE，以及为什么
 
-APNs 单条上限 **4 KB**，且 sealed box 有 48 字节固定开销、base64 再乘 1.33。可用明文约 **2.9 KB**——够放标题和正文，但 agent 的输出**必须截断**，不能整段塞。
+早期设计是 `mutable-content` + Notification Service Extension：Relay 搬不透明 blob，NSE 在设备上解密后替换成真实文字。为此要一套独立的长期推送密钥对、sealed box 封装、Keychain access group 共享、keyId 轮换、4 KB 载荷预算、以及一个新 target。
 
-四件必须定义、早期设计漏掉的事：
+**没做，因为它买的东西比看上去少。**它买的是"横幅上直接显示 agent 问了什么"。而不做它的代价只是横幅上写一句通用的话，用户点开就看到真实内容——中间隔了一次点击。
 
-| 项 | 规则 |
-|---|---|
-| NSE 失败或超时 | iOS 会显示**原始载荷**。所以可见字段必须预置不泄露内容的占位文案（如"你的 Mac 在等你"），密文只放在 `mutable-content` 的自定义字段里 |
-| 折叠 | 按会话设 `apns-collapse-id`，否则十次审批堆十条通知 |
-| 过期 | 设 `apns-expiration`，一小时后才送达的审批请求没有意义 |
-| 去重 | 载荷带事件序号，NSE 侧丢弃已见过的 |
+用一个新 target、一套第二密钥体系、一条独立的轮换/吊销/重装/多设备语义，换一次点击，不划算。§10.4 那个真实的元数据泄露两种方案都消不掉。
 
-**不用静默推送做唤醒。**静默推送受系统节流，且用户强杀 app 后不保证送达。用可见告警 + NSE 解密，这是唯一可靠的路径。
+**如果以后横幅太笼统成了真实抱怨**，NSE 那套设计仍然成立，上面几节的分析（尤其"NSE 拿不到隧道密钥，因为隧道密钥是每连接临时派生的"）依然是对的，可以照着实施。
+
+### 10.3 用 alert 不用 silent
+
+`content-available` 是更诱人的设计——醒来、取、发真实文案，连 NSE 都不用。但 iOS 把静默推送当可丢弃的：限流、低电量模式丢、app 被划掉后干脆不送。"能删掉这个吗"不能等系统心情好了再送。
 
 ### 10.4 诚实的泄露
 
 Relay 必须知道 **device token**（它要调 APNs），因此能建立 `device token ↔ 某台机器` 的关联。
 
-能否避免？只有让 Bridle 自己调 APNs——那需要把 APNs 私钥分发到每个用户的机器上，不可接受。
+能否避免？只有让 Bridle 自己调 APNs——那需要把 APNs 私钥分发到每个用户的机器上，等于每个用户都握着能推给所有其他用户的钥匙，不可接受。
 
-**所以这是一个真实的、不可消除的元数据泄露，必须写进隐私说明。**Relay 知道：谁在线、谁连谁、搬了多少字节、哪个 token 属于哪台机器。它不知道：任何内容。
+**所以这是一个真实的、不可消除的元数据泄露，必须写进隐私说明。**Relay 知道：谁在线、谁连谁、搬了多少字节、振铃时哪个 token 属于哪台机器。它不知道：任何内容。
 
-### 10.5 落点
+Relay **不持久化** token——只在振铃那一刻从 Bridle 手里拿到，用完即弃。
 
-| 改哪 | 做什么 |
+### 10.5 三个反直觉的决定
+
+| 决定 | 为什么 |
 |---|---|
-| `ios/Reins/App/Notifier.swift` | 注册远程通知，拿 device token |
-| `ios/Reins/Net/PushIdentity.swift`（新） | 生成/轮换推送密钥对，写共享 Keychain group |
-| 新帧 `push-register {token, environment, keyId, publicKey}` | app→bridle，走加密隧道 |
-| `bridle/src/push.ts` | 存 token/keyId/公钥；组装并封装告警 |
-| `relay/src/push.ts` | `POST /v1/push`，验签，调 APNs，不解密 |
-| `ios/ReinsNotify/`（新 target） | NSE，按 keyId 取私钥解密并替换告警 |
-| `ios/Reins/Reins.entitlements` | `aps-environment` + Keychain access group |
+| 帧里不带 APNs 环境 | token 由沙盒还是生产主机签发，是苹果自己会回答的问题（错主机回 `BadDeviceToken`）。早期让 app 读自己描述文件里的 `aps-environment` 再逐层传下来——那是把猜测当事实，而且猜错时推送静默不到达 |
+| 只有 410 `Unregistered` 才算 token 死了 | 早先把所有非 200 都当失效回传，于是一次限流、一次苹果 5xx、一个填错的 topic，都会让 Bridle 永久删掉一个好地址 |
+| 欠下的振铃要记账 | `onWaiting` 只触发一次，之后请求就被去重了。Relay 离线时直接丢弃 = 那个问题永远不会有人被通知 |
 
-### 10.6 前置条件与工期
+### 10.6 落点
 
-**付费 Apple Developer Program（$99/年）是硬阻塞**：免费个人 team 的 profile 无 `aps-environment`，后台 Keys 页面也不开放，无法签发 APNs key。这不是可以绕过的工程问题。
+| 位置 | 做什么 |
+|---|---|
+| `protocol/src/frames.ts` | `wake` 帧（app→Bridle） |
+| `protocol/src/mux.ts` | `MuxType.Wake`（双向：请求振铃 / 回传失效 token） |
+| `ios/Reins/App/Push.swift` | 每次启动和回前台向 iOS 要 token |
+| `ios/Reins/Net/Tunnel.swift` | 每次 `ready` 重发 token |
+| `bridle/src/core.ts` | `onWaiting` 钩子、接入计数 |
+| `bridle/src/relay-client.ts` | 判断无人接入、按 token 去重、欠账补发 |
+| `relay-worker/src/apns.ts` | ES256 签名、生产→沙盒回退、错误分类 |
+| `ios/Reins/Reins.entitlements` | `aps-environment`（付费会员才签得下来） |
 
-**工期重估**：早期文档写"一天"，那是在忽略推送密钥协议、载荷预算、NSE target、密钥轮换、以及真机验收矩阵的前提下。实际范围包括：
-
-- 推送密钥的注册/轮换/吊销/重装/多设备语义
-- 完整载荷格式与 4 KB 预算
-- NSE target 的建立、签名、与主 app 的 Keychain 共享
-- Relay 侧 APNs 凭据的保管与调用配额
-- **真机验收矩阵**：锁屏、挂起、用户强杀、NSE 超时、大载荷、密钥轮换中途到达的旧通知
-
-按"数天"计，不按"一天"计。实施前应先补一份规范级文档（`docs/README.md` 的规格等级）。
+配置见 `docs/deployment.md` 的 APNs 一节：四条 `REINS_APNS_*` secret，缺一个则 Relay 不振铃任何人，其余功能不受影响。
 
 ---
 

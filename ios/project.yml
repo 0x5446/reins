@@ -31,17 +31,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Reins/Reins.entitlements
-        INFOPLIST_KEY_CFBundleDisplayName: Reins
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_UIUserInterfaceStyle: Automatic
-        # Scanning the Mac's pairing QR is the fast path onto a machine; the
-        # string is what iOS shows in the permission sheet, so it says why.
-        INFOPLIST_KEY_NSCameraUsageDescription: Reins uses the camera to scan the pairing code your Mac shows.
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Reins attaches photos you pick to a message.
-        # Direct LAN connections skip the relay entirely. iOS gates any local
-        # network traffic behind this prompt.
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Reins connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
+        # iPhone only. The layout is one portrait column and has never been
+        # anything else, and claiming the iPad idiom costs three things for no
+        # gain: App Store Connect starts demanding a set of 13" iPad
+        # screenshots, App Review runs the app on hardware it was not drawn
+        # for, and the iPad multitasking rule requires all four orientations —
+        # the escape hatch for which, UIRequiresFullScreen, Apple has
+        # deprecated (TN3192). Dropping to family 1 settles all three, and an
+        # iPhone-only app still installs on iPad in compatibility mode.
+        TARGETED_DEVICE_FAMILY: "1"
+    # Every key below lives here rather than in `settings.base` as an
+    # INFOPLIST_KEY_* entry. Those settings are only consulted when Xcode
+    # *generates* the Info.plist; this target ships an explicit one
+    # (GENERATE_INFOPLIST_FILE = NO), so an INFOPLIST_KEY_* is evaluated,
+    # printed by -showBuildSettings, and then silently dropped on the floor.
+    # Six of them were, including three purpose strings the app cannot run
+    # without.
     info:
       path: Reins/Info.plist
       properties:
@@ -49,6 +54,31 @@ targets:
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
+        # One column, one orientation. Stated rather than left to the default,
+        # which is portrait *plus* both landscapes on iPhone.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Purpose strings. Each of these is load-bearing: iOS does not fail a
+        # missing one politely, it terminates the process (Termination Reason:
+        # Namespace TCC) the first time the matching API is touched.
+        #
+        # Camera — scanning the Mac's pairing QR is the fast path onto a
+        # machine, and ScannerView calls AVCaptureDevice.requestAccess.
+        NSCameraUsageDescription: Reins uses the camera to scan the pairing code your Mac shows.
+        # Face ID — AppLock calls LAContext.canEvaluatePolicy, which since
+        # iOS 17 is itself enough to trip the check, before any prompt appears.
+        NSFaceIDUsageDescription: Reins can ask for Face ID before showing your conversations, so a found phone does not open them.
+        # Photos — the composer's PhotosPicker runs out of process and would
+        # work without this, but the app does put library images into a
+        # message, and the honest declaration costs nothing.
+        NSPhotoLibraryUsageDescription: Reins attaches photos you pick to a message.
+        # Local network — direct LAN connections skip the relay entirely.
+        # Apple's TN3179 lists "making an outgoing TCP connection" as
+        # requiring this, Bonjour or not, and since iOS 18 the consent prompt
+        # does not even appear without the string: the connection just fails
+        # as NSURLErrorNotConnectedToInternet (-1009) with an underlying
+        # "Local network prohibited". That is the whole fast path, silently.
+        NSLocalNetworkUsageDescription: Reins connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
         # Declared true because it is true. The app implements Noise over
         # CryptoKit — Curve25519 and ChaCha20-Poly1305 — to encrypt what a
         # person types to their own machine, which is not any of the exemptions
@@ -58,8 +88,27 @@ targets:
         #
         # What it costs: App Store Connect asks once per app whether the
         # encryption is self-classified as mass market (ECCN 5D992.c), which
-        # this is, and that carries an annual self-classification report to BIS.
-        # Nothing blocks a build.
+        # this is. Nothing blocks a build.
+        #
+        # It does *not* carry an annual self-classification report, which an
+        # earlier version of this comment claimed. BIS narrowed that in the
+        # rule effective 2021-03-29: mass market 5A992.c / 5D992.c items sit
+        # under License Exception ENC (b)(1) and no longer report annually.
+        # What still reports is the hardware side — chips, chipsets, electronic
+        # assemblies, field-programmable logic devices — and software
+        # classified 5D002. An end-user application is none of those.
+        #
+        # What it does cost is one form: every primitive here comes from
+        # CryptoKit, but the Noise state machine on top is ours, so the App
+        # Store Connect questionnaire lands on "standard algorithms in addition
+        # to the operating system's", and that asks for a French encryption
+        # declaration to ship in France. Apple wants the filled form, not
+        # ANSSI's reply. No CCATS: that is only for cryptography that is both
+        # unstandardised *and* unpublished, and Noise is published.
+        #
+        # Keeping every primitive on CryptoKit is therefore worth defending.
+        # Bundling libsodium or a Rust Noise implementation would change none
+        # of the cryptography and still make the export answer worse.
         ITSAppUsesNonExemptEncryption: true
         CFBundleURLTypes:
           - CFBundleURLName: ai.novabox.reins.pair
