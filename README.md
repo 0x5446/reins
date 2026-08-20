@@ -1,162 +1,186 @@
 # Reins
 
-用 iPhone 操控跑在你电脑上的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。端到端加密，中继服务器看不到明文。
+**Drive the coding agent on your Mac from your iPhone.** End to end encrypted;
+the relay only ever sees ciphertext.
 
-| 组件 | 是什么 | 跑在哪 |
+The [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`)
+runs where your code and your keys already are. Reins is the other half: read
+what the agent did, approve what it wants to do next, answer the question it is
+blocked on, start the next thing from a train.
+
+| Piece | What it is | Where it runs |
 |---|---|---|
-| **Reins** | iOS app，你手里的那一头 | iPhone |
-| **Bridle** | 伴生进程，套住本机的 dsh | 和 dsh 同一台电脑 |
-| **Relay** | 哑管道，只搬密文 | 公网 |
+| **Reins** | the iOS app | your iPhone |
+| **Bridle** | a companion process that speaks for the harness | the Mac running `dsh` |
+| **Relay** | a content-blind switchboard | the public internet — ours, or yours |
 
 ```
- iPhone                  公网                   你的电脑
+ iPhone                  internet                   your Mac
 ┌────────┐          ┌──────────┐          ┌──────────────────┐
-│ Reins  │◄──wss───►│  Relay   │◄──wss───►│ Bridle ──► dsh   │
-└────────┘   密文   └──────────┘   密文   └──────────────────┘
-     └──────────── 端到端加密通道 ────────────┘
+│ Reins  │◄──wss───►│  Relay    │◄──wss───►│ Bridle ──► dsh  │
+└────────┘  sealed  └──────────┘  sealed  └──────────────────┘
+     └────────── Noise_IK_25519_ChaChaPoly_SHA256 ─────────┘
 ```
 
-Bridle 主动外连 Relay，**不需要端口转发、不需要公网 IP、不需要动路由器**。手机和电脑在同一个 Wi-Fi 时自动走直连，不经过 Relay。
+Bridle dials out. **No port forwarding, no public IP, nothing to change on your
+router.** When the phone and the Mac are on the same network the app talks to the
+Mac directly and the relay is not involved at all — both paths are raced and the
+local one wins.
 
-设计细节见 [`docs/architecture.md`](docs/architecture.md)，dsh 那 51 个 API 的清单见 [`docs/dsh-api-inventory.md`](docs/dsh-api-inventory.md)。
+There are no accounts. Pairing is a QR code in your terminal.
 
----
+## Where this is
 
-## 装上去用
+The Mac side is finished and in daily use. The relay is deployed. **The app is not
+on the App Store yet** — getting it means building it with Xcode, which is free
+but comes with [a seven-day catch](https://reins.novabox.ai/get).
 
-### 1. 电脑端：装 Bridle
+## Getting it running
+
+### 1. Install Bridle on the Mac
 
 ```sh
 curl -fsSL https://reins.novabox.ai/install | sh
 ```
 
-需要 Node 22+ 和 git。脚本不会替你装 Node，只会告诉你缺什么；装完 `bridle` 链接到 `~/.local/bin`。
+Needs Node 22+ and git. The script installs neither — it stops and tells you what
+is missing. It writes nothing outside `~/.reins`, plus one symlink onto your PATH.
+It is 134 lines, a third of them comments, if you would rather read it before
+running it.
 
-> Relay 还没部署的时候这个 URL 拿不到东西，从源码装：
->
-> ```sh
-> git clone https://github.com/0x5446/reins.git ~/.reins/src
-> sh ~/.reins/src/install.sh
-> ```
-
-### 2. 电脑端：配对
+### 2. Pair
 
 ```sh
 bridle pair
 ```
 
-终端里出一个二维码。第一次跑 `bridle` 会自动进配对流程，不用单独敲这条。
+A QR code appears in the terminal. Point the app at it. The first run of `bridle`
+does this for you, so this command is for adding a second phone.
 
-SSH 上去、终端画不出二维码，加 `--link` 打印原始配对链接。
+Over SSH, where a terminal may not draw a QR code, add `--link` to print the raw
+pairing link. There is also an 8-character short code underneath, for when the
+camera is not an option — but read the note in [SECURITY.md](SECURITY.md) about
+that path first; it is currently the weaker of the two.
 
-### 3. 手机端：扫码
-
-装好 Reins，打开，扫终端里那个码。扫完就连上了——不需要注册账号，不需要填服务器地址，不需要输密码。
-
-短码是给扫不了码的场景准备的（比如手机不在手边、屏幕共享）：终端上同时印了一个 8 位短码，在 app 里手输也行。走短码时两端会各显示一个 6 位数字，**对上了才是安全的**（同一套 Bluetooth 数字配对的逻辑，防中间人）。
-
-### 4. 让它一直跑着
+### 3. Keep it running
 
 ```sh
 bridle service install
 ```
 
-登录后自动起，关终端也不断。`bridle service uninstall` 卸掉。
+Starts after login and survives closing the terminal. `bridle service uninstall`
+takes it back off.
 
----
-
-## bridle 命令
-
-```
-bridle                    启动（第一次会带你配对）
-bridle pair               出一个新的配对二维码和短码
-bridle status             机器、Relay、dsh、已配对设备
-bridle devices            列出已配对设备
-bridle revoke <prefix>    踢掉一台设备
-bridle service install    开机自启
-bridle service uninstall  取消自启
-bridle doctor             体检这台机器的环境
-```
-
-`start` 的选项：
+## The `bridle` command
 
 ```
---relay <url>       换 Relay（默认公共 Relay）
---dsh <url>         dsh 地址，如果不在常见端口上
---dsh-command <cmd> 怎么启动 dsh（默认 dsh）
---direct-port <n>   固定局域网直连端口
---no-direct         不监听局域网
---no-auto-start     不自动拉起 dsh
---pair              已有配对设备时也印一份邀请
---link              连原始配对链接一起印（SSH 场景用）
+bridle                    start (and pair, on the first run)
+bridle pair               a fresh pairing QR and short code
+bridle status             machine, relay, harness, paired devices
+bridle devices            list paired devices
+bridle revoke <prefix>    remove one
+bridle backup <file>      save this machine's identity, encrypted
+bridle restore <file>     put a saved identity back
+bridle service install    keep it running after login
+bridle doctor             check this machine's setup
 ```
 
-状态文件在 `~/.reins/bridle.json`，权限 0600，里面有这台机器的静态私钥。`REINS_HOME` 可以改位置。
+Useful flags on `bridle` itself:
 
----
+```
+--relay <url>       a different relay (default: the public one)
+--dsh <url>         the harness, if it is not on a usual port
+--advertise <url>   an extra address to put in the pairing code — a tunnel
+                    hostname the machine cannot discover for itself. LAN and
+                    Tailscale addresses are found automatically.
+--direct-port <n>   fix the local-network port
+--no-direct         do not listen on the local network at all
+--no-auto-start     never launch the harness
+--link              also print the raw pairing link
+```
 
-## 安全模型
+State lives in `~/.reins/bridle.json`, mode `0600`, and it holds this machine's
+private key. `REINS_HOME` moves it.
 
-**Relay 只看得到密文。** 它按 deviceId 撮合两条 socket，转发不透明字节。拿不到明文、拿不到你的 dsh 地址、拿不到任何 API key。这一条有 e2e 测试盯着（`the relay only ever sees ciphertext`）。
+## What it is protecting, and what it is not
 
-**加密通道**是 Noise_IK_25519_ChaChaPoly_SHA256，两端都只用标准库（Node `node:crypto` / Swift `CryptoKit`），零第三方密码学依赖。每连接一对临时密钥（前向保密），静态密钥双向认证（TOFU 钉住）。帧用 ChaCha20-Poly1305，nonce 是单调计数器——重放、乱序、篡改都会当场断开而不是被吞掉。
+The relay switches sealed frames between two sockets by circuit number. It has no
+key material and cannot open them, which is a property of the shape rather than a
+promise about anyone's conduct — an end-to-end test taps the socket and fails if
+a method name, a machine name, or a session id ever appears on the wire. Both
+implementations of the tunnel use only their platform's own primitives, Node's
+`node:crypto` and Swift's `CryptoKit`. There is no third-party cryptography
+dependency in the tree.
 
-**配对令牌一次性。** 二维码被拍到，最多值一次连接尝试；用过就作废。之后设备靠自己的静态公钥被认出来。
+**The part people underestimate:** `dsh` has no authentication of its own, so a
+paired phone has the same authority over that Mac as its own terminal — it can
+run commands and read and write files. `bridle revoke` is the only way to take
+that back. Nothing in the app is a smaller permission than that; the app just
+draws fewer buttons.
 
-**dsh 本身没有认证层**，它的安全模型是「只绑 loopback + Host 头信任栅栏」。Bridle 和它同机，所以 51 个方法（含只允许 loopback 的特权方法）全都能用。这也意味着：**Bridle 等于 dsh 的完整权限**，配对进来的设备能做的事和坐在这台电脑前一样多。`bridle revoke` 是收回权限的唯一方式。
+[SECURITY.md](SECURITY.md) is the full threat model, including what the relay
+does learn, what an unlocked phone means, and the known weaknesses. It is worth
+reading before you pair anything you care about.
 
-**在手机上取消配对是单向的。** app 里「忘记这台 Mac」只清手机这边；电脑那边还认这台手机，得在电脑上 `bridle revoke`。app 的设置页里就是这么写的，不含糊。
-
----
-
-## 从源码开发
+## Building from source
 
 ```sh
 npm install
-npm run build          # tsc -b protocol bridle relay e2e
-npm test               # 62 个单元测试
-npm run test:e2e       # 20 个端到端测试（需要本机能跑起 dsh）
-npm run test:ios       # 46 个 iOS 测试（需要 Xcode + xcodegen）
-npm run vectors        # 重新生成跨语言测试向量
+npm test               # build, docs check, unit tests. Seconds.
+npm run test:e2e       # the whole stack (most of it needs a harness running)
+npm run test:ios       # needs Xcode and `brew install xcodegen`
+npm run vectors        # regenerate the cross-language test vectors
 ```
 
-工作区：
-
 ```
-protocol/   Noise、帧、配对载荷、Relay 线上格式（TypeScript）
-bridle/     伴生进程 + CLI
-relay/      中继服务
-e2e/        跨三方的端到端测试
-ios/        iOS app（Swift + SwiftUI，XcodeGen 生成工程）
-```
-
-### 两套实现怎么对齐
-
-Noise 握手和帧编码在 TypeScript 和 Swift 里各写了一遍。「我自己写的服务器能连上我自己写的客户端」证明不了任何事，所以 `npm run vectors` 用固定密钥、固定临时密钥跑出一份确定性向量（`ios/ReinsTests/Fixtures/protocol-vectors.json`），Swift 侧逐字节比对：握手消息、handshake hash、6 位确认数、传输层密文、配对链接、帧编码。
-
-这里的失败是协议分叉，不是 flaky test。
-
-### iOS
-
-```sh
-brew install xcodegen
-cd ios && ./run-tests.sh
+protocol/      Noise, frames, pairing, relay wire format (TypeScript)
+bridle/        the companion process and its CLI
+dsh-plugin/    the same core, mounted inside the harness instead of beside it
+relay/         the Node relay
+relay-worker/  the same relay on Cloudflare Workers and Durable Objects
+e2e/           tests that span all three
+ios/           the app (Swift, SwiftUI, XcodeGen)
 ```
 
-`Reins.xcodeproj` 是生成的，不入库。改了文件列表跑一遍 `xcodegen generate`。
+### How two implementations stay one protocol
 
-最低 iOS 17（用了 Observation）。签名在 `project.yml` 里关掉了，模拟器够用；上真机要填 `DEVELOPMENT_TEAM`。
+The Noise handshake and the frame encoding are written twice, in TypeScript and
+in Swift. "My server talks to my client" proves nothing when both are mine, so
+`npm run vectors` runs the handshake with fixed keys and fixed ephemerals and
+writes a deterministic fixture; the Swift side compares byte for byte — handshake
+messages, the handshake hash, the confirmation number, transport ciphertext, the
+pairing link, frame encoding.
 
----
+A failure there is a protocol fork, not a flaky test. It has already caught one:
+Foundation's `JSONEncoder` does not guarantee key order, which both ends were
+happy to parse and no amount of talking to myself would have found.
 
-## 上线前还缺什么
+### Running your own relay
 
-代码是完整的，跑得起来，测试全绿。但一个商业产品还差这些**不在源码树里**的东西：
+`bridle --relay wss://your.host` is the whole client side. `relay/` is a single
+Node process with no database and no configuration file; `relay-worker/` is the
+same switchboard on Cloudflare Workers, which is what the public one runs on.
+`docs/deployment.md` has the DNS and TLS details.
 
-1. **Relay 没部署**。域名定在 `reins.novabox.ai`（DNS 在 Cloudflare），Relay 自己会在 `/install` 上供出安装脚本，所以一个域名一次部署就够。步骤见 [`docs/deployment.md`](docs/deployment.md)。在那之前用 `bridle --relay <你自己的地址>`。
-2. **`/help` 和 `/privacy` 两个页面**还没写，现在返回 404。
-3. **App Store / TestFlight** 没提交。需要 Apple 开发者账号和一个真实 bundle id。
-4. **仓库是私有的**，所以 `install.sh` 里的 `git clone` 对外人会失败。要真正对外得转公开或改成从发布产物安装。
+## Documentation
 
-app 里所有对外链接集中在 `ios/Reins/App/Links.swift` 一个文件，换域名改一处。
-```
+`docs/` is in Chinese — it was written for the person maintaining this, and
+translating it is a bigger job than keeping it correct. English readers are not
+locked out of the parts that matter: [SECURITY.md](SECURITY.md) covers the threat
+model, [CONTRIBUTING.md](CONTRIBUTING.md) covers the build and the rules, and the
+code comments and commit messages are English throughout.
+
+| | |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | why it is shaped this way, where a new feature goes |
+| [`docs/protocol.md`](docs/protocol.md) | the exact bytes on the wire, enough to write a third client |
+| [`docs/fold.md`](docs/fold.md) | how an event log becomes a screen, rule by rule |
+| [`docs/dsh-api-inventory.md`](docs/dsh-api-inventory.md) | the harness's 51 methods and its RPC model |
+| [`docs/deployment.md`](docs/deployment.md) | running the relay, DNS, and what shipping still needs |
+
+[`docs/README.md`](docs/README.md) says which sections are specification-grade
+and which are design-grade. Ask before reimplementing from a design-grade one.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
