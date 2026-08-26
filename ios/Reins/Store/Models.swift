@@ -107,8 +107,12 @@ public struct SessionSummary: Identifiable, Equatable, Sendable {
 /// conversation into a folder it does not run in.
 ///
 /// Membership is a list of session ids held by the workspace rather than a
-/// field on the session, which is why grouping is a join done here and not
-/// something `session.list` could answer by itself.
+/// field on the session — and the list is a ledger, not the truth. The machine
+/// writes it only when a conversation is created *into* the workspace, so
+/// everything started before the workspace existed, or from a terminal on the
+/// Mac, is missing from it forever; no call it exposes backfills the past.
+/// `SessionBoard` therefore treats the ledger as one source and the rule the
+/// ledger caches — path equals working directory — as the other.
 public struct Workspace: Identifiable, Equatable, Sendable {
     public var id: String
     /// The folder the workspace stands for, when it stands for one.
@@ -214,14 +218,18 @@ public enum WorkspacePlacement: Equatable, Sendable {
     /// unequal paths are the same folder would put a conversation under a name
     /// that turns out to be wrong, and being told "ungrouped" and finding it
     /// grouped is the kinder mistake of the two.
-    private static func canonical(_ path: String) -> String {
+    ///
+    /// Shared with `SessionBoard`, whose sweep must agree with this resolution
+    /// about what "the same folder" means or the two screens would file one
+    /// conversation two ways.
+    static func canonical(_ path: String) -> String {
         var trimmed = path
         while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed.removeLast() }
         return trimmed
     }
 }
 
-/// What can be done about a conversation no workspace holds.
+/// What can be done about a conversation no workspace section shows.
 ///
 /// There is exactly one thing, and it is worth being blunt about why. A
 /// conversation belongs to the workspace whose folder is its own working
@@ -230,18 +238,19 @@ public enum WorkspacePlacement: Equatable, Sendable {
 /// like the call for it and is not: it reorders inside the one workspace that
 /// already accounts a session and refuses anything else.
 ///
-/// What is left is real and worth having anyway, because it is the case this
-/// app itself created for a long time: a conversation started from the phone
-/// went to a folder without ever being filed under the workspace that folder
-/// already had, and there it sat in the leftovers forever.
+/// A folder that already has a workspace offers nothing either, and that is
+/// new: `SessionBoard` seats a conversation under the workspace for its
+/// working directory whether or not the machine's ledger lists it, so "move
+/// into the group it is already shown in" would be a button that visibly does
+/// nothing. What is left is the folder no workspace stands for at all — and
+/// claiming it seats every conversation from that folder at once, not just
+/// the row that was pressed.
 public enum SessionFiling: Equatable, Sendable {
-    /// Nothing to offer. Already in a workspace, no folder recorded, or a
-    /// machine that has not said it groups.
+    /// Nothing to offer. Already shown under a workspace, no folder recorded,
+    /// or a machine that has not said it groups.
     case settled
-    /// A workspace already stands for this conversation's folder.
-    case join(workspaceId: String, title: String)
-    /// Nothing stands for the folder yet. Claiming it takes two steps, and the
-    /// second one is `join`.
+    /// Nothing stands for the folder yet. Claiming it makes the workspace, and
+    /// the board seats the folder's conversations on its own.
     case claim(path: String)
 
     public static func resolve(_ summary: SessionSummary, workspaces: [Workspace], grouping: Bool) -> SessionFiling {
@@ -251,7 +260,7 @@ public enum SessionFiling: Equatable, Sendable {
         // even if the accounting looks odd from here.
         guard !workspaces.contains(where: { $0.sessionIds.contains(summary.id) }) else { return .settled }
         switch WorkspacePlacement.resolve(path: cwd, workspaces: workspaces, grouping: grouping) {
-        case .joins(let id, let title): return .join(workspaceId: id, title: title)
+        case .joins: return .settled
         case .ungrouped: return .claim(path: cwd)
         case .unknown: return .settled
         }
@@ -349,6 +358,25 @@ public struct SessionBoard: Equatable {
                 guard !claimed.contains(id), let summary = byId[id] else { continue }
                 claimed.insert(id)
                 members.append(summary)
+            }
+            // The ledger, then the rule the ledger caches. Membership is
+            // written only when a conversation is created into the workspace,
+            // so everything started before the workspace existed — or from a
+            // terminal on the Mac — is missing from it forever, and no exposed
+            // call backfills it; a machine with years of history shows almost
+            // everything as leftovers under sections made for exactly those
+            // folders. The rule itself is exact and checkable from here: the
+            // machine refuses to account a conversation anywhere but the
+            // workspace whose path *is* its working directory, so seating by
+            // working directory reaches the same grouping the ledger would
+            // have reached. It just does not wait to be told.
+            if let path = workspace.path, !path.isEmpty {
+                let wanted = WorkspacePlacement.canonical(path)
+                for summary in rest where !claimed.contains(summary.id) {
+                    guard let cwd = summary.cwd, WorkspacePlacement.canonical(cwd) == wanted else { continue }
+                    claimed.insert(summary.id)
+                    members.append(summary)
+                }
             }
             // An empty workspace is a header with nothing under it, which reads
             // as a bug rather than as information.

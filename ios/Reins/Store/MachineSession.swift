@@ -815,7 +815,7 @@ public final class MachineSession {
     /// failing means an ungrouped conversation rather than one in the wrong
     /// place.
     private func joinWorkspace(_ sessionId: String, folder: String?) async {
-        guard case .joins(let workspaceId, let title) = WorkspacePlacement.resolve(
+        guard case .joins(let workspaceId, _) = WorkspacePlacement.resolve(
             path: folder,
             workspaces: workspaces,
             grouping: canGroup
@@ -824,12 +824,14 @@ public final class MachineSession {
             try await harness.fileSession(sessionId, into: workspaceId)
             await refreshWorkspaces()
         } catch {
-            // Said out loud, quietly. The conversation exists and is open in
-            // the right folder, so this is not a failure to start anything —
-            // but the picker had just promised which section it would appear
-            // under, and letting it turn up somewhere else without a word is
-            // the app being wrong on purpose.
-            problem = "Started, but it didn’t join \(title). It’s under Ungrouped."
+            // Not reported, deliberately, and this used to say "It's under
+            // Ungrouped". It no longer is: the board seats a conversation by
+            // its working directory whether or not the machine's ledger lists
+            // it, so nothing on this phone looks different when this write
+            // fails. The only audience left is the Mac's own sidebar, which
+            // stays one row short, and an alert about another machine's
+            // bookkeeping is not worth interrupting the conversation that
+            // just opened.
         }
     }
 
@@ -956,33 +958,6 @@ public final class MachineSession {
         } catch {
             workspaces = held
             problem = (error as? LocalizedError)?.errorDescription ?? "Could not remove that workspace."
-            return false
-        }
-    }
-
-    /// File an existing conversation under the workspace for its folder.
-    ///
-    /// Only ever *its* folder — see `Harness.fileSession`. There is no move
-    /// between workspaces to offer, so this is the one direction that exists:
-    /// a conversation the machine never filed, joining the group it already
-    /// belongs in by working directory.
-    @discardableResult
-    public func fileSession(_ sessionId: String, into workspaceId: String) async -> Bool {
-        let held = workspaces
-        if let index = workspaces.firstIndex(where: { $0.id == workspaceId }),
-           !workspaces[index].sessionIds.contains(sessionId) {
-            // Prepended to match the machine, whose attach puts new members
-            // first. The order is not drawn anywhere — the sections sort by
-            // activity — so this only has to be somewhere the join will find it.
-            workspaces[index].sessionIds.insert(sessionId, at: 0)
-        }
-        do {
-            try await harness.fileSession(sessionId, into: workspaceId)
-            return true
-        } catch {
-            workspaces = held
-            problem = (error as? LocalizedError)?.errorDescription
-                ?? "The Mac wouldn’t file that conversation there."
             return false
         }
     }

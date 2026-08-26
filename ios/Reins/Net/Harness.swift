@@ -170,8 +170,7 @@ public struct Harness: Sendable {
         try await transport.call("workspace.delete", .object(["workspaceId": .string(id)]))
     }
 
-    /// File an existing conversation under the workspace that stands for its
-    /// folder.
+    /// Write a just-created conversation into its workspace's ledger.
     ///
     /// There is no `workspace.attachSession` on the wire. What there is, is
     /// `session.create` being idempotent for an id that already exists: given
@@ -179,14 +178,12 @@ public struct Harness: Sendable {
     /// it already has and then attaches it, which is the same code path a
     /// conversation created *into* a workspace takes.
     ///
-    /// Two things follow from going in this way, and both are why this is only
-    /// offered as a deliberate action rather than done quietly in the
-    /// background. A conversation that was only on disk gets resumed into
-    /// memory as a side effect — harmless, and the same thing typing into it
-    /// would do, but it is not nothing. And the machine compares the session's
-    /// recorded working directory against the workspace's path as plain strings,
-    /// so a folder reached through a symlink is refused with `session-conflict`
-    /// even though it is the same directory.
+    /// Only ever called for a conversation this app created moments ago — the
+    /// idempotent re-create would otherwise resume a cold session into memory
+    /// as a side effect, which is why no bulk backfill of old conversations
+    /// goes through here. Grouping on the phone does not depend on this write:
+    /// `SessionBoard` seats a conversation by its working directory either
+    /// way. This keeps the Mac's own sidebar in step, nothing more.
     public func fileSession(_ sessionId: String, into workspaceId: String) async throws {
         try await transport.call("session.create", .object([
             "sessionId": .string(sessionId),

@@ -172,14 +172,14 @@ final class SessionFilingTests: XCTestCase {
         XCTAssertEqual(SessionFiling.resolve(summary, workspaces: registered, grouping: true), .settled)
     }
 
-    /// The case this app spent a long time creating: started from the phone
-    /// into a folder that already had a workspace, and never filed under it.
-    func testAStrayConversationCanJoinTheWorkspaceForItsFolder() {
+    /// The case this app spent a long time creating — started from the phone
+    /// into a folder that already had a workspace, never filed under it — no
+    /// longer needs a menu item: the board seats it under that workspace by
+    /// its working directory, so offering to "move" it there would be a
+    /// button that visibly does nothing.
+    func testAStrayInAClaimedFolderNeedsNothing() {
         let summary = session("stray", cwd: "/code/one")
-        XCTAssertEqual(
-            SessionFiling.resolve(summary, workspaces: registered, grouping: true),
-            .join(workspaceId: "w1", title: "One")
-        )
+        XCTAssertEqual(SessionFiling.resolve(summary, workspaces: registered, grouping: true), .settled)
     }
 
     func testAStrayConversationInAnUnclaimedFolderOffersToClaimIt() {
@@ -242,6 +242,68 @@ final class SessionBoardTests: XCTestCase {
         XCTAssertEqual(board.groups.map(\.id), ["w1", SessionGroup.ungroupedId])
         XCTAssertEqual(board.groups[1].sessions.map(\.id), ["stray"])
         XCTAssertTrue(board.groups[1].isUngrouped)
+    }
+
+    /// The machine's ledger only lists conversations created after the
+    /// workspace existed, and nothing it exposes backfills the past — so a
+    /// machine with years of history showed almost everything as leftovers,
+    /// under sections made for exactly those folders. The board seats by the
+    /// rule the ledger caches instead: path equals working directory.
+    func testAStrayIsSeatedByItsWorkingDirectory() {
+        let board = SessionBoard(
+            sessions: [session("a", minutesAgo: 1), session("old", minutesAgo: 9, cwd: "/code/one")],
+            workspaces: [Workspace(id: "w1", path: "/code/one", sessionIds: ["a"])]
+        )
+        XCTAssertEqual(board.groups.map(\.id), ["w1"], "a conversation from the workspace's own folder was left in the leftovers")
+        XCTAssertEqual(board.groups[0].sessions.map(\.id), ["a", "old"])
+    }
+
+    /// Exact match, not prefix — the same rule `WorkspacePlacement` states and
+    /// the machine enforces. `~/code` holding a session that runs in
+    /// `~/code/invoice-service` is the real shape this guards against.
+    func testTheSweepDoesNotClaimANestedFolder() {
+        let board = SessionBoard(
+            sessions: [session("a", minutesAgo: 1), session("nested", minutesAgo: 2, cwd: "/code/one/sub")],
+            workspaces: [Workspace(id: "w1", path: "/code/one", sessionIds: ["a"])]
+        )
+        XCTAssertEqual(board.groups.map(\.id), ["w1", SessionGroup.ungroupedId])
+        XCTAssertEqual(board.groups[1].sessions.map(\.id), ["nested"])
+    }
+
+    func testTheSweepToleratesATrailingSlash() {
+        let board = SessionBoard(
+            sessions: [session("s", cwd: "/code/one/")],
+            workspaces: [
+                Workspace(id: "w1", path: "/code/one", sessionIds: []),
+                Workspace(id: "w2", path: "/code/two", sessionIds: ["held"]),
+            ],
+            archived: []
+        )
+        XCTAssertEqual(board.groups.first?.sessions.map(\.id), ["s"])
+    }
+
+    /// A workspace the ledger says is empty still stands for its folder. This
+    /// is the moment claiming a folder pays off: the section appears with the
+    /// folder's conversations already in it, not as an empty header waiting
+    /// for taps.
+    func testALedgerlessWorkspaceWithMatchingStraysStillDraws() {
+        let board = SessionBoard(
+            sessions: [session("x", minutesAgo: 3, cwd: "/code/one"), session("y", minutesAgo: 1, cwd: "/code/one")],
+            workspaces: [Workspace(id: "w1", path: "/code/one", title: "One", sessionIds: [])]
+        )
+        XCTAssertEqual(board.groups.map(\.id), ["w1"])
+        XCTAssertEqual(board.groups[0].sessions.map(\.id), ["y", "x"], "swept members still sort by activity")
+    }
+
+    /// Archiving wins over the sweep, as it wins over everything: a row someone
+    /// deliberately made go away must not come back because its folder matches.
+    func testAnArchivedStrayIsNotResurrectedByTheSweep() {
+        let board = SessionBoard(
+            sessions: [session("a", cwd: "/code/one"), session("gone", cwd: "/code/one")],
+            workspaces: [Workspace(id: "w1", path: "/code/one", sessionIds: [])],
+            archived: ["gone"]
+        )
+        XCTAssertEqual(board.groups.flatMap { $0.sessions.map(\.id) }, ["a"])
     }
 
     /// The leftovers go last even when they hold the newest thing, because they

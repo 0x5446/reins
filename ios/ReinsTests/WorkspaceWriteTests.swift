@@ -319,38 +319,6 @@ final class WorkspaceWriteTests: XCTestCase {
         XCTAssertEqual(session.problem, "workspace \"w1\" not found")
     }
 
-    // MARK: - Filing a stray conversation
-
-    /// There is no `workspace.attachSession` on the wire. `session.create` is
-    /// idempotent for an id that already exists, and given a `workspaceId` it
-    /// attaches — that is the whole of the mechanism, and this pins the payload.
-    func testFilingAConversationGoesOutAsAnIdempotentCreate() async {
-        let session = await loaded()
-        let filed = await session.fileSession("stray", into: "w1")
-        let sent = await stub.payloads("session.create")
-
-        XCTAssertTrue(filed)
-        XCTAssertEqual(sent, [.object([
-            "sessionId": .string("stray"),
-            "workspaceId": .string("w1"),
-        ])])
-        XCTAssertEqual(session.workspaces[0].sessionIds, ["stray", "s1"])
-    }
-
-    func testARefusedFilingLeavesTheConversationWhereItWas() async {
-        let session = await loaded()
-        await stub.fail(
-            "session.create",
-            code: "session-conflict",
-            message: "session \"stray\" already exists with cwd \"/code/two\""
-        )
-
-        let filed = await session.fileSession("stray", into: "w1")
-        XCTAssertFalse(filed)
-        XCTAssertEqual(session.workspaces[0].sessionIds, ["s1"])
-        XCTAssertEqual(session.problem, "session \"stray\" already exists with cwd \"/code/two\"")
-    }
-
     // MARK: - Starting a conversation in a workspace
 
     /// The folder goes out as `cwd`, never as `workspaceId`, and the grouping is
@@ -386,19 +354,22 @@ final class WorkspaceWriteTests: XCTestCase {
         XCTAssertNil(session.problem)
     }
 
-    /// The conversation is real and open in the right folder, so this is not a
-    /// failure to start anything — but the folder sheet had just named the
-    /// section it would appear under, and being quietly wrong about that is
-    /// worse than saying so.
-    func testAConversationThatStartsButCannotJoinSaysSo() async {
+    /// This used to raise "It's under Ungrouped", and that stopped being true:
+    /// the board seats a conversation by its working directory whether or not
+    /// the ledger write lands, so a failure here changes nothing this phone
+    /// shows. Silence is only honest while that holds — which is what the
+    /// board assertion pins.
+    func testAConversationThatStartsButCannotJoinStaysSeatedAndSaysNothing() async {
         let session = await loaded()
         await stub.answer("session.create", .object(["sessionId": .string("fresh")]))
         await stub.fail("session.create", code: "workspace-attach-failed", message: "could not attach", after: 1)
 
         let id = await session.createSession(cwd: "/code/one")
         XCTAssertEqual(id, "fresh", "the conversation exists and is in the right folder")
-        XCTAssertEqual(session.problem, "Started, but it didn’t join One. It’s under Ungrouped.")
-        XCTAssertTrue(session.sessions.contains { $0.id == "fresh" }, "and it is reachable from the list")
+        XCTAssertNil(session.problem, "an alert about the Mac's own bookkeeping interrupts nothing this phone got wrong")
+        let board = SessionBoard(sessions: session.sessions, workspaces: session.workspaces)
+        XCTAssertEqual(board.groups.first { $0.id == "w1" }?.sessions.first?.id, "fresh",
+                       "the silence is only honest because the board seats it anyway")
     }
 
     // MARK: - Archiving

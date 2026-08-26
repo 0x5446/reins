@@ -406,33 +406,22 @@ struct SessionListView: View {
     /// Not a "move to…" menu, because there is nowhere to move it to. A
     /// conversation belongs to the workspace whose folder is its own working
     /// folder, that folder never changes, and the machine refuses to file a
-    /// conversation anywhere else. So the only case worth a menu item is the one
-    /// this app used to cause: a conversation sitting in the leftovers whose
-    /// folder does have — or could have — a workspace.
+    /// conversation anywhere else. And no "move into…" for a folder that
+    /// already has a workspace, because the board seats those on its own — the
+    /// only case left is a folder nothing stands for. One tap makes the
+    /// workspace, and the board seats every conversation from that folder
+    /// under it, not just this row.
     @ViewBuilder
     private func filing(_ summary: SessionSummary) -> some View {
         switch session.filing(for: summary) {
         case .settled:
             EmptyView()
-        case .join(let workspaceId, let title):
-            Button {
-                Task { await session.fileSession(summary.id, into: workspaceId) }
-            } label: {
-                Label("Move into \(title)", systemImage: "folder")
-            }
         case .claim(let folder):
             Button {
                 Task {
-                    // Two calls, and the second is the point: making the
-                    // workspace groups nothing by itself. Stopping after the
-                    // first would leave the row exactly where it was, under a
-                    // section that had just appeared empty.
                     if let failure = await session.createWorkspace(path: folder) {
                         session.problem = failure
-                        return
                     }
-                    guard case .joins(let workspaceId, _) = session.placement(for: folder) else { return }
-                    await session.fileSession(summary.id, into: workspaceId)
                 }
             } label: {
                 Label("Group by \((folder as NSString).lastPathComponent)", systemImage: "folder.badge.plus")
