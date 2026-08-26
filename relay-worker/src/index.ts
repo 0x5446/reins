@@ -160,12 +160,20 @@ async function claimOffer(url: URL, env: Env, ctx: ExecutionContext, caller: str
  * @param env - the bindings.
  * @returns the 101, or 426.
  */
-function upgradeBridle(request: Request, env: Env): Response | Promise<Response> {
+async function upgradeBridle(request: Request, env: Env): Promise<Response> {
   if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
     return new Response('expected a websocket upgrade', { status: 426 })
   }
+  // Charged before the Switchboard exists, because the Switchboard is the
+  // cost: this was the one unmetered entrance, and each pass through it mints
+  // a Durable Object that holds a socket for up to fifteen seconds whether or
+  // not anything registers. The Bridle already knows what a 4029 means — the
+  // close reads as a disconnect and the redial backs off.
+  if (!await exchangeOf(env).bridleAllowance(callerOf(request))) {
+    return refuse(4029, 'too many connections; wait a moment')
+  }
   const id = env.SWITCHBOARD.newUniqueId()
-  return env.SWITCHBOARD.get(id).fetch(new Request('https://switchboard/bridle', request))
+  return await env.SWITCHBOARD.get(id).fetch(new Request('https://switchboard/bridle', request))
 }
 
 /**

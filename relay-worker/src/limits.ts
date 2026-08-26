@@ -60,6 +60,17 @@ export const CLAIM_LIMIT = { capacity: 10, refillPerSecond: 0.2 } as const
 export const ATTACH_LIMIT = { capacity: 30, refillPerSecond: 1 } as const
 
 /**
+ * Bridle connections per caller.
+ *
+ * The bridle door was the one unmetered entrance — and here it is the most
+ * expensive door in the building: every upgrade mints a fresh Durable Object
+ * that holds a socket for up to fifteen seconds. A healthy Bridle connects
+ * once and redials with backoff, so the phone allowance is generous; the
+ * burst absorbs an office of machines reconnecting through one NAT.
+ */
+export const BRIDLE_LIMIT = { capacity: 30, refillPerSecond: 1 } as const
+
+/**
  * Read a positive integer out of a Worker variable.
  * @param raw - the configured value, if any.
  * @param fallback - used when unset, empty, or not a positive integer.

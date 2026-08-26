@@ -22,6 +22,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { Env } from './env.ts'
 import {
   ATTACH_LIMIT,
+  BRIDLE_LIMIT,
   CLAIM_LIMIT,
   DEFAULT_MAX_CIRCUITS,
   DEFAULT_MAX_MACHINES,
@@ -236,6 +237,19 @@ export class Exchange extends DurableObject<Env> {
    */
   claimAllowance(caller: string): boolean {
     return this.take(caller, CLAIM_LIMIT.capacity, CLAIM_LIMIT.refillPerSecond)
+  }
+
+  /**
+   * Charge a Bridle connection against the caller's bucket.
+   *
+   * Charged before the Switchboard is created, because the Switchboard is the
+   * cost: one fresh Durable Object per upgrade, holding a socket for up to
+   * fifteen seconds whether or not anything registers.
+   * @param caller - the connecting machine's address.
+   * @returns whether the connection may proceed.
+   */
+  bridleAllowance(caller: string): boolean {
+    return this.take(caller, BRIDLE_LIMIT.capacity, BRIDLE_LIMIT.refillPerSecond)
   }
 
   /**

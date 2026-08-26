@@ -98,6 +98,12 @@ export class RelayServer {
   private readonly offers = new OfferStore()
   private readonly claimLimit = new RateLimiter(10, 0.2)
   private readonly attachLimit = new RateLimiter(30, 1)
+  // The bridle door was the one unmetered entrance: every other path charged a
+  // bucket, while the door that allocates registration state per connection
+  // took callers at line rate. A healthy Bridle connects once and redials with
+  // backoff, so the same allowance phones get is generous here — the burst
+  // absorbs an office of machines reconnecting through one NAT after a blip.
+  private readonly bridleLimit = new RateLimiter(30, 1)
   private readonly startedAt = Date.now()
   private readonly log: (message: string) => void
   /** The installer, read once at construction; `undefined` disables the route. */
@@ -243,7 +249,7 @@ export class RelayServer {
   private onUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = new URL(request.url ?? '/', 'http://relay.invalid')
     if (url.pathname === '/v1/bridle') {
-      this.bridleSockets.handleUpgrade(request, socket, head, (ws) => { this.onBridle(ws) })
+      this.bridleSockets.handleUpgrade(request, socket, head, (ws) => { this.onBridle(ws, clientKey(request)) })
       return
     }
     if (url.pathname === '/v1/app') {
@@ -254,10 +260,17 @@ export class RelayServer {
     socket.destroy()
   }
 
-  private onBridle(socket: WebSocket): void {
+  private onBridle(socket: WebSocket, key: string): void {
+    tag(socket)
+    // The same refusal the app path gives, for the same reason, and the Bridle
+    // already knows what to do with it: the close reads as a disconnect and
+    // the redial backs off.
+    if (!this.bridleLimit.take(key)) {
+      socket.close(4029, 'too many connections; wait a moment')
+      return
+    }
     const nonce = mintNonce()
     let machine: Machine | undefined
-    tag(socket)
     const timer = setTimeout(() => {
       if (machine === undefined) socket.close(4001, 'registration timed out')
     }, REGISTER_TIMEOUT_MS)

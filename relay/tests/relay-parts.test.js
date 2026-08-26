@@ -148,3 +148,29 @@ test('a machine already known can always reconnect, even at the ceiling', () => 
   assert.doesNotThrow(() => registry.register('dev-0', 'A Mac', '0.1.0', { close() {} }))
   assert.equal(registry.size, limits.maxMachines, 'reconnecting displaces rather than adds')
 })
+
+test('the bridle door is metered like every other entrance', async (t) => {
+  // This was the one unmetered path: every other endpoint charged a bucket,
+  // while the door that allocates registration state per connection took
+  // callers at line rate. A healthy Bridle connects once, so a caller burning
+  // through the whole allowance inside a second is not a Bridle.
+  const { default: WebSocket } = await import('ws')
+  const server = new RelayServer({ port: 0, host: '127.0.0.1' })
+  const port = await server.listen()
+  t.after(() => server.close())
+
+  const outcomes = await Promise.all(Array.from({ length: 35 }, () =>
+    new Promise((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${String(port)}/v1/bridle`)
+      const done = (result) => { socket.terminate(); resolve(result) }
+      socket.on('message', () => { done('challenged') })
+      socket.on('close', (code) => { done(code === 4029 ? 'refused' : 'closed') })
+      socket.on('error', () => { done('errored') })
+    })))
+
+  const refused = outcomes.filter((outcome) => outcome === 'refused').length
+  const challenged = outcomes.filter((outcome) => outcome === 'challenged').length
+  assert.ok(refused >= 5, `${String(refused)} of the over-budget connections were refused; the bridle door is still unmetered`)
+  assert.ok(challenged <= 30, 'more connections were challenged than the allowance permits')
+  assert.ok(challenged >= 1, 'a legitimate first connection was refused outright')
+})

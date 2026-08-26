@@ -317,3 +317,25 @@ test('a Relay with no push key survives being asked to ring a phone', { skip, ti
   const described = await again.call('host.describe', {})
   assert.equal(described.ok, true, 'the circuit stopped working after an unanswerable wake')
 })
+
+test('the bridle door is metered like every other entrance', { skip, timeout: TIMEOUT_MS }, async () => {
+  // The one unmetered path, and the most expensive one in the building: every
+  // upgrade mints a Durable Object that holds a socket for up to fifteen
+  // seconds whether or not anything registers. Verified against the deployed
+  // Relay too — 35 rapid connections came back exactly 30 challenged, 5
+  // refused with 4029.
+  const { default: WebSocket } = await import('ws')
+  const outcomes = await Promise.all(Array.from({ length: 35 }, () =>
+    new Promise((resolve) => {
+      const socket = new WebSocket(new URL('/v1/bridle', RELAY_URL))
+      const done = (result) => { socket.terminate(); resolve(result) }
+      socket.on('message', () => { done('challenged') })
+      socket.on('close', (code) => { done(code === 4029 ? 'refused' : 'closed') })
+      socket.on('error', () => { done('errored') })
+    })))
+  const refused = outcomes.filter((outcome) => outcome === 'refused').length
+  const challenged = outcomes.filter((outcome) => outcome === 'challenged').length
+  assert.ok(refused >= 5, `${String(refused)} over-budget connections were refused; the bridle door is unmetered`)
+  assert.ok(challenged <= 30, 'more connections were challenged than the allowance permits')
+  assert.ok(challenged >= 1, 'a legitimate first connection was refused outright')
+})
