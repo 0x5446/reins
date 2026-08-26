@@ -60,6 +60,31 @@ export function clearRuntime(): void {
 }
 
 /**
+ * The other Bridle already serving this identity, if one is running.
+ *
+ * Two Bridles reading the same REINS_HOME sign in at the Relay as the same
+ * machine, and the Relay always believes the newest registration — so they
+ * displace each other in a loop, at retry speed, forever. Nothing on either
+ * side errors: each one is "online" right up until it is knocked off again.
+ * Observed in the wild as four and a half thousand Relay requests in two
+ * hours, from one standalone Bridle and one dsh plugin that had quietly
+ * inherited the same `~/.reins`.
+ *
+ * Asked at startup by both doorways — the CLI daemon and the dsh plugin —
+ * because the collision is between doorways: nobody runs the same one twice,
+ * but installing the plugin while the service is running is an ordinary
+ * Tuesday.
+ *
+ * The same pid is not a competitor: the dsh plugin is reloaded inside a
+ * process that already holds the file.
+ * @returns the incumbent's snapshot, or undefined when this process may start.
+ */
+export function competingDaemon(): RuntimeInfo | undefined {
+  const running = readRuntime()
+  return running === undefined || running.pid === process.pid ? undefined : running
+}
+
+/**
  * Read the snapshot of a daemon that is actually alive.
  * @returns the snapshot, or undefined when no daemon is running.
  */

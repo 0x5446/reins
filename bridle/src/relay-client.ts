@@ -28,6 +28,19 @@ const RETRY_MIN_MS = 1_000
 /** Backoff ceiling; a laptop that sleeps for hours should not hammer the Relay on wake. */
 const RETRY_MAX_MS = 30_000
 
+/**
+ * How long a connection must survive before its backoff is forgiven.
+ *
+ * Forgiving on registration was the accelerant in an identity fight: when two
+ * Bridles hold the same key, each registration succeeds — and displaces the
+ * other — so both reset to the floor and the pair hammered the Relay at a
+ * couple of seconds per round, forever, invisibly. In that fight each side
+ * stays online for exactly as long as the other waits to redial, which is at
+ * most the ceiling — so the bar to clear has to sit above the ceiling, or the
+ * fight earns its speed back.
+ */
+const STABLE_MS = RETRY_MAX_MS * 2
+
 /** Carrier-level keepalive, well under the usual 60s idle timeout of a proxy. */
 const KEEPALIVE_MS = 20_000
 
@@ -53,6 +66,8 @@ export interface RelayClientOptions {
   log?: (message: string) => void
   /** Called on every state transition. */
   onState?: (state: RelayState, detail?: string) => void
+  /** Override for {@link STABLE_MS}, so a test does not wait a minute. */
+  stableMs?: number
 }
 
 /** Holds one Relay socket and the tunnels multiplexed over it. */
@@ -66,6 +81,8 @@ export class RelayClient {
   private unwatchWaiting: (() => void) | undefined
   /** Whether the current socket has finished registering. */
   private registered = false
+  /** When the current socket registered, for deciding whether it earned a backoff reset. */
+  private onlineAt: number | undefined
 
   /**
    * @param core - the machine being served.
@@ -103,6 +120,9 @@ export class RelayClient {
       this.publish('connecting')
       const reason = await this.connectOnce()
       if (this.abort.signal.aborted) return
+      // The reset is earned by staying up, not by registering — see STABLE_MS.
+      if (this.onlineAt !== undefined && Date.now() - this.onlineAt >= (this.options.stableMs ?? STABLE_MS)) this.retry = RETRY_MIN_MS
+      this.onlineAt = undefined
       this.publish('offline', reason)
       const wait = this.retry + Math.floor(Math.random() * this.retry * 0.3)
       this.options.log?.(`relay disconnected (${reason}); retrying in ${String(Math.round(wait / 1000))}s`)
@@ -155,7 +175,7 @@ export class RelayClient {
           if (control.t === 'registered') {
             registered = true
             this.registered = true
-            this.retry = RETRY_MIN_MS
+            this.onlineAt = Date.now()
             this.publish('online')
             this.options.log?.(`relay online as ${this.core.state.deviceId}`)
             // Anything that stopped the agent while the Relay was down is owed

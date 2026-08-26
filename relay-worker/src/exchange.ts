@@ -168,6 +168,12 @@ export class Exchange extends DurableObject<Env> {
       this.ctx.waitUntil(stale.displace().catch(() => {
         // Already gone. That is the outcome we were asking for.
       }))
+      // Once is a laptop waking up. Repeating every few seconds is two Bridles
+      // holding the same key and displacing each other — a fight that is
+      // invisible from either machine, because each side is "online" right up
+      // until it is knocked off again. This line is the only vantage point
+      // that can see both fighters.
+      console.warn(`reins-relay: ${deviceId} re-registered from a new connection after ${String(Date.now() - existing.since)}ms; displacing the old one`)
     }
     await this.ctx.storage.put(`m:${deviceId}`, { switchboard, name, version, since: Date.now(), circuits: 0 } satisfies MachineRow)
     return { ok: true }

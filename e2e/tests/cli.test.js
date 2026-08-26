@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
@@ -192,6 +192,32 @@ test('the state file holds the machine secret and nobody else can read it', { sk
   for (const secret of [raw.privateKey, raw.signingKey]) {
     assert.equal(status.out.includes(secret), false, 'no command ever prints a private key')
   }
+})
+
+test('a second bridle for the same identity is refused before it can fight the first', { skip: false, timeout: 30_000 }, async (t) => {
+  // Two Bridles on one REINS_HOME register at the Relay as the same machine
+  // and displace each other in a silent loop at retry speed. The refusal has
+  // to come from the CLI's own front door, before it probes or starts a dsh —
+  // which is why this spawns the real binary rather than calling the library.
+  const { cli, home } = await fixture(t)
+  const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'])
+  t.after(() => { other.kill('SIGKILL') })
+  writeFileSync(join(home, 'runtime.json'), JSON.stringify({
+    pid: other.pid,
+    version: '0.0.0',
+    startedAt: 0,
+    relayUrl: '',
+    relayState: 'online',
+    dshUrl: '',
+    dshReachable: true,
+    direct: [],
+    attached: 0,
+  }))
+
+  const refused = await cli.run(['start'])
+  assert.equal(refused.code, 1, `start was not refused:\n${refused.out}\n${refused.err}`)
+  assert.match(refused.out, /already running/u, 'the refusal does not say what the problem is')
+  assert.match(refused.out, /REINS_HOME/u, 'the refusal does not say how to run two on purpose')
 })
 
 test('help and version answer without touching anything', { skip: false, timeout: 30_000 }, async (t) => {

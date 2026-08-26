@@ -25,6 +25,7 @@ import {
   DirectServer,
   RelayClient,
   clearRuntime,
+  competingDaemon,
   loadState,
   writeRuntime,
   type BridleState,
@@ -69,6 +70,22 @@ export function apply(
   },
   config: BridlePluginConfig = {},
 ): void {
+  // One Bridle per identity, refused before anything else exists. A second one
+  // for the same REINS_HOME registers at the Relay as the same machine, and
+  // the two displace each other in a silent loop at retry speed — the usual
+  // way is a standalone `bridle` service still running when the plugin is
+  // installed. Checked before the heartbeat is created, because a refused
+  // instance that still heartbeats would overwrite the incumbent's snapshot
+  // every five seconds, and its dispose would delete it.
+  const incumbent = competingDaemon()
+  if (incumbent !== undefined) {
+    ctx.logger?.error?.(
+      `reins-bridle did not start: another Bridle is already serving this identity (pid ${String(incumbent.pid)}, ${incumbent.version}). `
+      + 'Stop it and restart dsh, or give it its own home with REINS_HOME.',
+    )
+    return
+  }
+
   const state: BridleState = loadState()
   if (config.relay !== undefined && config.relay.length > 0) state.relayUrl = config.relay
   if (config.dsh !== undefined && config.dsh.length > 0) state.dshUrl = config.dsh
@@ -100,6 +117,11 @@ export function apply(
       attached: relay?.attachedCircuits ?? 0,
     })
   }
+
+  // Claimed now rather than on the first heartbeat: until this file carries
+  // our pid, a `bridle start` typed in the next five seconds would pass its
+  // own competing-daemon check and the two would fight for the identity.
+  publish()
 
   const heartbeat = setInterval(() => { publish() }, HEARTBEAT_MS)
   heartbeat.unref()

@@ -23,7 +23,7 @@ import { deviceIdFor } from '@reins/protocol'
 import { BackupError, describeBackup, exportIdentity, importIdentity } from './backup.ts'
 import { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
 import { RelayClient } from './relay-client.ts'
-import { clearRuntime, readRuntime, writeRuntime } from './runtime.ts'
+import { clearRuntime, competingDaemon, readRuntime, writeRuntime } from './runtime.ts'
 import { installService, serviceLogPath, uninstallService } from './service.ts'
 
 const VERSION = readVersion()
@@ -126,6 +126,33 @@ function flagBoolean(options: Options, name: string): boolean {
 async function start(options: Options): Promise<void> {
   const startedAt = Date.now()
   const state = loadState()
+
+  // One Bridle per identity, refused before anything is touched. Two of them
+  // register at the Relay as the same machine and displace each other in a
+  // silent loop at retry speed; the usual way it happens is not running this
+  // command twice but running it while the dsh plugin already holds ~/.reins.
+  const incumbent = competingDaemon()
+  if (incumbent !== undefined) {
+    say(`a Bridle for this identity is already running (pid ${String(incumbent.pid)}, ${incumbent.version}) — likely the dsh plugin or an installed service.`)
+    say('Stop that one first, or give this one its own home with REINS_HOME.')
+    process.exitCode = 1
+    return
+  }
+  // Claimed now, not when the relay comes up: `ensureDsh` below may start dsh,
+  // and a dsh that carries the plugin would otherwise read an unclaimed home
+  // during exactly that window and start a second Bridle for it.
+  writeRuntime({
+    pid: process.pid,
+    version: VERSION,
+    startedAt,
+    relayUrl: state.relayUrl,
+    relayState: 'offline',
+    dshUrl: state.dshUrl,
+    dshReachable: false,
+    direct: [],
+    attached: 0,
+  })
+
   const relayOverride = flagString(options, 'relay')
   if (relayOverride !== undefined) {
     state.relayUrl = relayOverride
