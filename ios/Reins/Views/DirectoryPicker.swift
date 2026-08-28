@@ -305,6 +305,14 @@ struct DirectoryPicker: View {
             }
 
             Section {
+                // Both halves, deliberately. The picker is split in two: the
+                // host plugin serves the listing API this app browses with,
+                // and the client plugin registers the in-page browser the
+                // desktop web UI picks with. The first version of this snippet
+                // carried only the host half — every desktop that pasted it
+                // got a "choose workspace" button that silently did nothing,
+                // because the native Finder chooser was disabled and no
+                // in-page picker had taken its slot.
                 Text("""
                 - id: directory-picker
                   disabled: true
@@ -312,13 +320,15 @@ struct DirectoryPicker: View {
                 - insert:
                     - id: directory-picker-browse
                       name: '@deepseek-ai/dsh-host-directory-picker-browse'
+                    - id: ui-directory-picker-browse
+                      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
                 """)
                 .font(.code(11))
                 .textSelection(.enabled)
             } header: {
                 Text("To browse folders from here")
             } footer: {
-                Text("dsh decided at startup that whoever uses it can see this Mac's screen, so it opens a Finder window there instead of listing folders — which a phone cannot use. Add this to ~/.dsh/profiles/web/cordis.patch.yml. It reloads by itself; nothing needs restarting. The desktop then picks folders in the page rather than in Finder.")
+                Text("dsh decided at startup that whoever uses it can see this Mac's screen, so it opens a Finder window there instead of listing folders — which a phone cannot use. Add this to ~/.dsh/profiles/web/cordis.patch.yml. It reloads by itself; nothing needs restarting. The desktop web page then picks folders in the page rather than in Finder — reload that page once so it learns the new picker.")
             }
         }
         .listStyle(.insetGrouped)

@@ -126,11 +126,16 @@ exec zsh</code></pre>
 
 - insert:
     - id: directory-picker-browse
-      name: '@deepseek-ai/dsh-host-directory-picker-browse'</code></pre>
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'</code></pre>
 
 <p>
-  It reloads by itself — nothing needs restarting. Afterwards the desktop picks
-  folders in the page rather than in Finder.
+  Both entries matter: the first serves the folder listing the phone browses
+  with, the second is the in-page picker the desktop web UI uses once Finder is
+  out of the way. Without it, the desktop's workspace button silently does
+  nothing. It reloads by itself — nothing needs restarting; reload the desktop
+  page once so it learns the new picker.
 </p>
 
 <h3>Searching conversations finds nothing</h3>
