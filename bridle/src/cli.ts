@@ -210,6 +210,21 @@ async function start(options: Options): Promise<void> {
   say(`relay     ${state.relayUrl}`)
 
   function publish(relayState: 'offline' | 'connecting' | 'online' = relay.connectionState): void {
+    // A snapshot nobody can write is not worth the daemon. This runs from a
+    // five-second timer and from relay state changes, and a throw from either
+    // is an uncaught exception — observed in the wild as a full disk (ENOSPC)
+    // killing a healthy Bridle mid-heartbeat, over a file that exists only so
+    // `bridle status` has something to read. The claim written at startup
+    // stays loud; it is the single-instance lock and failing it must stop the
+    // start. This one just goes quiet until the disk comes back.
+    try {
+      unsafePublish(relayState)
+    } catch {
+      // The next heartbeat retries in five seconds.
+    }
+  }
+
+  function unsafePublish(relayState: 'offline' | 'connecting' | 'online'): void {
     writeRuntime({
       pid: process.pid,
       version: VERSION,

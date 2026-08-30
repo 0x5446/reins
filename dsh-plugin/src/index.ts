@@ -105,17 +105,29 @@ export function apply(
   // exist to report. The file is keyed by pid, and this pid is dsh's, so a
   // stale file is still detected the same way.
   function publish(relayState: 'offline' | 'connecting' | 'online' = relay?.connectionState ?? 'offline'): void {
-    writeRuntime({
-      pid: process.pid,
-      version: VERSION,
-      startedAt,
-      relayUrl: state.relayUrl,
-      relayState,
-      dshUrl: state.dshUrl,
-      dshReachable: core.dshStatus.reachable,
-      direct: direct?.addresses ?? [],
-      attached: relay?.attachedCircuits ?? 0,
-    })
+    // Never a throw, at any cost. This runs from a five-second timer inside
+    // dsh's own process, and an uncaught exception here does not kill a
+    // plugin — it kills the harness and every session in it. The standalone
+    // CLI died exactly this way in the wild: a full disk (ENOSPC) took the
+    // whole daemon down over a status snapshot. In this doorway the same
+    // throw costs someone their running agent, so even the startup claim is
+    // tolerant here — a guest must fail alone, and a disk too full for a
+    // snapshot will announce itself through louder channels than ours.
+    try {
+      writeRuntime({
+        pid: process.pid,
+        version: VERSION,
+        startedAt,
+        relayUrl: state.relayUrl,
+        relayState,
+        dshUrl: state.dshUrl,
+        dshReachable: core.dshStatus.reachable,
+        direct: direct?.addresses ?? [],
+        attached: relay?.attachedCircuits ?? 0,
+      })
+    } catch {
+      // The next heartbeat retries in five seconds.
+    }
   }
 
   // Claimed now rather than on the first heartbeat: until this file carries

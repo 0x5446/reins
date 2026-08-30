@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
@@ -218,6 +218,27 @@ test('a second bridle for the same identity is refused before it can fight the f
   assert.equal(refused.code, 1, `start was not refused:\n${refused.out}\n${refused.err}`)
   assert.match(refused.out, /already running/u, 'the refusal does not say what the problem is')
   assert.match(refused.out, /REINS_HOME/u, 'the refusal does not say how to run two on purpose')
+})
+
+test('a heartbeat that cannot write its snapshot does not kill the daemon', { skip, timeout: 60_000 }, async (t) => {
+  // The daemon died exactly this way in the wild: ENOSPC during the
+  // five-second runtime.json heartbeat, uncaught inside setInterval, process
+  // gone — over a file that exists only so `bridle status` has something to
+  // read. A directory planted where the snapshot goes makes the atomic
+  // rename fail the same way a full disk does, without needing one.
+  const { cli, relayUrl } = await fixture(t)
+  const started = await cli.spawn(
+    ['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'],
+    /reins:\/\/pair#/u,
+  )
+  t.after(() => { started.child.kill('SIGKILL') })
+
+  rmSync(join(cli.home, 'runtime.json'), { force: true })
+  mkdirSync(join(cli.home, 'runtime.json'))
+
+  // Two heartbeats' worth of hostile disk, plus margin.
+  await new Promise((resolve) => setTimeout(resolve, 12_000))
+  assert.equal(started.child.exitCode, null, `the daemon died over a status snapshot:\n${started.err()}`)
 })
 
 test('help and version answer without touching anything', { skip: false, timeout: 30_000 }, async (t) => {
