@@ -8,7 +8,7 @@
  * for the days after that.
  */
 
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,6 +24,7 @@ import { BackupError, describeBackup, exportIdentity, importIdentity } from './b
 import { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
 import { RelayClient } from './relay-client.ts'
 import { clearRuntime, competingDaemon, readRuntime, writeRuntime } from './runtime.ts'
+import { holdsIdentity, listInstances, rememberInstance } from './instances.ts'
 import { installService, serviceLogPath, uninstallService } from './service.ts'
 
 const VERSION = readVersion()
@@ -49,6 +50,12 @@ async function main(argv: string[]): Promise<void> {
       return
     case 'status':
       await status()
+      return
+    case 'instances':
+      instances()
+      return
+    case 'reset':
+      await reset(options)
       return
     case 'devices':
       devices()
@@ -144,6 +151,7 @@ async function start(options: Options): Promise<void> {
   writeRuntime({
     pid: process.pid,
     version: VERSION,
+    via: 'cli',
     startedAt,
     relayUrl: state.relayUrl,
     relayState: 'offline',
@@ -152,6 +160,9 @@ async function start(options: Options): Promise<void> {
     direct: [],
     attached: 0,
   })
+  // On the machine's map from the moment the identity is claimed, so
+  // `bridle instances` can answer for this home even after this daemon stops.
+  rememberInstance()
 
   const relayOverride = flagString(options, 'relay')
   if (relayOverride !== undefined) {
@@ -228,6 +239,7 @@ async function start(options: Options): Promise<void> {
     writeRuntime({
       pid: process.pid,
       version: VERSION,
+      via: 'cli',
       startedAt,
       relayUrl: state.relayUrl,
       relayState,
@@ -458,7 +470,7 @@ async function status(): Promise<void> {
   if (runtime === undefined) {
     say('bridle    not running · start it with "bridle start"')
   } else {
-    say(`bridle    running (pid ${String(runtime.pid)}, ${VERSION}) · ${String(runtime.attached)} attached`)
+    say(`bridle    running (pid ${String(runtime.pid)}, ${VERSION}${runtime.via === 'plugin' ? ', inside dsh' : ''}) · ${String(runtime.attached)} attached`)
     const stale = builtAfter(runtime.startedAt)
     if (stale !== undefined) {
       say(`          ⚠ running code from before ${stale} — restart to pick up the build on disk`)
@@ -525,6 +537,78 @@ function service(options: Options): void {
   process.exitCode = 1
 }
 
+/**
+ * Every identity on this machine, one glance.
+ *
+ * Everything else in this file speaks about one REINS_HOME; this is the
+ * command that answers the question that comes before all of them. Read
+ * fresh from each home's own files — the index remembers only paths.
+ */
+function instances(): void {
+  const found = listInstances()
+  if (found.length === 0) {
+    say('no identities on this machine yet · "bridle start" creates one')
+    return
+  }
+  const current = reinsHome()
+  for (const instance of found) {
+    say(instance.home === current ? `${instance.home}   ← current REINS_HOME` : instance.home)
+    say(`  machine   ${instance.machineName}`)
+    say(`  device    ${instance.deviceId}`)
+    if (instance.running === undefined) {
+      say('  bridle    not running')
+    } else {
+      const doorway = instance.running.via === 'plugin' ? 'inside dsh' : 'standalone'
+      say(`  bridle    running (pid ${String(instance.running.pid)}, ${doorway}) · relay ${instance.running.relayState}`)
+    }
+    say(`  harness   ${instance.dshUrl}`)
+    say(`  devices   ${String(instance.peers)} paired`)
+    say('')
+  }
+  say('Commands act on one identity at a time:')
+  say('  REINS_HOME=<path> bridle status | pair | revoke | reset')
+}
+
+/**
+ * Erase this home's identity, deliberately and loudly.
+ *
+ * The one thing `rm -rf` was previously the only way to do. Refused while a
+ * daemon holds the identity — resetting under a live daemon would leave it
+ * signing as a machine that no longer exists on disk — and confirmed by
+ * typing the machine's name, because everything downstream of this is
+ * one-way: every paired phone keeps a dead entry it must forget by hand.
+ */
+async function reset(options: Options): Promise<void> {
+  const home = reinsHome()
+  if (!holdsIdentity(home)) {
+    say(`nothing to reset · ${home} holds no identity`)
+    return
+  }
+  const running = readRuntime()
+  if (running !== undefined) {
+    const doorway = running.via === 'plugin' ? 'the dsh plugin — restart dsh without it, or stop dsh' : `pid ${String(running.pid)} — stop it`
+    say(`this identity is in use by ${doorway} first.`)
+    process.exitCode = 1
+    return
+  }
+  const state = loadState()
+  say(`This erases the identity in ${home}:`)
+  say(`  machine   ${state.machineName}`)
+  say(`  devices   ${String(state.peers.length)} paired — each phone will keep a dead entry it must forget by hand`)
+  if (!flagBoolean(options, 'force')) {
+    const typed = await readLine(`Type the machine name (${state.machineName}) to continue: `)
+    if (typed.trim() !== state.machineName) {
+      say('names did not match; nothing was touched.')
+      process.exitCode = 1
+      return
+    }
+  }
+  for (const entry of ['bridle.json', 'runtime.json', 'secrets']) {
+    rmSync(join(home, entry), { recursive: true, force: true })
+  }
+  say('erased. The next "bridle start" here creates a fresh identity with a new pairing.')
+}
+
 async function doctor(): Promise<void> {
   const state = loadState()
   const major = Number(process.versions.node.split('.')[0] ?? '0')
@@ -555,6 +639,8 @@ function usage(): void {
   bridle pair               show a new pairing QR and short code
   bridle status             machine, relay, harness, and paired devices
   bridle devices            list paired devices
+  bridle instances          every identity on this machine, and who runs it
+  bridle reset              erase this identity (REINS_HOME picks which)
   bridle revoke <prefix>    remove a paired device
   bridle service install    keep the bridle running after login
   bridle service uninstall  remove the background service

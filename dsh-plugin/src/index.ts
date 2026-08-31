@@ -27,6 +27,7 @@ import {
   clearRuntime,
   competingDaemon,
   loadState,
+  rememberInstance,
   writeRuntime,
   type BridleState,
 } from '@reins/bridle'
@@ -117,6 +118,7 @@ export function apply(
       writeRuntime({
         pid: process.pid,
         version: VERSION,
+        via: 'plugin',
         startedAt,
         relayUrl: state.relayUrl,
         relayState,
@@ -134,6 +136,9 @@ export function apply(
   // our pid, a `bridle start` typed in the next five seconds would pass its
   // own competing-daemon check and the two would fight for the identity.
   publish()
+  // And onto the machine's map, so `bridle instances` knows this home exists
+  // even when it is only ever run by dsh.
+  rememberInstance()
 
   const heartbeat = setInterval(() => { publish() }, HEARTBEAT_MS)
   heartbeat.unref()

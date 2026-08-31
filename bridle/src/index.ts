@@ -16,6 +16,7 @@ export { createInvitation, publishInvitation, toHttpUrl, type Invitation } from 
 export { installService, uninstallService, serviceLogPath, SERVICE_LABEL } from './service.ts'
 export { BackupError, describeBackup, exportIdentity, importIdentity, sameIdentity, type BackupSummary } from './backup.ts'
 export { clearRuntime, competingDaemon, readRuntime, writeRuntime, type RuntimeInfo } from './runtime.ts'
+export { holdsIdentity, listInstances, rememberInstance, type InstanceSummary } from './instances.ts'
 export {
   DEFAULT_DSH_URL,
   DEFAULT_RELAY_URL,

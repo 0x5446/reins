@@ -18,6 +18,8 @@ export interface RuntimeInfo {
   pid: number
   /** Bridle package version. */
   version: string
+  /** Which doorway runs it — the rescue guidance differs between the two. */
+  via?: 'cli' | 'plugin'
   /** Epoch milliseconds the daemon started. */
   startedAt: number
   /** Relay base URL in use. */

@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
@@ -34,9 +34,9 @@ class Cli {
    * @param {string[]} args - CLI arguments.
    * @returns {Promise<{code: number|null, out: string, err: string}>} the result.
    */
-  run(args) {
+  run(args, extraEnv = {}) {
     return new Promise((resolve) => {
-      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home } })
+      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, ...extraEnv } })
       let out = ''
       let err = ''
       child.stdout.on('data', chunk => { out += String(chunk) })
@@ -51,8 +51,8 @@ class Cli {
    * @param {RegExp} until - matched against accumulated stdout.
    * @returns {Promise<{child: import('node:child_process').ChildProcess, out: () => string}>} the running process.
    */
-  async spawn(args, until) {
-    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home } })
+  async spawn(args, until, extraEnv = {}) {
+    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, ...extraEnv } })
     let out = ''
     let err = ''
     child.stdout.on('data', chunk => { out += String(chunk) })
@@ -239,6 +239,35 @@ test('a heartbeat that cannot write its snapshot does not kill the daemon', { sk
   // Two heartbeats' worth of hostile disk, plus margin.
   await new Promise((resolve) => setTimeout(resolve, 12_000))
   assert.equal(started.child.exitCode, null, `the daemon died over a status snapshot:\n${started.err()}`)
+})
+
+test('instances lists this home, and reset erases it only when nothing runs it', { skip, timeout: 60_000 }, async (t) => {
+  const { cli, home, relayUrl } = await fixture(t)
+  // A scratch machine-level index, so the test neither reads nor writes the
+  // developer's real one.
+  const index = join(home, 'instances-index.json')
+  const env = { REINS_INSTANCES: index }
+
+  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /reins:\/\/pair#/u, env)
+  t.after(() => { started.child.kill('SIGKILL') })
+
+  const listed = await cli.run(['instances'], env)
+  assert.equal(listed.code, 0, listed.err)
+  assert.ok(listed.out.includes(home), `the home that just started is not on the map:\n${listed.out}`)
+  assert.match(listed.out, /running \(pid \d+, standalone\)/u, 'the map does not say who runs it')
+
+  // Refused while the daemon holds the identity — resetting under a live
+  // daemon would leave it signing as a machine that no longer exists on disk.
+  const refused = await cli.run(['reset', '--force'], env)
+  assert.equal(refused.code, 1, `reset went ahead under a running daemon:\n${refused.out}`)
+
+  started.child.kill('SIGKILL')
+  await new Promise((resolve) => started.child.on('exit', resolve))
+  const erased = await cli.run(['reset', '--force'], env)
+  assert.equal(erased.code, 0, erased.err)
+  assert.equal(existsSync(join(home, 'bridle.json')), false, 'the identity survived its own reset')
+  assert.equal((await cli.run(['instances'], env)).out.includes(home), false,
+    'an erased identity is still being presented on the map')
 })
 
 test('help and version answer without touching anything', { skip: false, timeout: 30_000 }, async (t) => {
