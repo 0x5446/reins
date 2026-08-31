@@ -32,6 +32,19 @@ struct SessionListView: View {
     @State private var groupName = ""
     @State private var deletingGroup: SessionGroup?
 
+    /// Collision-aware machine name for prose. See `MachineLabel`.
+    private var machineLabel: String {
+        model.label(for: session.machine).prose
+    }
+
+    /// The one structured verdict a failed dial can carry — see `DialDiagnosis`.
+    private var relaySaysOffline: Bool {
+        if case .waiting(_, _, let diagnosis) = session.status {
+            return diagnosis?.relaySaysOffline == true
+        }
+        return false
+    }
+
     /// Where the most recently touched conversation is, if any.
     ///
     /// Most *recent* rather than most *used*, which is what the folder browser
@@ -202,7 +215,7 @@ struct SessionListView: View {
         switch session.status {
         case .idle, .connecting:
             return true
-        case .waiting(_, let retryIn):
+        case .waiting(_, let retryIn, _):
             // Backoff doubles from half a second; single digits mean only a
             // failure or two so far. At the ceiling it has genuinely tried.
             return retryIn < 8
@@ -244,22 +257,39 @@ struct SessionListView: View {
         } else if !query.isEmpty {
             Placeholder(icon: "magnifyingglass", title: "Nothing matched", detail: "Try a word from the conversation itself.")
         } else if !session.isOnline {
-            // Not reachable at all. Saying anything about dsh here would be
-            // stating something the app cannot know: with no tunnel there is no
-            // information about what is running on the far side, and the last
-            // time this claimed "dsh isn't running" the truth was that dsh was
-            // fine and the Bridle had stopped.
-            Placeholder(
-                icon: "antenna.radiowaves.left.and.right.slash",
-                title: "Can’t reach \(session.machine.name)",
-                detail: "The Mac is asleep, off your network, or Bridle isn’t running on it."
-            )
+            // Narrowed only as far as the evidence reaches. The relay saying
+            // "that machine is offline" (close code 4404) is the one verdict
+            // strong enough to name a layer: the relay answered, so the
+            // network works, and the machine's Bridle is not connected to it.
+            // Anything weaker keeps the honest three-way sentence — with no
+            // tunnel there is no information about the far side, and the last
+            // time this screen guessed, dsh was fine and the Bridle had
+            // stopped.
+            if relaySaysOffline {
+                Placeholder(
+                    icon: "antenna.radiowaves.left.and.right.slash",
+                    title: "Can’t reach \(machineLabel)",
+                    detail: "Bridle isn’t connected to the relay — the Mac is asleep, or Bridle isn’t running on it."
+                ) {
+                    RescueCard(tier: .bridleDown, session: session)
+                }
+            } else {
+                Placeholder(
+                    icon: "antenna.radiowaves.left.and.right.slash",
+                    title: "Can’t reach \(machineLabel)",
+                    detail: "The Mac is asleep, off your network, or Bridle isn’t running on it."
+                ) {
+                    RescueCard(tier: .unknown, session: session)
+                }
+            }
         } else if !session.harnessReachable {
             Placeholder(
                 icon: "bolt.horizontal.circle",
                 title: "dsh isn’t running",
-                detail: session.harnessDetail ?? "Start the agent on \(session.machine.name) and this fills in by itself."
-            )
+                detail: session.harnessDetail ?? "Start the agent on \(machineLabel) and this fills in by itself."
+            ) {
+                RescueCard(tier: .harnessDown, session: session)
+            }
         } else {
             Placeholder(
                 icon: "bubble.left.and.text.bubble.right",
@@ -701,6 +731,77 @@ func folderName(_ path: String) -> String {
 /// A transient failure, shown over whatever is on screen and dismissed by tapping
 /// it or by time. Failures here are things like "that didn't send" — worth saying
 /// once, not worth a modal.
+/// The rescue card: what to do on the Mac, said from the phone.
+///
+/// Guidance only, and the card says so — the tunnel is the only channel, so
+/// when the machine side is down there is nothing here that can act. What it
+/// can do is put the right command under the person's eyes, with the right
+/// home directory when the machine ever said one this app session. Commands
+/// are spelled `npx @reins/bridle …`, never bare `bridle`: a plugin install
+/// puts no binary on PATH, and command-not-found at rescue time is the worst
+/// possible answer.
+struct RescueCard: View {
+    enum Tier {
+        /// The relay answered: this machine's Bridle is not registered.
+        case bridleDown
+        /// The tunnel is up but the Bridle cannot reach dsh.
+        case harnessDown
+        /// Nothing conclusive — network, sleep, or Bridle, unranked.
+        case unknown
+    }
+
+    let tier: Tier
+    let session: MachineSession
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                    Text(step)
+                        .font(.code(12))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Reins can’t run these for you — the tunnel is the only channel, and it’s the part that’s down.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("On the Mac", systemImage: "terminal")
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .padding(.horizontal, Metrics.gutter * 2)
+        .padding(.top, 4)
+    }
+
+    private var steps: [String] {
+        let home = session.harnessInfo?.home
+        let status = home.map { "REINS_HOME=\($0) npx @reins/bridle status" }
+            ?? "npx @reins/bridle status   (multiple identities? point REINS_HOME at the right one)"
+        switch tier {
+        case .bridleDown:
+            return [
+                "1. \(status)",
+                "2. “inside dsh” → restart dsh · “not running” → " + (home.map { "REINS_HOME=\($0) npx @reins/bridle start" } ?? "npx @reins/bridle start"),
+            ]
+        case .harnessDown:
+            let port = session.harnessInfo?.port
+            return [
+                "Bridle is up; dsh isn’t. On the Mac:",
+                port.map { "dsh web --port \($0)" } ?? "dsh web",
+            ]
+        case .unknown:
+            return [
+                "1. Is the Mac awake, and on a network?",
+                "2. curl \(URL(string: session.machine.relay)?.host ?? "the relay")/healthz   (does the Mac reach the internet?)",
+                "3. \(status)",
+            ]
+        }
+    }
+}
+
 struct ProblemBanner: View {
     let session: MachineSession
 

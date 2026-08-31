@@ -306,12 +306,39 @@ extension CallError: LocalizedError {
     public var errorDescription: String? { message }
 }
 
+/// Which harness a Bridle identity fronts, and where the identity lives.
+///
+/// One Mac can run several Bridles; until the app knows which one it is
+/// talking to, every offline screen says the same name and every rescue
+/// command defaults to the wrong home. Optional end to end: a Bridle too old
+/// to send it costs the app a label, nothing more.
+public struct HarnessInfo: Equatable, Sendable {
+    /// The dsh address this identity points at, e.g. `http://127.0.0.1:3081`.
+    public let url: String
+    /// The `REINS_HOME` the identity lives in on the Mac.
+    public let home: String
+
+    public init(url: String, home: String) {
+        self.url = url
+        self.home = home
+    }
+
+    /// The port, which is how a person tells instances apart.
+    public var port: String? {
+        guard let colon = url.lastIndex(of: ":"), colon != url.startIndex else { return nil }
+        let digits = url[url.index(after: colon)...].prefix(while: \.isNumber)
+        return digits.isEmpty ? nil : String(digits)
+    }
+}
+
 /// Connection is live; describes the machine and its harness.
 public struct ReadyFrame: Sendable {
     public let version: Int
     public let bridle: String
     public let machine: String
     public let dshReachable: Bool
+    /// Which harness, and where the identity lives. `nil` from an older Bridle.
+    public let harness: HarnessInfo?
     /// The harness `host.describe` value when reachable.
     public let host: JSONValue?
     /// Where this machine can be dialled directly right now, best first.
@@ -368,6 +395,9 @@ public extension ServerFrame {
                 bridle: value["bridle"]?.stringValue ?? "unknown",
                 machine: value["machine"]?.stringValue ?? "a computer",
                 dshReachable: value["dshReachable"]?.boolValue ?? false,
+                harness: (value["harness"]?["url"]?.stringValue).map { url in
+                    HarnessInfo(url: url, home: value["harness"]?["home"]?.stringValue ?? "")
+                },
                 host: value["host"],
                 direct: value["direct"]?.arrayValue.map { $0.compactMap(\.stringValue) },
                 seq: value["seq"]?.intValue ?? 0

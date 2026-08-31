@@ -164,8 +164,9 @@ public final class AppModel {
     public func pair(with bundle: PairingBundle) {
         var machine = PairedMachine(bundle: bundle)
         if let index = machines.firstIndex(where: { $0.id == bundle.device }) {
-            machine.addedAt = machines[index].addedAt
-            machine.name = bundle.name.isEmpty ? machines[index].name : bundle.name
+            // The merge rule lives on PairedMachine — see `absorbing` for why
+            // the phone's name survives and the wire facts do not.
+            machine = machines[index].absorbing(bundle)
             machines[index] = machine
         } else {
             machines.insert(machine, at: 0)
@@ -230,6 +231,11 @@ public final class AppModel {
             defaults.removeObject(forKey: Keys.lastMachine)
         }
         restoreLastConnection()
+    }
+
+    /// What to call a machine on screen, collision-aware. See `MachineLabel`.
+    public func label(for machine: PairedMachine) -> MachineLabel {
+        MachineLabel.resolve(machine, among: machines)
     }
 
     /// Rename a machine as it appears in this app.

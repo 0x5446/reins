@@ -21,7 +21,7 @@ import {
   type ServerFrame,
   MAX_FRAME_BYTES,
 } from '@reins/protocol'
-import { acceptPeer, findPeer, offerAccepts, touchPeer } from '../identity.ts'
+import { acceptPeer, findPeer, offerAccepts, reinsHome, touchPeer } from '../identity.ts'
 import type { BridleCore, DshStatus } from '../core.ts'
 import type { LoggedEvent } from './event-log.ts'
 import { thinHistory } from './history.ts'
@@ -235,6 +235,13 @@ export class TunnelSession {
       bridle: this.options.version,
       machine: this.core.state.machineName,
       dshReachable: status.reachable,
+      // Which harness this identity fronts, and where the identity lives on
+      // disk. One machine can run several Bridles, and until the app knows
+      // which one it is talking to, every offline screen says the same name
+      // and every rescue command defaults to the wrong home. Nothing here is
+      // a new disclosure: a paired peer can already call `host.describe`
+      // through this same channel and read cwd and home from the harness.
+      harness: { url: this.core.state.dshUrl, home: reinsHome() },
       ...(status.host === undefined ? {} : { host: status.host }),
       // Where this machine can be dialled directly *now*, so the app can
       // retire the addresses frozen into its pairing bundle. Sent even when

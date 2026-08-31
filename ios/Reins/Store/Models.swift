@@ -22,6 +22,14 @@ public struct PairedMachine: Codable, Identifiable, Equatable, Sendable {
     public var addedAt: Date
     /// How the last successful connection got there, for the status line.
     public var lastCarrier: Carrier?
+    /// What the Mac itself calls this machine, as of the last pairing.
+    ///
+    /// Kept apart from `name` so a rename on this phone survives re-pairing:
+    /// `name` belongs to the person holding the phone, this belongs to the
+    /// Mac, and "Use the Mac's name" is an explicit act that copies one over
+    /// the other. Optional because pairings made before this field existed
+    /// decoded without it.
+    public var reportedName: String?
 
     public init(bundle: PairingBundle, addedAt: Date = Date()) {
         id = bundle.device
@@ -30,6 +38,7 @@ public struct PairedMachine: Codable, Identifiable, Equatable, Sendable {
         direct = bundle.direct ?? []
         key = bundle.key
         self.addedAt = addedAt
+        reportedName = bundle.name.isEmpty ? nil : bundle.name
     }
 
     /// A bundle for reconnecting. No token: the pairing already happened, and
@@ -52,10 +61,86 @@ public struct PairedMachine: Codable, Identifiable, Equatable, Sendable {
         )
     }
 
+    /// Absorb a fresh pairing bundle into this record.
+    ///
+    /// Re-pairing is how someone recovers from a moved Mac, so the wire facts
+    /// — addresses, key, relay — are the bundle's to overwrite. The two things
+    /// that are not: when this pairing was made, and what the person holding
+    /// the phone calls it. The name used to travel with the wire facts, and a
+    /// re-pair silently undid the rename someone made precisely to tell two
+    /// same-named machines apart. What the Mac calls itself still arrives,
+    /// into `reportedName`, where "Use the Mac's name" can reach it.
+    /// Pure, and tested directly — the pairing flow just applies it.
+    public func absorbing(_ bundle: PairingBundle) -> PairedMachine {
+        var merged = PairedMachine(bundle: bundle)
+        merged.addedAt = addedAt
+        merged.name = name
+        merged.reportedName = bundle.name.isEmpty ? reportedName : bundle.name
+        return merged
+    }
+
     /// Human-readable identity check, matching what `bridle devices` prints.
     public var fingerprint: String {
         guard let raw = Data(base64url: key) else { return "unknown" }
         return Pairing.keyFingerprint(raw)
+    }
+}
+
+/// What to call each paired machine on screen.
+///
+/// Machine names default to the Mac's hostname, so two Bridle identities on
+/// one Mac — a real one and a demo one is the observed case — arrive with the
+/// same name, and every surface that shows it (the chip, the list, the
+/// offline banner) says the same thing about two different machines. The
+/// suffix that tells them apart is **derived at render time and only under
+/// collision**: someone with one Mac never sees it, and the moment a
+/// colliding pairing is forgotten or renamed it disappears on its own —
+/// which a suffix written into the stored name at pair time would not.
+///
+/// The suffix must be rendered as its own element, never concatenated into
+/// the name: names truncate from the end, and the end is exactly where a
+/// concatenated suffix would be cut off. See `MachineChip`.
+public struct MachineLabel: Equatable, Sendable {
+    public let name: String
+    /// Present only when another pairing shares the display name.
+    public let suffix: String?
+
+    /// The one-line form for prose ("Can't reach X"), where truncation is not
+    /// the enemy and a separate view is not available.
+    public var prose: String {
+        suffix == nil ? name : "\(name) · \(suffix ?? "")"
+    }
+
+    /// - Parameters:
+    ///   - machine: the machine to label.
+    ///   - among: every paired machine, for collision detection.
+    public static func resolve(_ machine: PairedMachine, among machines: [PairedMachine]) -> MachineLabel {
+        let rivals = machines.filter { $0.name == machine.name && $0.id != machine.id }
+        guard !rivals.isEmpty else { return MachineLabel(name: machine.name, suffix: nil) }
+        return MachineLabel(
+            name: machine.name,
+            suffix: disambiguate(compact(machine.fingerprint), against: rivals.map { compact($0.fingerprint) })
+        )
+    }
+
+    /// Fingerprint prefix, grown until it separates this one from every rival.
+    ///
+    /// Four hex characters collide about once in sixty-five thousand, but
+    /// "about never" is not a rule, so the rule is growth. Separated from
+    /// `resolve` so the growth can be tested with crafted fingerprints
+    /// rather than by mining keys for a real collision.
+    static func disambiguate(_ mine: String, against others: [String]) -> String {
+        for length in stride(from: 4, through: mine.count, by: 4) {
+            let candidate = String(mine.prefix(length))
+            if !others.contains(where: { $0.hasPrefix(candidate) }) {
+                return candidate
+            }
+        }
+        return mine
+    }
+
+    private static func compact(_ fingerprint: String) -> String {
+        fingerprint.replacingOccurrences(of: "-", with: "")
     }
 }
 

@@ -110,6 +110,11 @@ test('the first run pairs a phone with no configuration at all', { skip, timeout
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.dshReachable, true)
+  // Which harness, and where the identity lives — the fields the app's
+  // instance labels and rescue card are built on. A Bridle that stopped
+  // sending them would fail silently everywhere else.
+  assert.equal(ready.harness?.url, DSH_URL, 'the ready frame does not say which harness this identity fronts')
+  assert.equal(ready.harness?.home, cli.home, 'the ready frame does not say where the identity lives')
   assert.equal((await phone.call('host.describe', {})).ok, true)
 })
 

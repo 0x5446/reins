@@ -110,6 +110,12 @@ public final class MachineSession {
     /// handshake — but a render can land in those milliseconds, and until it
     /// does the app has no claim to make about dsh either way.
     public private(set) var harnessKnown = false
+    /// Which dsh this machine's Bridle fronts, as of the last ready this app
+    /// session saw. Survives a disconnect on purpose: the rescue card needs
+    /// the home path precisely when the machine is unreachable. The detail
+    /// page shows the port only while online — staleness is a display rule,
+    /// not a reason to burn the hint.
+    public private(set) var harnessInfo: HarnessInfo?
     /// A one-off note that the route changed, shown briefly then cleared.
     public private(set) var routeChange: String?
     /// Distinguishes the timer that should clear the note from an older one.
@@ -223,6 +229,14 @@ public final class MachineSession {
             if case .online = value, !wasOnline {
                 Task { await self.refreshSessions() }
             }
+            // Old evidence may not testify about a new outage: `dshReachable`
+            // was a fact about a tunnel that no longer exists, and a stale
+            // "dsh isn't running" would steer the offline screen to the wrong
+            // tier of diagnosis.
+            if wasOnline, !isOnline {
+                harnessKnown = false
+                harnessDetail = nil
+            }
             // A route that changes under a live connection is worth one line.
             // The chip's icon changes too, but an icon swapping while nobody
             // was looking at it explains nothing; this says what happened and
@@ -258,8 +272,9 @@ public final class MachineSession {
         case .harness(let reachable, let detail):
             harnessKnown = true
             harnessDetail = reachable ? nil : (detail ?? "dsh isn’t running on that Mac.")
-        case .handshake(let number, let host, let direct):
+        case .handshake(let number, let host, let harness, let direct):
             confirmation = number.isEmpty ? nil : number
+            harnessInfo = harness
             if let host, let described = MachineDescription(host) {
                 machineInfo = described
             }

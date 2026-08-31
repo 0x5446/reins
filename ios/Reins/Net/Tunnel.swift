@@ -45,7 +45,7 @@ public enum TunnelStatus: Equatable, Sendable {
     /// Live. `carrier` is how it got there and `harnessUp` is whether dsh answers.
     case online(carrier: Carrier, machine: String, harnessUp: Bool)
     /// Waiting to retry after a failure. `detail` is what went wrong last time.
-    case waiting(detail: String, retryIn: TimeInterval)
+    case waiting(detail: String, retryIn: TimeInterval, diagnosis: DialDiagnosis?)
     /// The machine will not accept this device. No amount of retrying fixes it.
     case refused(reason: RefusalReason)
 }
@@ -72,6 +72,40 @@ public enum RefusalReason: Equatable, Sendable {
     case machineError(String)
 }
 
+/// What one path did in one dial round, with its structure intact.
+///
+/// The dial used to flatten every failure into a joined string, and the one
+/// structured fact the app ever receives about an unreachable machine — the
+/// relay's close code, where 4404 means "that machine is offline", meaning
+/// the Bridle is not registered — was destroyed on the way to the screen.
+/// The offline screen then had nothing to reason from but its own prose.
+public struct PathOutcome: Equatable, Sendable {
+    /// Which kind of path failed — a Wi-Fi address or the relay.
+    public let carrier: Carrier
+    public let label: String
+    /// The refusal close code, when the far end sent one. `nil` means the
+    /// path failed below that level: timeout, no route, connection refused.
+    public let closeCode: Int?
+    public let reason: String
+}
+
+/// Everything the paths reported in the round of dialling that just failed.
+///
+/// Lives only inside the `waiting` status it describes: the next dial makes a
+/// new one and a tunnel that comes up discards it — old evidence does not get
+/// to testify about a new outage.
+public struct DialDiagnosis: Equatable, Sendable {
+    public let outcomes: [PathOutcome]
+
+    /// The relay itself answered and said the machine is not registered.
+    /// This is the one verdict strong enough to narrow the offline screen:
+    /// the relay is reachable, so the network is fine, and the machine's
+    /// Bridle is not connected to it.
+    public var relaySaysOffline: Bool {
+        outcomes.contains { $0.carrier == .relay && $0.closeCode == 4404 }
+    }
+}
+
 /// Everything the tunnel tells the app about.
 public enum TunnelSignal: Sendable {
     case status(TunnelStatus)
@@ -83,8 +117,9 @@ public enum TunnelSignal: Sendable {
     case harness(reachable: Bool, detail: String?)
     /// A fresh handshake completed; `confirmation` is the six-digit number.
     /// `direct` is where the machine says it can be dialled locally right now —
-    /// nil from a Bridle too old to say.
-    case handshake(confirmation: String, host: JSONValue?, direct: [String]?)
+    /// nil from a Bridle too old to say. `harness` is which dsh this identity
+    /// fronts and where it lives — same vintage rule.
+    case handshake(confirmation: String, host: JSONValue?, harness: HarnessInfo?, direct: [String]?)
     /// One line about what the connection is doing, for the diagnostics screen.
     case note(ConnectionNote)
 }
@@ -242,6 +277,10 @@ public actor Tunnel {
     private var wakeTokenKnown = false
 
     private var continuation: AsyncStream<TunnelSignal>.Continuation?
+    /// Structured evidence from the most recent failed dial round; see
+    /// `DialDiagnosis` for its lifetime rule.
+    private var lastDial: DialDiagnosis?
+
     private(set) public var status: TunnelStatus = .idle {
         didSet { if status != oldValue { continuation?.yield(.status(status)) } }
     }
@@ -495,7 +534,7 @@ public actor Tunnel {
                 if Task.isCancelled { return }
                 let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 note(.fail, "\(detail) Retrying in \(elapsed(backoff))")
-                status = .waiting(detail: detail, retryIn: backoff)
+                status = .waiting(detail: detail, retryIn: backoff, diagnosis: lastDial)
                 await sleep(backoff)
                 backoff = min(backoff * 2, timings.maximumBackoff)
                 continue
@@ -549,6 +588,8 @@ public actor Tunnel {
         }
 
         note(.ok, "Connected over \(winner.label) in \(elapsed(winner.took))")
+        // A tunnel that came up ends the previous outage; its evidence is spent.
+        lastDial = nil
         adopt(winner)
     }
 
@@ -567,6 +608,7 @@ public actor Tunnel {
 
         var winner: Attempt?
         var failures: [String] = []
+        var outcomes: [PathOutcome] = []
         var refusal: RefusalReason?
 
         await withTaskGroup(of: Outcome.self) { group in
@@ -588,8 +630,9 @@ public actor Tunnel {
                     } else {
                         attempt.socket.close("lost the race")
                     }
-                case .failed(let label, let reason, let took):
+                case .failed(let label, let carrier, let code, let reason, let took):
                     failures.append("\(label): \(reason)")
+                    outcomes.append(PathOutcome(carrier: carrier, label: label, closeCode: code, reason: reason))
                     note(.fail, "\(label) failed after \(elapsed(took)) — \(reason)")
                 case .refused(let reason):
                     refusal = reason
@@ -599,6 +642,7 @@ public actor Tunnel {
                 }
             }
         }
+        lastDial = outcomes.isEmpty ? nil : DialDiagnosis(outcomes: outcomes)
         return (winner, failures, refusal)
     }
 
@@ -754,7 +798,7 @@ public actor Tunnel {
 
     private enum Outcome: @unchecked Sendable {
         case won(Attempt)
-        case failed(label: String, reason: String, took: TimeInterval)
+        case failed(label: String, carrier: Carrier, code: Int?, reason: String, took: TimeInterval)
         case refused(RefusalReason)
         case cancelled
     }
@@ -896,7 +940,12 @@ public actor Tunnel {
             socket.close("handshake failed")
             if Task.isCancelled { return .cancelled }
             let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            return .failed(label: candidate.label, reason: reason, took: Date().timeIntervalSince(started))
+            // The close code travels whole. Flattening it here is how the app
+            // once lost the only structured fact it ever gets about an
+            // unreachable machine.
+            return .failed(label: candidate.label, carrier: candidate.carrier,
+                           code: (error as? CarrierError)?.closeCode, reason: reason,
+                           took: Date().timeIntervalSince(started))
         }
     }
 
@@ -951,7 +1000,7 @@ public actor Tunnel {
                 learned = true
             }
             status = .online(carrier: currentCarrier, machine: ready.machine, harnessUp: ready.dshReachable)
-            continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host, direct: ready.direct))
+            continuation?.yield(.handshake(confirmation: confirmation ?? "", host: ready.host, harness: ready.harness, direct: ready.direct))
             continuation?.yield(.harness(reachable: ready.dshReachable, detail: nil))
             try? write(ResumeFrame(since: highestSeq))
             // Re-offered on every ready rather than once, because the machine

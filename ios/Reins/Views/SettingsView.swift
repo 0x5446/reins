@@ -111,13 +111,23 @@ struct SettingsView: View {
 
                 Section {
                     ForEach(model.machines) { machine in
-                        Button {
-                            unpairing = machine
+                        // Into a detail page, not straight into a destructive
+                        // confirm. Tapping a machine used to *be* the forget
+                        // flow — the most reversible-looking gesture on the
+                        // screen wired to the least reversible act — while
+                        // rename existed in the model with no way to reach it.
+                        NavigationLink {
+                            MachineDetailView(machineId: machine.id)
                         } label: {
                             HStack(spacing: Metrics.gap) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(machine.name)
-                                        .font(.system(size: 15, weight: .medium))
+                                    HStack(spacing: 6) {
+                                        Text(model.label(for: machine).name)
+                                            .font(.system(size: 15, weight: .medium))
+                                        if let suffix = model.label(for: machine).suffix {
+                                            Text(suffix).font(.code(11)).foregroundStyle(.secondary)
+                                        }
+                                    }
                                     Text(machine.fingerprint)
                                         .font(.code(11))
                                         .foregroundStyle(.tertiary)
@@ -128,15 +138,11 @@ struct SettingsView: View {
                                         .font(.system(size: 12))
                                         .foregroundStyle(.secondary)
                                 }
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        .foregroundStyle(.primary)
-                        // The same action by swipe, for people who expect it.
-                        // A swipe alone would not do: it is invisible, and the
-                        // only way to discover it is to already know.
+                        // Forget stays reachable by swipe for people who
+                        // expect it, and lives in the detail page for people
+                        // who do not.
                         .swipeActions {
                             Button(role: .destructive) {
                                 unpairing = machine
@@ -148,7 +154,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Paired Macs")
                 } footer: {
-                    Text("Tap a Mac to forget it on this iPhone. To stop that Mac trusting this iPhone, run `bridle revoke` there — this end cannot do it for you.")
+                    Text("Tap a Mac to rename it or see its details. To stop a Mac trusting this iPhone, run `bridle revoke` there — this end cannot do it for you.")
                 }
 
                 Section {
@@ -315,5 +321,100 @@ private struct Row: View {
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         }
+    }
+}
+
+
+/// One paired machine, in full.
+///
+/// Looked up by id on every render rather than captured: renaming has to be
+/// visible immediately, and a machine forgotten elsewhere has to make this
+/// page dismiss itself instead of editing a ghost.
+struct MachineDetailView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let machineId: String
+
+    @State private var name = ""
+    @State private var confirmingForget = false
+
+    private var machine: PairedMachine? {
+        model.machines.first { $0.id == machineId }
+    }
+
+    var body: some View {
+        List {
+            if let machine {
+                Section {
+                    TextField("Name", text: $name)
+                        .onSubmit { commitName() }
+                    if let reported = machine.reportedName, reported != machine.name {
+                        Button("Use the Mac’s name (\(reported))") {
+                            model.rename(machine: machineId, to: reported)
+                            name = reported
+                        }
+                        .font(.system(size: 14))
+                    }
+                } header: {
+                    Text("Name")
+                } footer: {
+                    Text("Only on this iPhone. Re-pairing keeps it; the Mac’s own name stays what it was.")
+                }
+
+                Section {
+                    Row(label: "Fingerprint", value: machine.fingerprint)
+                    Row(label: "Device id", value: machine.id)
+                    // Honest about vintage: the port is a fact about the
+                    // connection, so it is only claimed while one exists.
+                    // "Connect to see" beats a cached number that may be a
+                    // different instance by now.
+                    if machine.id == model.active?.machine.id,
+                       model.active?.isOnline == true,
+                       let port = model.active?.harnessInfo?.port {
+                        Row(label: "Harness", value: ":" + port)
+                    } else {
+                        Row(label: "Harness", value: "connect to see")
+                    }
+                } header: {
+                    Text("Identity")
+                }
+
+                Section {
+                    Button("Forget This Mac", role: .destructive) {
+                        confirmingForget = true
+                    }
+                    .frame(maxWidth: .infinity)
+                } footer: {
+                    Text("One-sided: the Mac still trusts this iPhone until you run `bridle revoke` there.")
+                }
+            }
+        }
+        .navigationTitle(machine.map { model.label(for: $0).prose } ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { name = machine?.name ?? "" }
+        .onDisappear { commitName() }
+        .confirmationDialog(
+            "Forget \(machine?.name ?? "this Mac")?",
+            isPresented: $confirmingForget,
+            titleVisibility: .visible
+        ) {
+            Button("Forget", role: .destructive) {
+                // Leave first, then unpair: unpair switches the active
+                // connection, and this page must not stay open over a record
+                // that no longer exists.
+                dismiss()
+                let id = machineId
+                Task { @MainActor in
+                    model.unpair(id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func commitName() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard let machine, !trimmed.isEmpty, trimmed != machine.name else { return }
+        model.rename(machine: machineId, to: trimmed)
     }
 }

@@ -180,6 +180,13 @@ export interface ReadyFrame {
   machine: string
   /** Whether the local dsh is reachable right now. */
   dshReachable: boolean
+  /**
+   * Which harness this identity fronts (`url`) and where the identity lives
+   * on disk (`home`). One machine can run several Bridles; this is how the
+   * app tells them apart and how its rescue guidance names the right
+   * `REINS_HOME`. Optional: an older Bridle not sending it costs a label.
+   */
+  harness?: { url: string; home: string }
   /** dsh `host.describe` value when reachable. */
   host?: unknown
   /**

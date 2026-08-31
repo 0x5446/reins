@@ -122,7 +122,11 @@ struct MachineView: View {
                     Button {
                         showPicker = true
                     } label: {
-                        MachineChip(name: model.active?.machine.name ?? "Reins", status: model.active?.status ?? .idle)
+                        MachineChip(
+                            name: model.active.map { model.label(for: $0.machine).name } ?? "Reins",
+                            suffix: model.active.flatMap { model.label(for: $0.machine).suffix },
+                            status: model.active?.status ?? .idle
+                        )
                     }
                     .accessibilityLabel("Switch Mac")
                 }
@@ -160,6 +164,11 @@ struct MachineView: View {
 /// The accessibility label spells it out, and Settings still gives the sentence.
 struct MachineChip: View {
     let name: String
+    /// Collision disambiguator; see `MachineLabel`. Its own element on
+    /// purpose: the name truncates from the end, and a suffix concatenated
+    /// into it would be the first thing cut — on exactly the screen where
+    /// two same-named machines most need telling apart.
+    let suffix: String?
     let status: TunnelStatus
 
     var body: some View {
@@ -168,6 +177,13 @@ struct MachineChip: View {
             Text(name)
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
+            if let suffix {
+                Text(suffix)
+                    .font(.code(11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .layoutPriority(1)
+            }
             if let carrier {
                 Image(systemName: carrier == .lan ? "wifi" : "cloud")
                     .font(.system(size: 11, weight: .semibold))
@@ -253,6 +269,12 @@ struct StatusLine: View {
         }
     }
 
+    /// Collision-aware name for prose; two same-named Macs must not produce
+    /// two identical banners.
+    private var machineLabel: String {
+        model.label(for: session.machine).prose
+    }
+
     private var message: String? {
         switch session.status {
         case .idle:
@@ -265,22 +287,22 @@ struct StatusLine: View {
             // the app was actually doing. Saying so in the calm colour is the
             // middle both versions missed.
             return session.sessions.isEmpty
-                ? "Connecting to \(session.machine.name)…"
-                : "Reconnecting to \(session.machine.name)…"
-        case .waiting(let detail, let retryIn):
+                ? "Connecting to \(machineLabel)…"
+                : "Reconnecting to \(machineLabel)…"
+        case .waiting(let detail, let retryIn, _):
             let seconds = max(1, Int(retryIn.rounded()))
             return "\(detail) Trying again in \(seconds)s."
         case .refused(let reason):
             switch reason {
             case .unpaired:
-                return "\(session.machine.name) doesn’t recognise this iPhone. Run `bridle pair` on the Mac and scan the new code."
+                return "\(machineLabel) doesn’t recognise this iPhone. Run `bridle pair` on the Mac and scan the new code."
             case .version(let appIsOlder):
                 // Naming the end that is behind is the whole reason the machine
                 // sends its supported versions. "Update the older one" leaves
                 // the person to guess, and they will guess wrong half the time.
                 return appIsOlder
-                    ? "Reins is older than the Bridle on \(session.machine.name). Update Reins."
-                    : "The Bridle on \(session.machine.name) is older than Reins. Run `npm update` there, or update the dsh plugin."
+                    ? "Reins is older than the Bridle on \(machineLabel). Update Reins."
+                    : "The Bridle on \(machineLabel) is older than Reins. Run `npm update` there, or update the dsh plugin."
             case .machineError(let detail):
                 return detail
             }
@@ -351,7 +373,12 @@ struct MachinePicker: View {
                                     .foregroundStyle(.secondary)
                                     .frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(machine.name).font(.system(size: 16, weight: .medium))
+                                    HStack(spacing: 6) {
+                                        Text(model.label(for: machine).name).font(.system(size: 16, weight: .medium))
+                                        if let suffix = model.label(for: machine).suffix {
+                                            Text(suffix).font(.code(11)).foregroundStyle(.secondary)
+                                        }
+                                    }
                                     Text(machine.id)
                                         .font(.code(11))
                                         .foregroundStyle(.tertiary)

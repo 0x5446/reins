@@ -332,7 +332,9 @@ App **应当**在每次 `ready` 之后重发一次：token 存在机器上，而
 | `bridle` | string | Bridle 版本 |
 | `machine` | string | 机器名 |
 | `dshReachable` | boolean | 本机 agent 当前是否可达 |
+| `harness` | object，可选 | `{ url, home }`：此身份指向的 agent 地址与 `REINS_HOME` 实际路径。一台机器可以跑多个 Bridle，app 靠它区分实例并在急救指引里带上正确目录。旧 Bridle 不发；app 缺省时不显示（§14） |
 | `host` | any | 可达时为 agent 的 `host.describe` 值；不可达时省略 |
+| `direct` | string[]，可选 | 本机当前可直连的地址，优先在前。空数组表示直连监听已关（app 应清掉存量地址）；缺省表示 Bridle 太老不发（app 保留存量地址） |
 | `seq` | number | Bridle 已产生的最高事件序号 |
 
 **`res`** — `req` 的应答
