@@ -80,7 +80,7 @@ wake 判定与隧道选择解耦：**Bridle 对每个配置的实例各起一路
 
 | 层 | 改动 |
 |---|---|
-| bridle | `instances` 配置 + 迁移；每实例 AgentClient/泵/事件日志（(peer,instance) 键）；wake 多实例监听；`bridle dsh *` 命令族 |
+| bridle | `instances` 配置 + 迁移；每实例 AgentClient/泵/**共享事件日志**（每手机各持游标，见 §3）；机器级锁；wake 按实例计数；`bridle dsh *` 命令族 + `discoverAll` |
 | protocol | hello.instance / ready.instances+instance；`docs/protocol.md` 增补 |
 | ios | 实例选择器；(instance,sessionId) 作用域的会话缓存；急救卡实例化 |
 | docs | architecture §8 改写（"两个入口一份核心"补"一机一配对"）；§17 更新 |
