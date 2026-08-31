@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -48,6 +48,21 @@ process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
 // home it starts, and a test must not put its scratch identity on the
 // developer's real map.
 process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
+// And a state file with the relay switched off, seeded before any test runs
+// apply(): a fresh identity's default relayUrl is the production Relay, so
+// every `npm test` was registering a throwaway machine there — visible as a
+// third row on /healthz until the sweep collected it, and pure noise pollution
+// against a live service. dsh is pointed at a dead port for the same reason.
+writeFileSync(join(process.env.REINS_HOME, 'bridle.json'), JSON.stringify({
+  version: 1,
+  deviceId: 'plugin-test',
+  privateKey: Buffer.alloc(32).toString('base64url'),
+  signingKey: Buffer.alloc(64).toString('base64url'),
+  machineName: 'plugin-test',
+  relayUrl: '',
+  dshUrl: 'http://127.0.0.1:9',
+  peers: [],
+}))
 
 /** Kept as a no-op so each test still reads as isolating itself. */
 function isolateHome() {
