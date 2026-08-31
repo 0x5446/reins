@@ -737,9 +737,10 @@ func folderName(_ path: String) -> String {
 /// when the machine side is down there is nothing here that can act. What it
 /// can do is put the right command under the person's eyes, with the right
 /// home directory when the machine ever said one this app session. Commands
-/// are spelled `npx @reins/bridle …`, never bare `bridle`: a plugin install
-/// puts no binary on PATH, and command-not-found at rescue time is the worst
-/// possible answer.
+/// are spelled bare `bridle …`: the pairing sheet's install line links that
+/// command onto PATH, and no npm package exists for `npx` to fetch — an
+/// `npx @reins/bridle` here would end in a registry 404 at rescue time, the
+/// worst possible answer.
 struct RescueCard: View {
     enum Tier {
         /// The relay answered: this machine's Bridle is not registered.
@@ -778,13 +779,13 @@ struct RescueCard: View {
 
     private var steps: [String] {
         let home = session.harnessInfo?.home
-        let status = home.map { "REINS_HOME=\($0) npx @reins/bridle status" }
-            ?? "npx @reins/bridle status   (multiple identities? point REINS_HOME at the right one)"
+        let status = home.map { "REINS_HOME=\($0) bridle status" }
+            ?? "bridle status   (multiple identities? point REINS_HOME at the right one)"
         switch tier {
         case .bridleDown:
             return [
                 "1. \(status)",
-                "2. “inside dsh” → restart dsh · “not running” → " + (home.map { "REINS_HOME=\($0) npx @reins/bridle start" } ?? "npx @reins/bridle start"),
+                "2. “inside dsh” → restart dsh · “not running” → " + (home.map { "REINS_HOME=\($0) bridle start" } ?? "bridle start"),
             ]
         case .harnessDown:
             let port = session.harnessInfo?.port

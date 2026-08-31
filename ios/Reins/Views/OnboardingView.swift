@@ -125,6 +125,11 @@ struct PairingFlow: View {
 
                 CommandBlock(command: Links.pairCommand)
 
+                Text("No `bridle` command? Run the install line above — it’s what provides the command, and it’s safe even when Bridle is already running with dsh.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Label {
                     Text("Bridle prints a QR code. Leave it on screen.")
                         .font(.system(size: 14))

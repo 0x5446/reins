@@ -3,9 +3,9 @@
  * The whole computer-side surface of Reins: one command, sensible defaults, and
  * a first run that ends with a QR code on screen and nothing else to decide.
  *
- * `npx @reins/bridle` finds the harness, starts it if it is not running, opens
- * a tunnel out to the Relay, and prints an invitation. Everything else here is
- * for the days after that.
+ * `bridle` finds the harness, starts it if it is not running, opens a tunnel
+ * out to the Relay, and prints an invitation. Everything else here is for the
+ * days after that.
  */
 
 import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -349,6 +349,10 @@ async function printInvitation(invitation: Invitation, state: ReturnType<typeof 
   }
   if (forceLink || !drawable) say(`link:                ${invitation.link}`)
   say(`machine:             ${state.machineName}`)
+  // A QR code belongs to an identity, and an identity fronts exactly one dsh.
+  // Say which one, or the person running two homes has to guess.
+  const dshUrl = readRuntime()?.dshUrl ?? state.dshUrl
+  say(`harness:             ${dshUrl}${state.dshHome === undefined ? '' : ` · DSH_HOME ${state.dshHome}`}`)
   say(`identity:            ${keyFingerprint(staticKeys(state).publicKey)}`)
   say(`expires:             ${new Date(invitation.expiresAt).toLocaleTimeString()}`)
   say('')
@@ -516,7 +520,7 @@ async function status(): Promise<void> {
   }
   const dshUrl = runtime?.dshUrl ?? state.dshUrl
   const health = await new DshClient({ baseUrl: dshUrl }).health()
-  say(`harness   ${health.reachable ? 'up' : 'down'} · ${dshUrl}${health.reachable ? '' : ` (${health.detail ?? 'no answer'})`}`)
+  say(`harness   ${health.reachable ? 'up' : 'down'} · ${dshUrl}${state.dshHome === undefined ? '' : ` · DSH_HOME ${state.dshHome}`}${health.reachable ? '' : ` (${health.detail ?? 'no answer'})`}`)
   say('')
   printDevices(state)
 }
