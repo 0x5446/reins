@@ -173,11 +173,24 @@ async function start(options: Options): Promise<void> {
 
   say(`Reins Bridle ${VERSION} · ${state.machineName}`)
   const discovered = await ensureDsh({
-    ...(dshOverride === undefined ? {} : { preferred: dshOverride }),
+    // The remembered binding races first; `--dsh` pins it outright. Without
+    // the remembered URL as preferred, every restart re-rolled the binding
+    // by port order — a machine running a second dsh could wake up served
+    // by the wrong one, silently.
+    preferred: dshOverride ?? state.dshUrl,
+    pinned: dshOverride !== undefined,
     autoStart: !flagBoolean(options, 'no-auto-start'),
     ...(flagString(options, 'dsh-command') === undefined ? {} : { command: flagString(options, 'dsh-command') as string }),
     log: say,
   })
+  if (discovered.url !== state.dshUrl && dshOverride === undefined) {
+    // Adopting a different URL is legitimate — dsh port-falls-back on its
+    // own — but it is never silent: on a machine with more than one dsh,
+    // "moved" and "wrong harness" look identical from here, and only the
+    // person can tell them apart.
+    say(`harness   moved: ${state.dshUrl} did not answer; now bound to ${discovered.url}`)
+    say('          (a different dsh means different conversations — use --dsh to rebind deliberately)')
+  }
   state.dshUrl = discovered.url
   const core = new BridleCore(state, { dsh: new DshClient({ baseUrl: discovered.url }) })
   await core.start()

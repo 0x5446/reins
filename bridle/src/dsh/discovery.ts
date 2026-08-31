@@ -49,12 +49,26 @@ export function portOpen(port: number): Promise<boolean> {
 
 /**
  * Probe the usual dsh ports for one that answers the harness API.
+ *
+ * The candidate scan exists for dsh's own sake, not for multi-instance
+ * convenience: dsh falls back through these ports itself when its default is
+ * taken, so a single-dsh machine legitimately answers on 3081 some mornings.
+ * What the scan must never do is *silently* move a binding — that decision
+ * belongs to the caller, which knows whether the URL was stated by a person
+ * (`pinned`) or is just where dsh answered last time.
  * @param preferred - a URL to try before the candidates, e.g. from config.
+ * @param pinned - when true, the preferred URL is the *only* one tried. This
+ *   is the `--dsh` contract: a person who named a harness gets that harness
+ *   or an error, never a quiet substitute fronting a different session
+ *   history — on the machines that run more than one dsh, the substitute is
+ *   by definition the wrong one.
  * @returns the first dsh that answers, or undefined.
  */
-export async function probeDsh(preferred?: string): Promise<string | undefined> {
+export async function probeDsh(preferred?: string, pinned = false): Promise<string | undefined> {
   const urls = [...(preferred === undefined ? [] : [preferred])]
-  for (const port of CANDIDATE_PORTS) urls.push(`http://127.0.0.1:${String(port)}`)
+  if (!pinned || preferred === undefined) {
+    for (const port of CANDIDATE_PORTS) urls.push(`http://127.0.0.1:${String(port)}`)
+  }
   const seen = new Set<string>()
   for (const url of urls) {
     if (seen.has(url)) continue
@@ -85,6 +99,8 @@ export async function probeDsh(preferred?: string): Promise<string | undefined> 
 export interface EnsureOptions {
   /** Configured dsh URL, tried first. */
   preferred?: string
+  /** Only the preferred URL counts; see {@link probeDsh}. */
+  pinned?: boolean
   /** Start dsh when nothing answers. */
   autoStart: boolean
   /** Command to start dsh; defaults to the published CLI via npx. */
@@ -105,12 +121,18 @@ export interface EnsureOptions {
  */
 export async function ensureDsh(options: EnsureOptions): Promise<DiscoveredDsh> {
   const log = options.log ?? ((): void => {})
-  const found = await probeDsh(options.preferred)
+  const found = await probeDsh(options.preferred, options.pinned ?? false)
   if (found !== undefined) return { url: found, launched: false }
   if (!options.autoStart) {
     throw new Error('no dsh web server is running; start one, or run bridle with --auto-start')
   }
-  const port = options.port ?? 3080
+  // A pinned URL is also where a launched dsh must live: starting the
+  // default port when the person said 3081 would bind them to a harness they
+  // explicitly did not name.
+  const pinnedPort = options.pinned === true && options.preferred !== undefined
+    ? Number((() => { try { return new URL(options.preferred).port } catch { return '' } })() || '3080')
+    : undefined
+  const port = options.port ?? pinnedPort ?? 3080
   const command = options.command ?? 'dsh'
   const args = options.args ?? ['web', '--host', '127.0.0.1', '--port', String(port), '--no-open']
   log(`starting dsh on 127.0.0.1:${String(port)}`)
