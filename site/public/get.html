@@ -20,15 +20,19 @@
 <div class="note">
   <p>
     <strong>Short version:</strong> the Mac side is finished and deployed. The
-    iPhone app is finished too, but shipping it to strangers needs an Apple
-    Developer Program membership that has not been bought yet. Until then it is
-    a build-it-yourself app.
+    iPhone app is finished too, and the developer membership that distribution
+    hangs on is active. What has not happened yet is App Store review — until
+    it clears, this is a build-it-yourself app.
   </p>
 </div>
 
 <h2>Building it yourself</h2>
 
-<p>You need a Mac with Xcode and an Apple ID. A paid account is not required.</p>
+<p>
+  You need a Mac with Xcode, <code>xcodegen</code>
+  (<code>brew install xcodegen</code>), and an Apple ID. A paid account is not
+  required.
+</p>
 
 <ol class="steps">
   <li>
@@ -64,19 +68,25 @@ cd reins</code></pre>
   annoyance, not a loss. A paid membership makes it a year.
 </p>
 
-<h2>What the App Store needs</h2>
+<p>
+  One thing a self-built copy cannot do: lock-screen push notifications. The
+  push entitlement is not available to free accounts, and the relay's push key
+  only covers the released app. Everything else works identically.
+</p>
+
+<h2>Where the App Store release stands</h2>
 
 <table>
-  <tr><th>Apple Developer Program</th><td><strong>Submitted, awaiting review.</strong> The rest unblocks when it clears.</td></tr>
-  <tr><th>TestFlight</th><td>Needs the membership.</td></tr>
-  <tr><th>Push notifications</th><td>Needs the membership — the entitlement is not available to free accounts at all.</td></tr>
+  <tr><th>Apple Developer Program</th><td><strong>Active</strong> since August 2026. This was the purchase everything else waited on.</td></tr>
+  <tr><th>Push notifications</th><td><strong>Working.</strong> The entitlement came with the membership, and current releases use it.</td></tr>
+  <tr><th>TestFlight</th><td>Unblocked. No public build is up yet; when one is, this page will link it.</td></tr>
   <tr><th>Mainland China storefront</th><td>Not happening under this domain. Apple checks for an ICP filing number, and <code>.ai</code> is not a filable top-level domain in China. Every other storefront is unaffected.</td></tr>
   <tr><th>Everything else</th><td>Done. Permission strings, encryption export declaration, and the privacy policy are in place.</td></tr>
 </table>
 
 <p>
-  One purchase unblocks all three. Naming that plainly seemed better than a
-  roadmap that implies work is in progress when what is missing is a decision.
+  What remains is process, not engineering. This page is the status page: when
+  the app reaches TestFlight or the App Store, this is where it will say so.
 </p>
 
 </main>
@@ -85,6 +95,7 @@ cd reins</code></pre>
   <a href="/">Home</a>
   <a href="/help">Help</a>
   <a href="/privacy">Privacy</a>
+  <a href="https://github.com/0x5446/reins">GitHub</a>
 </footer>
 
 </body>

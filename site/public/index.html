@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reins — your coding agent, in your pocket</title>
-<meta name="description" content="Drive the DeepSeek Harness running on your Mac from your iPhone. End-to-end encrypted; the relay only ever sees ciphertext.">
+<meta name="description" content="Drive the DeepSeek Harness on your Mac from your iPhone. End-to-end encrypted; the relay only ever sees ciphertext. Free and open source.">
 <link rel="stylesheet" href="/_/style.css">
 </head>
 <body>
@@ -13,37 +13,181 @@
   <a class="wordmark" href="/">Reins</a>
   <h1>Your coding agent, in your pocket.</h1>
   <p class="lede">
-    The DeepSeek Harness runs on your Mac, where your code and your keys already
-    are. Reins is the iPhone app that drives it — read what it did, approve what
-    it wants to do next, start the next thing from a train.
+    The DeepSeek Harness runs on your Mac, where your code and your keys
+    already are. Reins is the iPhone app that drives it — watch it think,
+    approve what it wants to run, answer the question it is blocked on,
+    start the next thing from a train.
   </p>
+  <div class="cta">
+    <a class="primary" href="/get">Get the app</a>
+    <a class="secondary" href="https://github.com/0x5446/reins">Source on GitHub</a>
+  </div>
+  <p class="fineprint">
+    Free. MIT-licensed. No accounts. On the Mac that runs <code>dsh</code>,
+    the whole setup is one line:
+  </p>
+  <code class="command">curl -fsSL https://reins.novabox.ai/install | sh</code>
 </header>
 
 <main>
 
-<h2>How it fits together</h2>
+<h2>What it does</h2>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>Read the run, not a summary of it</h3>
+    <p>
+      Replies stream in as they are written, the model's thinking included.
+      Tool calls arrive as cards — the command, the diff, the output — and the
+      agent's to-do list ticks over as it works through it.
+    </p>
+    <p>
+      Diffs and terminal output are rendered for a phone screen rather than
+      shrunk to fit one.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/conversation.png" width="1320" height="2868" loading="lazy"
+       alt="A conversation in Reins: the model's thinking streaming in above a tool-call card with a diff, and a to-do list part-way done.">
+</section>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>Approve with the whole picture</h3>
+    <p>
+      When the agent wants to run something, the request arrives with the full
+      command and diff — not a paraphrase. Approve or refuse from wherever you
+      are. Anything raised while you were away is waiting at the top of the
+      list when you come back, where it cannot be scrolled past.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/approval.png" width="1320" height="2868" loading="lazy"
+       alt="An approval card in Reins showing the exact command the agent wants to run, with approve and deny buttons.">
+</section>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>It finds you when it is stuck</h3>
+    <p>
+      “Your agent is waiting on you”, on the lock screen, the moment the agent
+      stops to ask. The push itself carries nothing else: your phone wakes,
+      opens its own encrypted tunnel to your Mac, and fetches the actual
+      question — so the words never pass through Apple's push service, or our
+      relay, in readable form.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/push.png" width="1320" height="2868" loading="lazy"
+       alt="An iPhone lock screen showing the notification “Your agent is waiting on you”.">
+</section>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>Show it, instead of describing it</h3>
+    <p>
+      Attach a photo from the camera or an image from your library. Sketch a
+      screen on paper, photograph it, and ask for the interface — the sketch
+      goes to the model, the code lands on your Mac.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/photo.png" width="1320" height="2868" loading="lazy"
+       alt="A message in Reins with a photographed hand-drawn sketch attached, asking the agent to build that screen.">
+</section>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>Pick the model per conversation</h3>
+    <p>
+      DeepSeek, GLM, and the dozens of others your harness knows about. Switch
+      mid-project without touching the Mac — the picker shows what your
+      <code>dsh</code> actually offers, and how hard the model should think.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/models.png" width="1320" height="2868" loading="lazy"
+       alt="The model picker in Reins listing DeepSeek and GLM models.">
+</section>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>Every session, one list</h3>
+    <p>
+      Everything the harness is running, grouped by workspace — the same
+      directories you work in on the Mac. Search the full text of every
+      conversation. And when one reaches an interesting branch point, fork it
+      and take both paths.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/sessions.png" width="1320" height="2868" loading="lazy"
+       alt="The session list in Reins, grouped by workspace, with full-text search.">
+</section>
+
+<h3>Also in the app</h3>
+
+<table>
+  <tr>
+    <th>Trace</th>
+    <td>The whole run as one line per step, searchable, with what each one took — for the two questions a transcript cannot answer at a glance: what has it been doing, and where did it go wrong.</td>
+  </tr>
+  <tr>
+    <th>Cost and context</th>
+    <td>How full the context window is and what is filling it, plus the four token classes broken out — because cache reads and fresh input are an order of magnitude apart in price.</td>
+  </tr>
+  <tr>
+    <th>Subagents</th>
+    <td>When work is handed to a child agent, see what it is doing instead of watching a tool call sit there.</td>
+  </tr>
+  <tr>
+    <th>Slash commands</th>
+    <td>Run the skills installed on your Mac by typing <code>/</code>.</td>
+  </tr>
+  <tr>
+    <th>Several Macs</th>
+    <td>Pair as many as you like and switch between them.</td>
+  </tr>
+</table>
+
+<h2>The security is structural</h2>
 
 <p>
-  Three pieces. <strong>Reins</strong> is the app on your phone.
-  <strong>Bridle</strong> is a small program on your Mac that talks to the
-  Harness for it. Between them, when they are not on the same Wi-Fi, sits a
-  <strong>relay</strong> we run.
+  Three pieces. <strong>Reins</strong> is the app. <strong>Bridle</strong> is a
+  small program on your Mac that speaks for the harness. Between them, when
+  they are not on the same network, sits a <strong>relay</strong> we run on
+  Cloudflare's edge. Bridle dials out, so there is no port to forward and no
+  public IP to need.
 </p>
 
 <p>
-  The relay is a switchboard, not a middleman. The app and Bridle set up an
-  encrypted channel with each other and the relay forwards the sealed bytes
-  without being able to open them. That is a property of the design, not a
-  promise about our conduct — see <a href="/privacy">what the relay can and
-  cannot see</a>.
+  The phone and the Mac run a Noise&nbsp;IK handshake with each other — not
+  with the relay — and everything after it travels as sealed frames. The relay
+  switches those frames between two sockets by circuit number. It holds no key
+  material, so it cannot read your prompts, the model's replies, your diffs,
+  or your file paths. That is a property of the design, not a promise about
+  our conduct: an end-to-end test taps the wire and fails if a method name or
+  a machine name ever appears in the clear.
 </p>
 
 <p>
-  On the same Wi-Fi, the app skips the relay entirely and talks to your Mac
-  directly.
+  Pairing is a QR code in your terminal, or a short code typed by hand. It
+  anchors keys on both ends — no accounts, no passwords — and both ends show a
+  key fingerprint you can compare when you want to be sure. On the same
+  Wi-Fi, the app talks to the Mac directly and the relay is not involved at
+  all.
+</p>
+
+<p>
+  All of it is open source — the app, Bridle, the relay, and the protocol —
+  so none of this has to be taken on faith.
+  <a href="https://github.com/0x5446/reins">Read the source</a>, or read
+  <a href="/privacy">exactly what the relay can and cannot see</a>. And if
+  even a content-blind relay is more trust than you want to extend, run your
+  own: <code>bridle --relay wss://your.host</code> is the whole client side.
 </p>
 
 <h2>Setting up</h2>
+
+<p>
+  The one prerequisite: a Mac already running the
+  <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek
+  Harness</a>.
+</p>
 
 <ol class="steps">
   <li>
@@ -67,43 +211,6 @@
   </li>
 </ol>
 
-<h2>What it does</h2>
-
-<table>
-  <tr>
-    <th>Approvals</th>
-    <td>When the agent wants to run something, the request arrives with the full command and diff. Approve or refuse. Anything raised while you were away is waiting when you come back — and sits above everything else in the list, where it cannot be scrolled past or folded away.</td>
-  </tr>
-  <tr>
-    <th>Sessions</th>
-    <td>Everything the Harness is running, grouped by workspace. Start new ones, branch from where a conversation got interesting, archive what is done.</td>
-  </tr>
-  <tr>
-    <th>Reading</th>
-    <td>Diffs, tool output, file reads, and to-do lists rendered for a phone screen rather than shrunk to fit one.</td>
-  </tr>
-  <tr>
-    <th>Trace</th>
-    <td>The whole run as one line per step, searchable, with what each one took. For the two questions a transcript cannot answer at a glance: what has it been doing, and where did it go wrong.</td>
-  </tr>
-  <tr>
-    <th>Cost and context</th>
-    <td>How full the context window is and what is filling it, turns and steps, time to first token, and the four token classes broken out — because cache reads and fresh input are an order of magnitude apart in price.</td>
-  </tr>
-  <tr>
-    <th>Control</th>
-    <td>Pick the model and how hard it thinks. Change what the agent is allowed to touch. Run the skills installed on your Mac by typing <code>/</code>.</td>
-  </tr>
-  <tr>
-    <th>Subagents</th>
-    <td>When work is handed to a child agent, see what it is doing instead of watching a tool call sit there.</td>
-  </tr>
-  <tr>
-    <th>Several Macs</th>
-    <td>Pair as many as you like and switch between them.</td>
-  </tr>
-</table>
-
 <h2>Where it is</h2>
 
 <div class="note">
@@ -113,16 +220,18 @@
   </p>
   <p>
     <strong>The app is not on the App Store yet.</strong> Right now getting it
-    means building it yourself with Xcode. <a href="/get">What that involves.</a>
+    means building it yourself with Xcode.
+    <a href="/get">What that involves, and where the release stands.</a>
   </p>
 </div>
 
 </main>
 
 <footer>
-  <a href="/help">Help</a>
   <a href="/get">Get the app</a>
+  <a href="/help">Help</a>
   <a href="/privacy">Privacy</a>
+  <a href="https://github.com/0x5446/reins">GitHub</a>
 </footer>
 
 </body>

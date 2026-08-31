@@ -47,3 +47,6 @@ AuthKey_*.p8
 /GTM.md
 /APPSTORE.md
 /OPENSOURCE.md
+
+# Screen recordings: regenerate with ios/ReinsUITests/Recording.swift rather than store them.
+marketing/shots/*.mp4
