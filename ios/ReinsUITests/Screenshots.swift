@@ -157,38 +157,21 @@ final class Screenshots: XCTestCase {
         save("plan")
     }
 
-    /// A photograph on its way to the agent: the phone's camera as an input to
-    /// the codebase.
+    /// A photograph already in the conversation: a layout sketched on paper,
+    /// sent from the phone, and the model working from it.
+    ///
+    /// Driven from the machine side rather than through the system photo
+    /// picker — the picker runs out of process and does not take synthetic
+    /// taps, and what matters in the shot is the sketch in the transcript, not
+    /// the moment of choosing it.
     func test6Photo() throws {
-        try openSession("Why does the webhook retry twice?")
-        sleep(3)
-
-        let attach = app.buttons["photo.on.rectangle"].exists
-            ? app.buttons["photo.on.rectangle"]
-            : app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'photo'")).firstMatch
-        XCTAssertTrue(attach.waitForExistence(timeout: 10), "no attach button")
-        attach.tap()
-        sleep(5)
-
-        let photo = app.images.element(boundBy: 1)
-        if photo.waitForExistence(timeout: 15) {
-            photo.tap()
-            sleep(2)
-            if app.buttons["Add"].exists { app.buttons["Add"].tap() }
-            sleep(3)
-        }
-
-        // The caption is a nicety; the attachment is the story. Type it only
-        // if the field actually took the keyboard.
-        let field = app.textFields["composer.field"]
-        if field.waitForExistence(timeout: 10) {
-            field.tap()
-            sleep(2)
-            if app.keyboards.count > 0 {
-                app.typeText("Make the dashboard look like this sketch.")
-                sleep(2)
-            }
-        }
+        try openSession("Match the dashboard to this sketch")
+        sleep(6)
+        // Back up to the message itself — the sketch is the point of the shot.
+        app.swipeDown()
+        app.swipeDown()
+        app.swipeDown()
+        sleep(2)
         save("photo")
     }
 }
