@@ -88,6 +88,8 @@ Settings 机器行改为进入**机器详情页**：
 
 配套（bridle 侧小改动）：`bridle status` 输出增加一行运行形态（"running inside dsh (plugin)" / "running standalone"）——插件的 runtime.json 快照加一个 `via: 'plugin' | 'cli'` 字段即可，两个入口各写各的，零探测。
 
+命令一律拼成 `npx @reins/bridle status` 形式，不写裸 `bridle`：插件安装只把 CLI 落进 profile 的 `node_modules`，不进用户 PATH——纯插件用户敲 `bridle` 是 command not found。npx 对两种形态都成立（发包后）。
+
 文案明说 app 无法远程执行——隧道是唯一通道，机器侧死了只能人到场。这是诚实，也是安全边界。
 
 ### 4.5 明确不做
