@@ -1,6 +1,6 @@
 {
   "name": "@reins/protocol",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Wire format shared by the Reins app, Bridle, and Relay: Noise IK, tunnel frames, pairing payloads, relay muxing.",
   "license": "MIT",
   "type": "module",

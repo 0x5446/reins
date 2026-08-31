@@ -1,6 +1,6 @@
 {
   "name": "@reins/relay-worker",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Reins Relay on Cloudflare Workers and Durable Objects.",
   "license": "MIT",
   "type": "module",

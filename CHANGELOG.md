@@ -7,6 +7,41 @@ Versions are the tags `install.sh` can install. `REINS_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
+## 0.1.2 — 2026-09-01
+
+- **Two Bridles claiming one identity now lose quickly instead of fighting all
+  night.** A leftover copy of a `REINS_HOME` used to displace the real machine
+  in a tight loop — thousands of relay requests in two hours, and a machine
+  that never stayed online. A second daemon now refuses to start against a home
+  that already has a live one, a tunnel earns its backoff reset by staying up
+  rather than by merely connecting, and the relay rate-limits a machine that
+  redials too hot.
+- **A full disk no longer silently kills the daemon.** The heartbeat tolerates
+  a state file it cannot write instead of throwing out of a timer.
+- **`bridle instances` lists every identity on this Mac — which dsh each one
+  fronts, which is running — and `bridle reset` retires one deliberately.**
+- **A Bridle can bind a dsh by its home, not just by a port.** `bridle start
+  --dsh-home <dir>` reads the address the home itself declares, so the binding
+  follows the world rather than whatever answered first. When the harness moves,
+  the daemon says so out loud.
+- **`bridle pair` says which dsh the invitation is for.** A `harness:` line
+  under the QR code names the URL and, when bound by home, the `DSH_HOME` — so
+  a Mac running two of them hands its phone the right one.
+- **The phone can tell same-named Macs apart, and you can rename one.** Paired
+  machines with identical names grow a fingerprint suffix; the machine's detail
+  page shows the fingerprint and harness port, takes a new name that survives
+  re-pairing, and moves Forget to the bottom where it stops being the only
+  button left to press.
+- **When a machine is unreachable, the app says which layer died and what to
+  type.** The empty state distinguishes "Bridle isn't connected to the relay"
+  from "Bridle is up but dsh isn't", and the rescue card prints commands with
+  the right `REINS_HOME` already filled in.
+- **Rescue commands are spelled in a way that exists.** They said
+  `npx @reins/bridle`, but no such npm package is published — that path ends in
+  a 404 at the worst possible moment. Bare `bridle` is what the installer puts
+  on the PATH, and the pairing sheet now says the install line is what provides
+  it.
+
 ## 0.1.1 — 2026-08-20
 
 - **Conversations resume where they left off.** Reopening a session starts at the
