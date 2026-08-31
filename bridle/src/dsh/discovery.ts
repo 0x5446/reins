@@ -8,6 +8,8 @@
  */
 
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createConnection } from 'node:net'
 import { DshClient } from './client.ts'
 
@@ -93,6 +95,40 @@ export async function probeDsh(preferred?: string, pinned = false): Promise<stri
     if (health.reachable) return url
   }
   return undefined
+}
+
+/**
+ * The address a DSH_HOME declares for itself, if it declares one.
+ *
+ * A dsh home can carry its own host and port (`profiles/web/cordis.patch.yml`,
+ * entry `webserver`), and a home that does is the strongest binding there is:
+ * the port doubles as a single-instance lock — a second boot from the same
+ * home dies on EADDRINUSE instead of wandering off to another port — so the
+ * URL derived here names the identity, not an incarnation.
+ *
+ * The parse is deliberately narrow: literal `host:` and `port:` inside the
+ * `webserver` block, nothing else. A home without the patch, or one using a
+ * `!!js` expression, yields undefined — the caller says so plainly rather
+ * than this function guessing. Narrow beats a YAML dependency for reading a
+ * file whose one relevant shape is two literal lines.
+ * @param home - the DSH_HOME directory.
+ * @returns the declared base URL, or undefined when the home does not say.
+ */
+export function dshHomeUrl(home: string): string | undefined {
+  let text: string
+  try {
+    text = readFileSync(join(home, 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+  } catch {
+    return undefined
+  }
+  // Entries start at column zero with "- "; the webserver block is whatever
+  // lies between its header and the next entry.
+  const block = text.split(/^- /mu).find(chunk => chunk.startsWith('id: webserver'))
+  if (block === undefined) return undefined
+  const host = /^\s+host:\s*([\w.-]+)\s*$/mu.exec(block)?.[1]
+  const port = /^\s+port:\s*(\d+)\s*$/mu.exec(block)?.[1]
+  if (host === undefined || port === undefined) return undefined
+  return `http://${host}:${String(Number(port))}`
 }
 
 /** How Bridle should behave when no dsh is running. */

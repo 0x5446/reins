@@ -17,7 +17,7 @@ import { keyFingerprint } from '@reins/protocol'
 import { BridleCore } from './core.ts'
 import { DirectServer } from './direct-server.ts'
 import { DshClient } from './dsh/client.ts'
-import { ensureDsh, probeDsh } from './dsh/discovery.ts'
+import { dshHomeUrl, ensureDsh, probeDsh } from './dsh/discovery.ts'
 import { loadState, reinsHome, revokePeer, saveState, signingKeys, staticKeys } from './identity.ts'
 import { deviceIdFor } from '@reins/protocol'
 import { BackupError, describeBackup, exportIdentity, importIdentity } from './backup.ts'
@@ -172,13 +172,36 @@ async function start(options: Options): Promise<void> {
   const dshOverride = flagString(options, 'dsh')
 
   say(`Reins Bridle ${VERSION} · ${state.machineName}`)
+  // Binding resolution, strongest anchor first:
+  //   --dsh <url>        a person named an address        → pinned
+  //   --dsh-home <path>  a person named a *world*; its own
+  //                      config says where it answers      → pinned, derived
+  //   remembered dshUrl  where it answered last time       → races first
+  // A home is the strongest anchor because the home *is* the instance — and
+  // a home that declares its port also cannot be double-booted (EADDRINUSE
+  // is the lock), so the derived URL names the identity, not an incarnation.
+  const homeOverride = flagString(options, 'dsh-home') ?? state.dshHome
+  let homeUrl: string | undefined
+  if (dshOverride === undefined && homeOverride !== undefined) {
+    homeUrl = dshHomeUrl(homeOverride)
+    if (homeUrl === undefined) {
+      say(`${homeOverride} does not declare its address — add a webserver entry (host + port) to`)
+      say(`${join(homeOverride, 'profiles/web/cordis.patch.yml')}, or bind by URL with --dsh.`)
+      process.exitCode = 1
+      return
+    }
+    if (flagString(options, 'dsh-home') !== undefined && state.dshHome !== homeOverride) {
+      state.dshHome = homeOverride
+      saveState(state)
+    }
+  }
   const discovered = await ensureDsh({
-    // The remembered binding races first; `--dsh` pins it outright. Without
-    // the remembered URL as preferred, every restart re-rolled the binding
-    // by port order — a machine running a second dsh could wake up served
-    // by the wrong one, silently.
-    preferred: dshOverride ?? state.dshUrl,
-    pinned: dshOverride !== undefined,
+    // The remembered binding races first; `--dsh` and `--dsh-home` pin it
+    // outright. Without the remembered URL as preferred, every restart
+    // re-rolled the binding by port order — a machine running a second dsh
+    // could wake up served by the wrong one, silently.
+    preferred: dshOverride ?? homeUrl ?? state.dshUrl,
+    pinned: dshOverride !== undefined || homeUrl !== undefined,
     autoStart: !flagBoolean(options, 'no-auto-start'),
     ...(flagString(options, 'dsh-command') === undefined ? {} : { command: flagString(options, 'dsh-command') as string }),
     log: say,
@@ -664,6 +687,8 @@ function usage(): void {
 Options for start:
   --relay <url>       Relay to dial out to (default: the public Relay)
   --dsh <url>         harness address, if it is not on a usual port
+  --dsh-home <path>   bind to the dsh living in this DSH_HOME; its own config
+                      (webserver host+port) says where it answers
   --dsh-command <cmd> how to launch the harness (default: dsh)
   --direct-port <n>   fixed port for the local-network tunnel
   --advertise <url>   extra address(es) to put in the pairing code, comma

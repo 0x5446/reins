@@ -73,6 +73,15 @@ export interface BridleState {
   relayUrl: string
   /** dsh base URL on loopback. */
   dshUrl: string
+  /**
+   * The DSH_HOME this identity fronts, when binding by home.
+   *
+   * The home is the instance's identity — its sessions, config, and (when it
+   * declares one) its port all live there — so a binding recorded as a home
+   * is anchored to the world itself, and `dshUrl` becomes a derived cache of
+   * where that world answers. Optional: a plain URL binding works as before.
+   */
+  dshHome?: string
   peers: PairedPeer[]
   offer?: PairingOffer
 }
