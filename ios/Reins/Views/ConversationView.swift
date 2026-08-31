@@ -31,7 +31,25 @@ struct ConversationView: View {
     @State private var jumpTo: String?
     /// Set when a branch succeeds, so the view can offer to follow it.
     @State private var forked: String?
-    @State private var atBottom = true
+    @State private var atBottom: Bool
+
+    /// The only explicit init, and it exists for one parameter: `atBottom` is
+    /// private view state whose false branch is only reachable through a real
+    /// drag, which a unit test cannot perform. Stating the post-drag world at
+    /// construction lets a responsiveness test compare "following the tail"
+    /// against "scrolled away" on identical data. The default is the shipped
+    /// behavior; the app never passes this.
+    init(
+        session: MachineSession,
+        sessionId: String,
+        onOpen: ((String) -> Void)? = nil,
+        initiallyAtBottom: Bool = true
+    ) {
+        self.session = session
+        self.sessionId = sessionId
+        self.onOpen = onOpen
+        _atBottom = State(initialValue: initiallyAtBottom)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -178,6 +196,13 @@ struct ConversationView: View {
                 // Streaming grows the last bubble without changing the count, so
                 // following along needs its length too.
                 guard atBottom else { return }
+                proxy.scrollTo(Anchor.bottom, anchor: .bottom)
+            }
+            .onChange(of: conversation.queue.count) { old, new in
+                // A queued message lands in the strip below the transcript, not
+                // in it, so neither trigger above fires — but the person who
+                // just sent it expects the view to follow them down.
+                guard new > old, atBottom else { return }
                 proxy.scrollTo(Anchor.bottom, anchor: .bottom)
             }
             .onAppear {

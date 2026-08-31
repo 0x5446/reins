@@ -225,6 +225,46 @@ enum Markdown {
         return (String(rest.dropFirst(2)), true)
     }
 
+    /// Split streaming prose at its last block boundary — the last blank line,
+    /// outside any code fence, that already has content after it.
+    ///
+    /// Everything before that line is settled: `parse` flushes at blank lines,
+    /// so no later delta can change how the prefix reads, and a view over it
+    /// can be skipped by equality instead of rebuilt. The remainder is the one
+    /// block still being written. The blank line itself carries nothing and is
+    /// returned with neither half.
+    ///
+    /// A blank only counts once a later non-blank line exists. The final line
+    /// of a stream is the one thing appending can still rewrite — a blank
+    /// there may become the first characters of content — and a boundary that
+    /// moved back would re-render the very prefix this split protects.
+    /// - Parameter source: the full text so far.
+    /// - Returns: the settled prefix (possibly empty) and the live tail.
+    static func settle(_ source: String) -> (settled: String, live: String) {
+        let lines = source.components(separatedBy: "\n")
+        var fence: String?
+        var lastBlank = -1
+        var boundary = -1
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let marker = fence {
+                if trimmed.hasPrefix(marker) { fence = nil }
+            } else if trimmed.isEmpty {
+                lastBlank = index
+            } else {
+                if lastBlank >= 0 { boundary = lastBlank }
+                if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                    fence = String(trimmed.prefix(3))
+                }
+            }
+        }
+        guard boundary > 0 else { return ("", source) }
+        return (
+            lines[..<boundary].joined(separator: "\n"),
+            lines[(boundary + 1)...].joined(separator: "\n")
+        )
+    }
+
     /// Inline emphasis, code, and links, via the system parser. A source string
     /// the parser rejects comes back verbatim.
     static func inline(_ source: String) -> AttributedString {
@@ -240,9 +280,36 @@ enum Markdown {
 // MARK: - Rendering
 
 /// A block of agent-written prose.
+///
+/// Rendered in two halves. A streaming reply re-renders on every delta, and
+/// the cost of a rebuild is the whole bubble — hundreds of blocks for a long
+/// one, which is enough to starve the main thread of touch events. Only the
+/// block still being written can change, so everything before the last block
+/// boundary sits behind an equality check that lets SwiftUI skip it wholesale;
+/// each delta rebuilds just the tail. Settled text splits the same way, once,
+/// and renders identically — the seam spacing is the block spacing.
 struct MarkdownText: View {
     let source: String
     var size: CGFloat = 15
+
+    var body: some View {
+        let (settled, live) = Markdown.settle(source)
+        VStack(alignment: .leading, spacing: Metrics.tight) {
+            if !settled.isEmpty {
+                MarkdownBlocks(source: settled, size: size).equatable()
+            }
+            if !live.isEmpty {
+                MarkdownBlocks(source: live, size: size)
+            }
+        }
+    }
+}
+
+/// The parsed-and-drawn half of `MarkdownText`. `Equatable` on its inputs so
+/// the settled half short-circuits before parsing anything.
+private struct MarkdownBlocks: View, Equatable {
+    let source: String
+    let size: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.tight) {
