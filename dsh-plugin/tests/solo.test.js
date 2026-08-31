@@ -23,6 +23,10 @@ import { readRuntime, writeRuntime } from '@reins/bridle'
 import { apply } from '../lib/index.js'
 
 process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-solo-'))
+// The machine-level index gets the same isolation: apply() registers the
+// home it starts, and a test must not put its scratch identity on the
+// developer's real map.
+process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
 
 test('the plugin refuses an identity another process is already serving', async (t) => {
   const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'])

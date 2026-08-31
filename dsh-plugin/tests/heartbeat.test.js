@@ -20,6 +20,10 @@ import { join } from 'node:path'
 import { apply } from '../lib/index.js'
 
 process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-heartbeat-'))
+// The machine-level index gets the same isolation: apply() registers the
+// home it starts, and a test must not put its scratch identity on the
+// developer's real map.
+process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
 
 test('a snapshot that cannot be written does not take the host down', async (t) => {
   // A state file with the relay switched off and dsh pointed at a dead port,

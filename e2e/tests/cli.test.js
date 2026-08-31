@@ -36,7 +36,7 @@ class Cli {
    */
   run(args, extraEnv = {}) {
     return new Promise((resolve) => {
-      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, ...extraEnv } })
+      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, REINS_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
       let out = ''
       let err = ''
       child.stdout.on('data', chunk => { out += String(chunk) })
@@ -52,7 +52,7 @@ class Cli {
    * @returns {Promise<{child: import('node:child_process').ChildProcess, out: () => string}>} the running process.
    */
   async spawn(args, until, extraEnv = {}) {
-    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, ...extraEnv } })
+    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, REINS_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
     let out = ''
     let err = ''
     child.stdout.on('data', chunk => { out += String(chunk) })

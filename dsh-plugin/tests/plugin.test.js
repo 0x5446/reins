@@ -44,6 +44,10 @@ function fakeContext() {
  * live machine reported the harness as down.
  */
 process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
+// The machine-level index gets the same isolation: apply() registers the
+// home it starts, and a test must not put its scratch identity on the
+// developer's real map.
+process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
 
 /** Kept as a no-op so each test still reads as isolating itself. */
 function isolateHome() {
