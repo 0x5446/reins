@@ -102,7 +102,7 @@ struct MachineView: View {
                     Placeholder(
                         icon: "desktopcomputer",
                         title: "No machine connected",
-                        detail: "Pick one of your paired Macs to carry on."
+                        detail: "Pick one of your paired dsh to carry on."
                     ) {
                         Button("Choose a Mac") { showPicker = true }
                             .buttonStyle(SecondaryButtonStyle())
@@ -352,7 +352,12 @@ struct StatusLine: View {
     }
 }
 
-/// Switch between paired Macs, or add another.
+/// Switch between paired dsh, or add another.
+///
+/// The unit of pairing is a dsh (through the Bridle fronting it), not the
+/// computer: one Mac can run two, and each row here is one of them. The row
+/// still wears the machine name, because people recognise machines — the
+/// port lives in the detail page.
 struct MachinePicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -398,11 +403,11 @@ struct MachinePicker: View {
                     Button {
                         adding = true
                     } label: {
-                        Label("Pair another Mac", systemImage: "plus.circle")
+                        Label("Pair another dsh", systemImage: "plus.circle")
                     }
                 }
             }
-            .navigationTitle("Your Macs")
+            .navigationTitle("Your dsh")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

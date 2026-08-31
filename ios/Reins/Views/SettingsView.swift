@@ -152,9 +152,9 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Paired Macs")
+                    Text("Paired dsh")
                 } footer: {
-                    Text("Tap a Mac to rename it or see its details. To stop a Mac trusting this iPhone, run `bridle revoke` there — this end cannot do it for you.")
+                    Text("Each pairing is one dsh on one machine. Tap to rename it or see details. To stop that machine trusting this iPhone, run `bridle revoke` there — this end cannot do it for you.")
                 }
 
                 Section {
