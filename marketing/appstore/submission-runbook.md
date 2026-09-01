@@ -114,10 +114,22 @@ export ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<Key ID>.p8
 
 ## Phase 5 — TestFlight internal smoke test (strongly recommended, zero review)
 
-You (Account Holder) are automatically an eligible internal tester. Install
-via TestFlight and verify on a physical phone the three things that once
-crashed in this exact codebase (fixed in `project.yml`, but TCC only proves
-itself on-device):
+Being the account holder is not enough to see a build, which is the opposite
+of what it looks like. Three things have to exist first, and none of them are
+created by uploading:
+
+1. **An internal beta group.** A fresh app has none, so TestFlight shows
+   nothing at all. `POST /v1/betaGroups` with `isInternalGroup: true`, then
+   `POST /v1/betaGroups/<id>/relationships/builds` to put the build in it.
+2. **Test Information.** `betaAppLocalizations` starts empty; at minimum a
+   description and a feedback email.
+3. **An accepted invitation.** Add yourself with `POST /v1/betaTesters` and
+   then **open the emailed invite on the phone**. A team member's own Apple ID
+   does not surface the app on its own — the tester sits at `INVITED` until
+   the link is tapped, and TestFlight looks simply empty in the meantime.
+
+Then verify on a physical phone the things that once crashed in this exact
+codebase (fixed in `project.yml`, but TCC only proves itself on-device):
 - [ ] Scan-pairing opens the camera **with a permission prompt, no crash**.
 - [ ] App lock triggers Face ID without a crash.
 - [ ] LAN direct connection shows the Local Network permission prompt and
