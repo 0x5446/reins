@@ -7,6 +7,16 @@ Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
+## Unreleased
+
+- **A machine that was plainly running could report itself offline to the
+  phone, forever.** The machine id is a hash of the signing key, domain-separated
+  by the project's name — so the rename changed it, while the copy cached in
+  `bridle.json` stayed on the old value. The Relay never reads that copy (it
+  derives the id from the signature), so registering kept working; the pairing
+  bundle does read it, so the phone was sent looking for a machine that could
+  not exist. The id is derived on load now and the stale copy corrected once.
+
 ## 0.1.3 — 2026-09-01
 
 - **Reins is now Rowel, and 0.1.2 cannot reach anything any more.** The project

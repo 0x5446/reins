@@ -57,6 +57,24 @@ test('the device id is derived from the signing key, not invented', () => {
   })
 })
 
+test('a device id left over from the old derivation is corrected on load', () => {
+  withHome(() => {
+    // What a state file written before the rename looks like: the keys are
+    // fine, but `deviceId` was hashed with the old domain string and no longer
+    // matches them. The Relay derives the id from the signature and so never
+    // noticed; the pairing bundle reads this field and sent the phone after a
+    // machine that could not exist.
+    const state = loadState()
+    const correct = deviceIdFor(signingKeys(state).publicKey)
+    state.deviceId = 'OnNhRs8iOPPZCvoFWM0aQg'
+    saveState(state)
+
+    const reloaded = loadState()
+    assert.equal(reloaded.deviceId, correct, 'the id has to be derived, not trusted')
+    assert.equal(loadState().deviceId, correct, 'and the correction has to be written back')
+  })
+})
+
 test('a second load returns the same identity', () => {
   withHome(() => {
     const first = loadState()

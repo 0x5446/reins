@@ -166,6 +166,24 @@ export function loadState(): BridleState {
       parsed.relayUrl = DEFAULT_RELAY_URL
       saveState(parsed)
     }
+    // `deviceId` is derived from the signing key, and a derived value kept on
+    // disk can go stale. This one did: the hash is domain-separated by the
+    // project's name, so the rename changed every machine's id while the copy
+    // written into this file stayed on the old one.
+    //
+    // Nothing failed loudly, because the two readers disagree in the worst
+    // possible way. The Relay never trusts this field — it verifies a signature
+    // and derives the id itself — so registration kept working. The pairing
+    // bundle handed to the phone reads the stored copy, so the phone went
+    // looking for a machine that could not exist, and the only thing anyone saw
+    // was "that machine is offline" about a Mac sitting right there.
+    //
+    // Derived here rather than trusted, and written back so one load fixes it.
+    const derived = deviceIdFor(signingPublicKeyOf(Buffer.from(parsed.signingKey, 'base64url')))
+    if (parsed.deviceId !== derived) {
+      parsed.deviceId = derived
+      saveState(parsed)
+    }
     return applyEnvironment(parsed)
   }
   const keys = generateKeyPair()
