@@ -234,6 +234,27 @@ for (const key of projectionKeys('### 5.3 尚未折叠的键', 'prose')) {
     `${key} 现在已经折叠了，但 fold.md §5.3 还把它列在"尚未折叠"里`)
 }
 
+// --- The installer installs the release the CHANGELOG is about -----------------
+//
+// These two lines are one decision recorded in two files, and once they came
+// apart: the project was renamed ten hours after 0.1.2 was tagged, and the
+// installer kept handing out 0.1.2 for the rest of the day. Every install that
+// day was a Bridle that called itself Reins and dialled a relay that had been
+// retired — and nothing failed loudly, because from the installer's side a
+// stale tag looks exactly like a current one.
+{
+  const ref = /^REF="\$\{ROWEL_REF:-([^}]+)\}"$/mu.exec(read('install.sh'))?.[1]
+  // The newest heading that names a version; `## Unreleased` is not one.
+  const released = /^## (v?\d+\.\d+\.\d+)/mu.exec(read('CHANGELOG.md'))?.[1]
+  expect(ref !== undefined, 'install.sh 里找不到 REF 那一行')
+  expect(released !== undefined, 'CHANGELOG.md 里找不到已发布的版本标题')
+  if (ref !== undefined && released !== undefined) {
+    const tag = released.startsWith('v') ? released : `v${released}`
+    expect(ref === tag,
+      `install.sh 装的是 ${ref}，但 CHANGELOG 最新发布版本是 ${tag} —— 发版时两处要一起改`)
+  }
+}
+
 // --- Report ------------------------------------------------------------------
 
 if (problems.length === 0) {

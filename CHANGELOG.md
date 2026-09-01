@@ -7,8 +7,23 @@ Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
-## Unreleased
+## 0.1.3 — 2026-09-01
 
+- **Reins is now Rowel, and 0.1.2 cannot reach anything any more.** The project
+  was renamed after 0.1.2 was tagged, and the installer went on handing out
+  0.1.2 for the rest of the day — so a fresh install printed "scan this in the
+  Reins app", built its identity in `~/.reins`, and dialled
+  `wss://reins-relay.novabox.ai`, which no longer exists. Nothing about the
+  failure said "you installed the wrong version": the QR simply never worked.
+  **Upgrade by re-running the installer.** Then note what moved:
+  - the home is `~/.rowel`, not `~/.reins`, and the environment variables are
+    `ROWEL_*`
+  - the relay is `wss://rowel-relay.novabox.ai`; an install that still names
+    an old address is moved to it on load, so a config you did not write
+    yourself needs no attention
+  - the identity does **not** move with the rename, so the machine is new to
+    your phone and each device pairs once more. `~/.reins` can be deleted
+    after that.
 - **Photos in a conversation are drawn instead of standing as grey squares.**
   A history page names its images rather than carrying them, and the app had
   the parser for the reference and the call for the bytes but nothing joining

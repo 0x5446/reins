@@ -28,7 +28,14 @@ REPO="${ROWEL_REPO:-https://github.com/0x5446/rowel.git}"
 # is whatever was pushed most recently — including a push made thirty seconds
 # ago by someone who should not have been able to make it. A tag is a name for
 # one commit, and a release is a decision rather than a side effect of merging.
-REF="${ROWEL_REF:-v0.1.2}"
+#
+# The cost of that choice is that this line has to move with every release, and
+# once it did not: the project was renamed ten hours after 0.1.2 was tagged, and
+# this kept installing 0.1.2 — a Bridle that greeted people as Reins and dialled
+# a relay that had been retired. Nothing downstream can catch it, because from
+# here a stale tag and a current one look identical. Bump this in the same
+# commit as the CHANGELOG heading; they are one decision, not two.
+REF="${ROWEL_REF:-v0.1.3}"
 SRC_DIR="${ROWEL_SRC:-$HOME/.rowel/src}"
 
 # Colour only when a human is watching. Piped output stays plain.
