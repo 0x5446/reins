@@ -79,7 +79,16 @@ start_harness() {
     host: 127.0.0.1
     port: $port
 YAML
-  DSH_TELEMETRY_DISABLED=1 DSH_HOME="$home/dsh-home" nohup dsh web >> "$home/dsh.log" 2>&1 &
+  # An empty agents home, because `DSH_HOME` does not isolate skills: they are
+  # read from a shared `~/.agents`, so this harness inherited every skill on
+  # the machine and dsh injected the whole catalogue — names and descriptions —
+  # into each session as context. That catalogue is rendered, and it described
+  # the operator's employer, their internal tools and what they work on. It
+  # reached the fixtures behind the store screenshots, one tap from being
+  # legible. A throwaway harness gets a throwaway agents home.
+  mkdir -p "$home/agents-home/skills"
+  DSH_TELEMETRY_DISABLED=1 DSH_HOME="$home/dsh-home" DSH_AGENTS_HOME="$home/agents-home" \
+    nohup dsh web >> "$home/dsh.log" 2>&1 &
   printf 'harness starting on :%s ' "$port"
   until curl -s -o /dev/null -m 2 "http://127.0.0.1:$port/"; do printf '.'; sleep 1; done
   echo ' up'
