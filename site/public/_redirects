@@ -1,0 +1,12 @@
+# The installer.
+#
+# `curl -fsSL https://rowel.novabox.ai/install | sh` is printed inside the app,
+# on the web page, and in the README — it is the one URL that cannot be
+# corrected once someone has read it. So the thing it resolves to lives here,
+# in the repository, rather than as a redirect rule typed into a dashboard
+# where nothing records why it exists.
+#
+# It points at `main` rather than a tag on purpose: the script itself installs
+# a tag (`ROWEL_REF`), so the only thing following `main` here changes is the
+# installer's own logic, and a broken installer must be fixable with a push.
+/install  https://raw.githubusercontent.com/0x5446/rowel/main/install.sh  302

@@ -21,17 +21,23 @@
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
   },
-  // Path-scoped, never `/*`. A wildcard at the root would swallow /healthz,
-  // /install and every /v1 route — that is, the entire product.
+  // The whole hostname, as a custom domain.
   //
-  // Assets live under `/_/` so that adding a favicon or an image later is one
-  // file rather than one file plus a route nobody remembers to add. `/_/` can
-  // never collide with the Relay, whose routes are fixed and listed above.
+  // It used to be five path-scoped routes, because the site and the Relay once
+  // shared one name and a `/*` here would have swallowed `/healthz`, `/install`
+  // and every `/v1`. They no longer share anything: the Relay is
+  // `rowel-relay.novabox.ai`, so there is nothing left on this name to collide
+  // with, and five patterns that must be kept in step with the page list is a
+  // maintenance cost bought for a risk that no longer exists.
+  //
+  // A custom domain also provisions the DNS record and the certificate, which
+  // a zone route does not — a route on a name with no record resolves nowhere.
+  //
+  // `/install` is a redirect declared in `public/_redirects`, not a rule typed
+  // into a dashboard. The installer line is printed inside the app and cannot
+  // be corrected after the fact, so what it points at belongs in the
+  // repository, next to the file it serves.
   "routes": [
-    { "pattern": "rowel.novabox.ai/", "zone_name": "novabox.ai" },
-    { "pattern": "rowel.novabox.ai/get", "zone_name": "novabox.ai" },
-    { "pattern": "rowel.novabox.ai/help", "zone_name": "novabox.ai" },
-    { "pattern": "rowel.novabox.ai/privacy", "zone_name": "novabox.ai" },
-    { "pattern": "rowel.novabox.ai/_/*", "zone_name": "novabox.ai" }
+    { "pattern": "rowel.novabox.ai", "custom_domain": true }
   ]
 }
