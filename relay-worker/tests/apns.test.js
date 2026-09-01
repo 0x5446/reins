@@ -33,10 +33,10 @@ const KEY = generateKeyPairSync('ec', { namedCurve: 'P-256' })
 /** A configured environment; individual tests blank out what they are testing. */
 function env(overrides = {}) {
   return {
-    REINS_APNS_KEY: KEY,
-    REINS_APNS_KEY_ID: 'ABCDE12345',
-    REINS_APNS_TEAM_ID: 'FGHIJ67890',
-    REINS_APNS_TOPIC: 'ai.novabox.reins',
+    ROWEL_APNS_KEY: KEY,
+    ROWEL_APNS_KEY_ID: 'ABCDE12345',
+    ROWEL_APNS_TEAM_ID: 'FGHIJ67890',
+    ROWEL_APNS_TOPIC: 'ai.novabox.rowel',
     ...overrides,
   }
 }
@@ -145,7 +145,7 @@ test('half a configuration is louder than none', async (t) => {
 
   // Someone set three secrets and stopped. Every push disappears until they
   // finish, and "push is not configured" would read as a deliberate choice.
-  const half = await wake(env({ REINS_APNS_TOPIC: undefined }), { token: TOKEN })
+  const half = await wake(env({ ROWEL_APNS_TOPIC: undefined }), { token: TOKEN })
   assert.equal(half.reason, 'unconfigured')
   assert.match(half.detail, /half-configured/u)
 

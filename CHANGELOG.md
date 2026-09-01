@@ -3,14 +3,14 @@
 What changed between releases, from the point of view of someone using it. The
 commit log has the rest.
 
-Versions are the tags `install.sh` can install. `REINS_REF` in that script names
+Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
 ## 0.1.2 — 2026-09-01
 
 - **Two Bridles claiming one identity now lose quickly instead of fighting all
-  night.** A leftover copy of a `REINS_HOME` used to displace the real machine
+  night.** A leftover copy of a `ROWEL_HOME` used to displace the real machine
   in a tight loop — thousands of relay requests in two hours, and a machine
   that never stayed online. A second daemon now refuses to start against a home
   that already has a live one, a tunnel earns its backoff reset by staying up
@@ -35,9 +35,9 @@ the same decision.
 - **When a machine is unreachable, the app says which layer died and what to
   type.** The empty state distinguishes "Bridle isn't connected to the relay"
   from "Bridle is up but dsh isn't", and the rescue card prints commands with
-  the right `REINS_HOME` already filled in.
+  the right `ROWEL_HOME` already filled in.
 - **Rescue commands are spelled in a way that exists.** They said
-  `npx @reins/bridle`, but no such npm package is published — that path ends in
+  `npx @rowel/bridle`, but no such npm package is published — that path ends in
   a 404 at the worst possible moment. Bare `bridle` is what the installer puts
   on the PATH, and the pairing sheet now says the install line is what provides
   it.

@@ -9,7 +9,7 @@
 1. **同名不可辨。** 两条记录都叫 `alphadeMacBook-Pro`——顶部胶囊、机器列表、离线横幅全都分不清谁是谁。机器名默认取 hostname，同一台 Mac 上的第二个身份必然同名。
 2. **断连时最显眼的出口是最具破坏性的那个。** Settings 里机器行的唯一动作就是 Forget（整行点击即进解除配对确认）；用户面对离线的第一反应真的就是"只能点 forget 了对吧"。Rename 在模型层存在（`AppModel.rename(machine:to:)`），但**没有任何 UI 调用它**——死能力。
 3. **离线空态没有行动路径。** "The Mac is asleep, off your network, or Bridle isn't running on it." 三种可能并列，一个都没告诉用户怎么验证、怎么修。
-4. **配对的真实单位与产品语言不一致。** 实际配对的是 bridle 身份（一个 `REINS_HOME` 的密钥对），身份指向一个 dsh 实例；"pair Macs" 在一机一实例时成立，多实例时心智断裂。
+4. **配对的真实单位与产品语言不一致。** 实际配对的是 bridle 身份（一个 `ROWEL_HOME` 的密钥对），身份指向一个 dsh 实例；"pair Macs" 在一机一实例时成立，多实例时心智断裂。
 
 ## 2. 设计原则（承接既有 UI 硬规则）
 
@@ -39,7 +39,7 @@
 - 生效面：顶部胶囊、机器列表行、离线空态与横幅里的机器名。
 - 验收：20 字符以上机器名 + 最大动态字体下，两条同名记录在胶囊处仍可肉眼区分。
 
-**harness 端口与实例目录（协议可选字段）**：ready 帧新增可选 `harness: { url, home }`——bridle 的 `state.dshUrl` 与自己的 `REINS_HOME` 实际值。app 在机器详情与急救卡使用。老 bridle 不发此字段，app 不显示，向后兼容（协议 §14 版本纪律照旧）。
+**harness 端口与实例目录（协议可选字段）**：ready 帧新增可选 `harness: { url, home }`——bridle 的 `state.dshUrl` 与自己的 `ROWEL_HOME` 实际值。app 在机器详情与急救卡使用。老 bridle 不发此字段，app 不显示，向后兼容（协议 §14 版本纪律照旧）。
 
 > 安全评估（v1 待议，已议）：配对方本就可经隧道调 `host.describe` 看到 cwd/home 等信息，loopback 端口与 home 目录对**已配对设备**不构成新的信息类别；字段只进 Noise 隧道内的 ready 帧，relay 依然只见密文。
 
@@ -82,13 +82,13 @@ Settings 机器行改为进入**机器详情页**：
 
 | 档位 | 卡片内容 |
 |---|---|
-| bridle 层死（4404） | ① 跑 `REINS_HOME=<目录> bridle status`（有 §4.1 的 home 提示则代入；没有则给不带前缀的命令并注明"若配了多个身份，用 REINS_HOME 指向对应目录"）② 按输出分支：显示"由 dsh 插件运行"→ 重启 dsh；显示未运行 → `bridle start`（同样带目录前缀） |
+| bridle 层死（4404） | ① 跑 `ROWEL_HOME=<目录> bridle status`（有 §4.1 的 home 提示则代入；没有则给不带前缀的命令并注明"若配了多个身份，用 ROWEL_HOME 指向对应目录"）② 按输出分支：显示"由 dsh 插件运行"→ 重启 dsh；显示未运行 → `bridle start`（同样带目录前缀） |
 | dsh 层死（隧道在、dshReachable=false） | 说明"Bridle 活着、harness 不在"，给 `dsh web` 与端口提示（§4.1 的 harness url 有则代入） |
 | 网络层失败（第三档，v1 缺失） | ① 确认 Mac 醒着、和手机同网或能出公网 ② Mac 上 `curl <relay>/healthz` 验证出网 ③ 通了还连不上再看 `bridle status` |
 
 配套（bridle 侧小改动）：`bridle status` 输出增加一行运行形态（"running inside dsh (plugin)" / "running standalone"）——插件的 runtime.json 快照加一个 `via: 'plugin' | 'cli'` 字段即可，两个入口各写各的，零探测。
 
-命令一律拼成 `npx @reins/bridle status` 形式，不写裸 `bridle`：插件安装只把 CLI 落进 profile 的 `node_modules`，不进用户 PATH——纯插件用户敲 `bridle` 是 command not found。npx 对两种形态都成立（发包后）。
+命令一律拼成 `npx @rowel/bridle status` 形式，不写裸 `bridle`：插件安装只把 CLI 落进 profile 的 `node_modules`，不进用户 PATH——纯插件用户敲 `bridle` 是 command not found。npx 对两种形态都成立（发包后）。
 
 文案明说 app 无法远程执行——隧道是唯一通道，机器侧死了只能人到场。这是诚实，也是安全边界。
 

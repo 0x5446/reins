@@ -17,7 +17,7 @@
 **规范级** —— 已实现，有测试守着，可照着重新实现：
 
 - `protocol.md` 全部（权威是 `protocol/scripts/emit-vectors.js` 的向量）
-- `fold.md` 全部（权威是 `ios/ReinsTests/StoreTests.swift`）
+- `fold.md` 全部（权威是 `ios/RowelTests/StoreTests.swift`）
 - `architecture.md` §1–§9、§14–§18
 
 **设计级** —— 决策已定、落点已定，但尚未实现：
@@ -43,7 +43,7 @@
 
 `npm run check:docs` 机械地盯住其中一部分：一个 reimplementer 会照抄的常量、prologue 两端是否一致、帧类型是否都被描述、以及 `fold.md` 声称"尚未折叠"的 projection 有没有偷偷被折叠了。它跟在 `npm test` 里跑。
 
-它只检查有唯一正确答案的事，不检查散文。**剩下的靠人**——所以改了 `bridle/src`、`ios/Reins/Store`、协议帧或 dsh 方法之后，要么更新对应文档，要么在提交信息里写明为什么不影响。
+它只检查有唯一正确答案的事，不检查散文。**剩下的靠人**——所以改了 `bridle/src`、`ios/Rowel/Store`、协议帧或 dsh 方法之后，要么更新对应文档，要么在提交信息里写明为什么不影响。
 
 文档与代码不一致时，先判断哪个是对的：如果文档描述的是**应该**的行为而代码没做到，那是代码 bug；如果文档记错了**已经**稳定的行为，那是文档 bug。两种都要修，不要只改一边让它们"看起来一致"。
 

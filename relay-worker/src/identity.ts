@@ -8,17 +8,17 @@
  * key, so the binding is self-certifying and the Relay keeps no database of
  * who owns what.
  *
- * Everything here is async where `@reins/protocol` is synchronous; that is the
+ * Everything here is async where `@rowel/protocol` is synchronous; that is the
  * only difference, and it is WebCrypto's, not the protocol's.
  */
 
 import { fromBase64Url, toBase64Url } from './wire.ts'
 
 /** Domain separator so a registration signature can never be replayed elsewhere. */
-const REGISTRATION_CONTEXT = 'reins-relay-registration/v1'
+const REGISTRATION_CONTEXT = 'rowel-relay-registration/v1'
 
 /** Domain separator for publishing a short-code pairing offer. */
-const PAIR_OFFER_CONTEXT = 'reins-pair-offer/v1'
+const PAIR_OFFER_CONTEXT = 'rowel-pair-offer/v1'
 
 /** Raw Ed25519 public key length. */
 const KEY_LENGTH = 32
@@ -28,12 +28,12 @@ const utf8 = new TextEncoder()
 /**
  * Derive the Relay device id from a Bridle's signing identity.
  *
- * `base64url(sha256("reins-device" ‖ key)[0..16])`, docs/protocol.md §2.3.
+ * `base64url(sha256("rowel-device" ‖ key)[0..16])`, docs/protocol.md §2.3.
  * @param publicKey - raw 32-byte Ed25519 public key.
  * @returns the 22-character device id.
  */
 export async function deviceIdFor(publicKey: Uint8Array): Promise<string> {
-  const prefix = utf8.encode('reins-device')
+  const prefix = utf8.encode('rowel-device')
   const body = new Uint8Array(prefix.byteLength + publicKey.byteLength)
   body.set(prefix)
   body.set(publicKey, prefix.byteLength)

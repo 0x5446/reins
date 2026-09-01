@@ -24,9 +24,9 @@ ios/DerivedData/
 relay-worker/worker-configuration.d.ts
 
 # Local machine state. bridle.json holds this machine's static private key and
-# must never be committed; it lives in ~/.reins, but a stray REINS_HOME here
+# must never be committed; it lives in ~/.rowel, but a stray ROWEL_HOME here
 # would put it in the tree.
-.reins/
+.rowel/
 bridle.json
 
 # macOS
@@ -48,5 +48,5 @@ AuthKey_*.p8
 /APPSTORE.md
 /OPENSOURCE.md
 
-# Screen recordings: regenerate with ios/ReinsUITests/Recording.swift rather than store them.
+# Screen recordings: regenerate with ios/RowelUITests/Recording.swift rather than store them.
 marketing/shots/*.mp4

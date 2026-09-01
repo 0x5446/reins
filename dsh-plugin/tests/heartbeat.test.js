@@ -19,18 +19,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../lib/index.js'
 
-process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-heartbeat-'))
+process.env.ROWEL_HOME = mkdtempSync(join(tmpdir(), 'rowel-heartbeat-'))
 // The machine-level index gets the same isolation: apply() registers the
 // home it starts, and a test must not put its scratch identity on the
 // developer's real map.
-process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
+process.env.ROWEL_INSTANCES = join(process.env.ROWEL_HOME, 'instances-index.json')
 
 test('a snapshot that cannot be written does not take the host down', async (t) => {
   // A state file with the relay switched off and dsh pointed at a dead port,
   // so the plugin under test starts nothing that outlives the test — the
   // first version of this file left an orphaned relay client dialling
   // production forever, and the test run never exited.
-  writeFileSync(join(process.env.REINS_HOME, 'bridle.json'), JSON.stringify({
+  writeFileSync(join(process.env.ROWEL_HOME, 'bridle.json'), JSON.stringify({
     version: 1,
     deviceId: 'heartbeat-test',
     privateKey: Buffer.alloc(32).toString('base64url'),
@@ -43,7 +43,7 @@ test('a snapshot that cannot be written does not take the host down', async (t) 
   // The claim, the heartbeat, and every state-change publish all funnel into
   // the same write; blocking the destination makes each of them throw unless
   // the plugin swallows it.
-  mkdirSync(join(process.env.REINS_HOME, 'runtime.json'))
+  mkdirSync(join(process.env.ROWEL_HOME, 'runtime.json'))
 
   const handlers = []
   const errors = []

@@ -77,22 +77,22 @@ export function normalizeShortCode(input: string): string {
  * the fragment so it never reaches a web server if the link is ever opened in
  * a browser instead of the app.
  * @param bundle - the pairing bundle.
- * @returns a `reins://pair#...` URL.
+ * @returns a `rowel://pair#...` URL.
  */
 export function encodePairingLink(bundle: PairingBundle): string {
-  return `reins://pair#${Buffer.from(JSON.stringify(bundle), 'utf8').toString('base64url')}`
+  return `rowel://pair#${Buffer.from(JSON.stringify(bundle), 'utf8').toString('base64url')}`
 }
 
 /**
  * Decode a pairing deep link.
  * @param link - the scanned or pasted URL.
  * @returns the bundle it carries.
- * @throws {@link Error} when the link is not a well-formed Reins pairing link.
+ * @throws {@link Error} when the link is not a well-formed Rowel pairing link.
  */
 export function decodePairingLink(link: string): PairingBundle {
   const marker = '#'
   const at = link.indexOf(marker)
-  if (!link.startsWith('reins://pair') || at < 0) throw new Error('not a Reins pairing link')
+  if (!link.startsWith('rowel://pair') || at < 0) throw new Error('not a Rowel pairing link')
   const parsed: unknown = JSON.parse(Buffer.from(link.slice(at + 1), 'base64url').toString('utf8'))
   if (typeof parsed !== 'object' || parsed === null) throw new Error('pairing link payload is not an object')
   const bundle = parsed as PairingBundle
@@ -112,7 +112,7 @@ export function decodePairingLink(link: string): PairingBundle {
  * @returns a zero-padded six-digit string.
  */
 export function confirmationNumber(handshakeHash: Buffer): string {
-  const digest = createHash('sha256').update('reins-confirm').update(handshakeHash).digest()
+  const digest = createHash('sha256').update('rowel-confirm').update(handshakeHash).digest()
   const value = digest.readUInt32BE(0) % 10 ** FINGERPRINT_DIGITS
   return String(value).padStart(FINGERPRINT_DIGITS, '0')
 }
@@ -123,6 +123,6 @@ export function confirmationNumber(handshakeHash: Buffer): string {
  * @returns four hyphen-separated four-character groups.
  */
 export function keyFingerprint(publicKey: Buffer): string {
-  const digest = createHash('sha256').update('reins-identity').update(publicKey).digest('hex').toUpperCase()
+  const digest = createHash('sha256').update('rowel-identity').update(publicKey).digest('hex').toUpperCase()
   return [0, 4, 8, 12].map(offset => digest.slice(offset, offset + 4)).join('-')
 }

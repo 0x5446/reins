@@ -24,7 +24,7 @@ call" are different claims. Make the strongest one that is true.
 
 ## Documentation
 
-- [ ] Touched `bridle/src`, `ios/Reins/Store`, a protocol frame, or a harness
+- [ ] Touched `bridle/src`, `ios/Rowel/Store`, a protocol frame, or a harness
       method — and either updated the matching document, or said here why it
       does not need one
 - [ ] Changed the wire format — regenerated `npm run vectors`, and said what an

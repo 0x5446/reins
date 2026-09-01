@@ -2,7 +2,7 @@
  * A phone that arrives after the machine has stopped to ask.
  *
  * This is the app's whole premise in one test. The agent hits an approval
- * while you are somewhere else; you open Reins; the card has to be there. It
+ * while you are somewhere else; you open Rowel; the card has to be there. It
  * was not — the request crosses dsh's mux stream once, live, and a phone not
  * attached at that instant never heard it. Found by triggering an
  * `ask_user_question` and watching the phone show a spinner while the browser
@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { FakeAgent, ReinsPhone, startStack, waitFor } from '../lib/index.js'
+import { FakeAgent, RowelPhone, startStack, waitFor } from '../lib/index.js'
 
 /** Unwrap a tunnel event into the dsh frame it carries. */
 function payloadOf(event) {
@@ -39,7 +39,7 @@ test('a phone attaching after the question still gets it', { timeout: 60_000 }, 
     questions: [{ id: 'q1', question: 'Keep Exa as the only provider?', options: [{ label: 'Keep' }, { label: 'Switch' }] }],
   }))
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, name: 'Late iPhone' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, name: 'Late iPhone' })
   t.after(() => { phone.close() })
   const asked = []
   phone.onEvent(event => {
@@ -63,7 +63,7 @@ test('a question answered before the phone arrives is not offered again', { time
   // Answered in the browser on the Mac, before this phone ever connects.
   agent.emit(request('question/resolved', 's1'))
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, name: 'Late iPhone' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, name: 'Late iPhone' })
   t.after(() => { phone.close() })
   const asked = []
   phone.onEvent(event => {

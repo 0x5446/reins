@@ -1,7 +1,7 @@
 /**
  * The machine-level map of Bridle homes.
  *
- * Every other command answers questions about one REINS_HOME; `bridle
+ * Every other command answers questions about one ROWEL_HOME; `bridle
  * instances` answers the one that comes first — which identities live on
  * this machine at all. The index under test remembers only paths, so these
  * tests are really about the two properties that make that design safe:
@@ -15,20 +15,20 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listInstances, loadState, rememberInstance, writeRuntime } from '@reins/bridle'
+import { listInstances, loadState, rememberInstance, writeRuntime } from '@rowel/bridle'
 
 /** A scratch index plus a scratch home, torn down per test. */
 function scratch(t) {
-  const root = mkdtempSync(join(tmpdir(), 'reins-instances-'))
+  const root = mkdtempSync(join(tmpdir(), 'rowel-instances-'))
   t.after(() => { rmSync(root, { recursive: true, force: true }) })
-  const previousIndex = process.env.REINS_INSTANCES
-  const previousHome = process.env.REINS_HOME
-  process.env.REINS_INSTANCES = join(root, 'index.json')
+  const previousIndex = process.env.ROWEL_INSTANCES
+  const previousHome = process.env.ROWEL_HOME
+  process.env.ROWEL_INSTANCES = join(root, 'index.json')
   t.after(() => {
-    if (previousIndex === undefined) delete process.env.REINS_INSTANCES
-    else process.env.REINS_INSTANCES = previousIndex
-    if (previousHome === undefined) delete process.env.REINS_HOME
-    else process.env.REINS_HOME = previousHome
+    if (previousIndex === undefined) delete process.env.ROWEL_INSTANCES
+    else process.env.ROWEL_INSTANCES = previousIndex
+    if (previousHome === undefined) delete process.env.ROWEL_HOME
+    else process.env.ROWEL_HOME = previousHome
   })
   return root
 }
@@ -36,7 +36,7 @@ function scratch(t) {
 /** Create a real identity in a fresh home and put it on the map. */
 function identityAt(root, name) {
   const home = join(root, name)
-  process.env.REINS_HOME = home
+  process.env.ROWEL_HOME = home
   loadState()
   rememberInstance()
   return home
@@ -91,8 +91,8 @@ test('running is a live pid in that home, nothing else', async (t) => {
 test('an index that cannot be written costs an entry, not the caller', (t) => {
   const root = scratch(t)
   // A directory where the index file should be: every write attempt fails.
-  mkdirSync(process.env.REINS_INSTANCES, { recursive: true })
-  process.env.REINS_HOME = join(root, 'tolerant')
+  mkdirSync(process.env.ROWEL_INSTANCES, { recursive: true })
+  process.env.ROWEL_HOME = join(root, 'tolerant')
   loadState()
   assert.doesNotThrow(() => { rememberInstance() },
     'a broken index took down the daemon start that tried to register')

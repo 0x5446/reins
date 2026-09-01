@@ -12,19 +12,19 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { probeDsh } from '@reins/bridle'
-import { decodePairingLink } from '@reins/protocol'
-import { RelayServer } from '@reins/relay'
-import { ReinsPhone, waitFor } from '../lib/index.js'
+import { probeDsh } from '@rowel/bridle'
+import { decodePairingLink } from '@rowel/protocol'
+import { RelayServer } from '@rowel/relay'
+import { RowelPhone, waitFor } from '../lib/index.js'
 
-const DSH_URL = process.env.REINS_E2E_DSH_URL ?? await probeDsh()
-const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set REINS_E2E_DSH_URL' : false
+const DSH_URL = process.env.ROWEL_E2E_DSH_URL ?? await probeDsh()
+const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set ROWEL_E2E_DSH_URL' : false
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bridle', 'lib', 'cli.js')
 
 /** One CLI invocation against a throwaway home directory. */
 class Cli {
-  /** @param {string} home - value for REINS_HOME. */
+  /** @param {string} home - value for ROWEL_HOME. */
   constructor(home) {
     this.home = home
   }
@@ -36,7 +36,7 @@ class Cli {
    */
   run(args, extraEnv = {}) {
     return new Promise((resolve) => {
-      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, REINS_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
+      const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, ROWEL_HOME: this.home, ROWEL_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
       let out = ''
       let err = ''
       child.stdout.on('data', chunk => { out += String(chunk) })
@@ -52,7 +52,7 @@ class Cli {
    * @returns {Promise<{child: import('node:child_process').ChildProcess, out: () => string}>} the running process.
    */
   async spawn(args, until, extraEnv = {}) {
-    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, REINS_HOME: this.home, REINS_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
+    const child = spawn(process.execPath, [CLI, ...args], { env: { ...process.env, ROWEL_HOME: this.home, ROWEL_INSTANCES: join(this.home, 'instances-index.json'), ...extraEnv } })
     let out = ''
     let err = ''
     child.stdout.on('data', chunk => { out += String(chunk) })
@@ -73,7 +73,7 @@ class Cli {
  * @returns {Promise<{cli: Cli, home: string, relayUrl: string, relay: RelayServer}>} the fixture.
  */
 async function fixture(t) {
-  const home = mkdtempSync(join(tmpdir(), 'reins-cli-'))
+  const home = mkdtempSync(join(tmpdir(), 'rowel-cli-'))
   t.after(() => { rmSync(home, { recursive: true, force: true }) })
   const relay = new RelayServer({ port: 0, host: '127.0.0.1' })
   const port = await relay.listen()
@@ -84,10 +84,10 @@ async function fixture(t) {
 /**
  * Pull the pairing link out of CLI output.
  * @param {string} out - captured stdout.
- * @returns {import('@reins/protocol').PairingBundle} the bundle it carries.
+ * @returns {import('@rowel/protocol').PairingBundle} the bundle it carries.
  */
 function bundleFrom(out) {
-  const match = /reins:\/\/pair#[A-Za-z0-9_-]+/u.exec(out)
+  const match = /rowel:\/\/pair#[A-Za-z0-9_-]+/u.exec(out)
   assert.ok(match, `no pairing link in output:\n${out}`)
   return decodePairingLink(match[0])
 }
@@ -97,16 +97,16 @@ test('the first run pairs a phone with no configuration at all', { skip, timeout
 
   const started = await cli.spawn(
     ['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'],
-    /reins:\/\/pair#/u,
+    /rowel:\/\/pair#/u,
   )
   t.after(() => { started.child.kill('SIGKILL') })
 
   const out = started.out()
-  assert.match(out, /Reins Bridle/u, 'the banner names the product and version')
+  assert.match(out, /Rowel Bridle/u, 'the banner names the product and version')
   assert.match(out, new RegExp(`harness {3}${DSH_URL.replaceAll('.', String.raw`\.`)}`, 'u'), 'it reports which harness it found')
   assert.match(out, /code: +[BCDFGHJKMNPQRSTVWXYZ23456789]{4}-[BCDFGHJKMNPQRSTVWXYZ23456789]{4}/u, 'a typed code is offered too')
 
-  const phone = new ReinsPhone({ bundle: bundleFrom(out), prefer: 'relay', name: 'First iPhone' })
+  const phone = new RowelPhone({ bundle: bundleFrom(out), prefer: 'relay', name: 'First iPhone' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.dshReachable, true)
@@ -120,10 +120,10 @@ test('the first run pairs a phone with no configuration at all', { skip, timeout
 
 test('a second device is added from another terminal while the bridle runs', { skip, timeout: 120_000 }, async (t) => {
   const { cli, relayUrl } = await fixture(t)
-  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /reins:\/\/pair#/u)
+  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /rowel:\/\/pair#/u)
   t.after(() => { started.child.kill('SIGKILL') })
 
-  const first = new ReinsPhone({ bundle: bundleFrom(started.out()), prefer: 'relay', name: 'iPhone' })
+  const first = new RowelPhone({ bundle: bundleFrom(started.out()), prefer: 'relay', name: 'iPhone' })
   t.after(() => { first.close() })
   await first.connect()
 
@@ -132,7 +132,7 @@ test('a second device is added from another terminal while the bridle runs', { s
   // state file rather than owning it.
   const paired = await cli.run(['pair', '--link'])
   assert.equal(paired.code, 0, paired.err)
-  const second = new ReinsPhone({ bundle: bundleFrom(paired.out), prefer: 'relay', name: 'iPad' })
+  const second = new RowelPhone({ bundle: bundleFrom(paired.out), prefer: 'relay', name: 'iPad' })
   t.after(() => { second.close() })
   const ready = await second.connect()
   assert.equal(ready.dshReachable, true)
@@ -144,9 +144,9 @@ test('a second device is added from another terminal while the bridle runs', { s
 
 test('status and doctor describe a healthy machine', { skip, timeout: 120_000 }, async (t) => {
   const { cli, relayUrl } = await fixture(t)
-  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /reins:\/\/pair#/u)
+  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /rowel:\/\/pair#/u)
   t.after(() => { started.child.kill('SIGKILL') })
-  const phone = new ReinsPhone({ bundle: bundleFrom(started.out()), prefer: 'relay', name: 'Status iPhone' })
+  const phone = new RowelPhone({ bundle: bundleFrom(started.out()), prefer: 'relay', name: 'Status iPhone' })
   t.after(() => { phone.close() })
   await phone.connect()
 
@@ -165,10 +165,10 @@ test('status and doctor describe a healthy machine', { skip, timeout: 120_000 },
 
 test('a revoked device is refused, and the CLI says so plainly', { skip, timeout: 120_000 }, async (t) => {
   const { cli, relayUrl } = await fixture(t)
-  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /reins:\/\/pair#/u)
+  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /rowel:\/\/pair#/u)
   t.after(() => { started.child.kill('SIGKILL') })
   const bundle = bundleFrom(started.out())
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Doomed iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Doomed iPhone' })
   await phone.connect()
   phone.close()
 
@@ -179,7 +179,7 @@ test('a revoked device is refused, and the CLI says so plainly', { skip, timeout
 
   assert.match((await cli.run(['revoke', 'zzzzzzzz'])).out, /No paired device matches/u)
 
-  const returning = new ReinsPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  const returning = new RowelPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
   t.after(() => { returning.close() })
   await assert.rejects(() => returning.connect(), error => error.reason === 'unpaired')
 })
@@ -200,7 +200,7 @@ test('the state file holds the machine secret and nobody else can read it', { sk
 })
 
 test('a second bridle for the same identity is refused before it can fight the first', { skip: false, timeout: 30_000 }, async (t) => {
-  // Two Bridles on one REINS_HOME register at the Relay as the same machine
+  // Two Bridles on one ROWEL_HOME register at the Relay as the same machine
   // and displace each other in a silent loop at retry speed. The refusal has
   // to come from the CLI's own front door, before it probes or starts a dsh —
   // which is why this spawns the real binary rather than calling the library.
@@ -222,7 +222,7 @@ test('a second bridle for the same identity is refused before it can fight the f
   const refused = await cli.run(['start'])
   assert.equal(refused.code, 1, `start was not refused:\n${refused.out}\n${refused.err}`)
   assert.match(refused.out, /already running/u, 'the refusal does not say what the problem is')
-  assert.match(refused.out, /REINS_HOME/u, 'the refusal does not say how to run two on purpose')
+  assert.match(refused.out, /ROWEL_HOME/u, 'the refusal does not say how to run two on purpose')
 })
 
 test('a heartbeat that cannot write its snapshot does not kill the daemon', { skip, timeout: 60_000 }, async (t) => {
@@ -234,7 +234,7 @@ test('a heartbeat that cannot write its snapshot does not kill the daemon', { sk
   const { cli, relayUrl } = await fixture(t)
   const started = await cli.spawn(
     ['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'],
-    /reins:\/\/pair#/u,
+    /rowel:\/\/pair#/u,
   )
   t.after(() => { started.child.kill('SIGKILL') })
 
@@ -251,9 +251,9 @@ test('instances lists this home, and reset erases it only when nothing runs it',
   // A scratch machine-level index, so the test neither reads nor writes the
   // developer's real one.
   const index = join(home, 'instances-index.json')
-  const env = { REINS_INSTANCES: index }
+  const env = { ROWEL_INSTANCES: index }
 
-  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /reins:\/\/pair#/u, env)
+  const started = await cli.spawn(['start', '--relay', relayUrl, '--dsh', DSH_URL, '--no-auto-start'], /rowel:\/\/pair#/u, env)
   t.after(() => { started.child.kill('SIGKILL') })
 
   const listed = await cli.run(['instances'], env)

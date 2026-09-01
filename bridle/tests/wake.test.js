@@ -15,8 +15,8 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BridleCore, TunnelSession } from '@reins/bridle'
-import { NoiseInitiator, TUNNEL_PROLOGUE, generateKeyPair } from '@reins/protocol'
+import { BridleCore, TunnelSession } from '@rowel/bridle'
+import { NoiseInitiator, TUNNEL_PROLOGUE, generateKeyPair } from '@rowel/protocol'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -212,14 +212,14 @@ test('the same request arriving twice still rings once', async () => {
 })
 
 test('a handshake whose ready frame cannot be sent leaves nobody counted as listening', async () => {
-  // A real REINS_HOME, because the handshake re-reads the state file before
+  // A real ROWEL_HOME, because the handshake re-reads the state file before
   // deciding whether this peer is paired — `bridle pair` and `bridle revoke`
   // run in other processes and have to take effect on the next handshake. An
   // in-memory peer is wiped by that re-read, which made the first version of
   // this test refuse the handshake and pass without exercising anything.
-  const home = mkdtempSync(join(tmpdir(), 'reins-wake-'))
-  const previous = process.env.REINS_HOME
-  process.env.REINS_HOME = home
+  const home = mkdtempSync(join(tmpdir(), 'rowel-wake-'))
+  const previous = process.env.ROWEL_HOME
+  process.env.ROWEL_HOME = home
   // A real key pair, not the all-zero one the other tests use: those never
   // reach the cryptography, and an all-zero X25519 scalar cannot complete a
   // handshake.
@@ -263,6 +263,6 @@ test('a handshake whose ready frame cannot be sent leaves nobody counted as list
   // that moment on was suppressed.
   assert.equal(machine.attached, 0, 'a dead session is counted as a listener; push is silenced from here on')
   machine.stop()
-  if (previous === undefined) delete process.env.REINS_HOME
-  else process.env.REINS_HOME = previous
+  if (previous === undefined) delete process.env.ROWEL_HOME
+  else process.env.ROWEL_HOME = previous
 })

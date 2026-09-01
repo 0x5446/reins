@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
-import { BridleCore, DirectServer } from '@reins/bridle'
+import { BridleCore, DirectServer } from '@rowel/bridle'
 
 function core() {
   return new BridleCore(

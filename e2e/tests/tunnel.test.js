@@ -3,17 +3,17 @@
  * dials a Relay, and drives a DeepSeek Harness that is actually running on this
  * machine — including a real model turn.
  *
- * Requires a harness. Point REINS_E2E_DSH_URL at one, or let the port probe find
+ * Requires a harness. Point ROWEL_E2E_DSH_URL at one, or let the port probe find
  * it. Without one these tests skip rather than pass silently.
  */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { probeDsh } from '@reins/bridle'
-import { ReinsPhone, startStack, waitFor } from '../lib/index.js'
+import { probeDsh } from '@rowel/bridle'
+import { RowelPhone, startStack, waitFor } from '../lib/index.js'
 
-const DSH_URL = process.env.REINS_E2E_DSH_URL ?? await probeDsh()
-const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set REINS_E2E_DSH_URL' : false
+const DSH_URL = process.env.ROWEL_E2E_DSH_URL ?? await probeDsh()
+const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set ROWEL_E2E_DSH_URL' : false
 
 /** How long a real model turn may take before the test gives up. */
 const MODEL_TIMEOUT_MS = 180_000
@@ -98,7 +98,7 @@ test('a phone pairs, reaches the harness through the relay, and gets a real mode
   t.after(() => stack.stop())
   await stack.waitForRelay()
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'E2E iPhone' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'E2E iPhone' })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -151,14 +151,14 @@ test('the same phone reconnects without the pairing token', { skip, timeout: 120
   await stack.waitForRelay()
   const bundle = stack.invite().bundle
 
-  const first = new ReinsPhone({ bundle, prefer: 'relay', name: 'Persistent iPhone' })
+  const first = new RowelPhone({ bundle, prefer: 'relay', name: 'Persistent iPhone' })
   await first.connect()
   const identity = first.keys
   first.close()
 
   // A second launch of the same app: same key, no token, and the machine already
   // knows it. This is every launch after the first one.
-  const second = new ReinsPhone({ bundle, keys: identity, pairing: false, prefer: 'relay' })
+  const second = new RowelPhone({ bundle, keys: identity, pairing: false, prefer: 'relay' })
   t.after(() => { second.close() })
   const ready = await second.connect()
   assert.equal(ready.dshReachable, true)
@@ -175,7 +175,7 @@ test('replay is gapless across a reconnect, and honest when it cannot be', { ski
   await stack.waitForRelay()
   const bundle = stack.invite().bundle
 
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Flaky iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Flaky iPhone' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
 
@@ -196,7 +196,7 @@ test('replay is gapless across a reconnect, and honest when it cannot be', { ski
   stack.core.events.append('mux', { type: 'session/subscribed', sessionId: 'c', lastSeq: 1 })
   stack.core.events.append('mux', { type: 'session/subscribed', sessionId: 'd', lastSeq: 1 })
 
-  const back = new ReinsPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  const back = new RowelPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
   t.after(() => { back.close() })
   await back.connect()
   const replayed = []
@@ -212,7 +212,7 @@ test('replay is gapless across a reconnect, and honest when it cannot be', { ski
   for (let index = 0; index < capacity + 4; index += 1) {
     stack.core.events.append('mux', { type: 'session/subscribed', sessionId: `overflow-${String(index)}`, lastSeq: 1 })
   }
-  const late = new ReinsPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  const late = new RowelPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
   t.after(() => { late.close() })
   await late.connect()
   const resyncs = []

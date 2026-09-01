@@ -43,7 +43,7 @@ jobs:
       # forgetting a phone that hangs up.
       - name: the relay that is actually serving
         env:
-          REINS_E2E_RELAY_URL: wss://reins-relay.novabox.ai
+          ROWEL_E2E_RELAY_URL: wss://rowel-relay.novabox.ai
         run: node --test --test-concurrency=1 e2e/tests/deployed.test.js
 
       # The four pages the app links to, and the installer redirect. A 404

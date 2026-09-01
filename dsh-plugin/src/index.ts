@@ -6,7 +6,7 @@
  * later; this is right for the common case, where the answer to "what do I
  * install" should be one line and the thing should start and stop with dsh.
  *
- *   dsh plugin --profile web add @reins/bridle-plugin
+ *   dsh plugin --profile web add @rowel/bridle-plugin
  *
  * It still speaks to dsh over loopback HTTP rather than reaching into the
  * process it is running inside. That looks wasteful and is not: the call never
@@ -30,13 +30,13 @@ import {
   rememberInstance,
   writeRuntime,
   type BridleState,
-} from '@reins/bridle'
+} from '@rowel/bridle'
 
 /** How often to refresh the snapshot `bridle status` reads. */
 const HEARTBEAT_MS = 5_000
 
 /** Shown in dsh's plugin list and in diagnostics. */
-export const name = 'reins-bridle'
+export const name = 'rowel-bridle'
 
 /** What the plugin page writes, and what `cordis.yml` can set by hand. */
 export interface BridlePluginConfig {
@@ -72,7 +72,7 @@ export function apply(
   config: BridlePluginConfig = {},
 ): void {
   // One Bridle per identity, refused before anything else exists. A second one
-  // for the same REINS_HOME registers at the Relay as the same machine, and
+  // for the same ROWEL_HOME registers at the Relay as the same machine, and
   // the two displace each other in a silent loop at retry speed — the usual
   // way is a standalone `bridle` service still running when the plugin is
   // installed. Checked before the heartbeat is created, because a refused
@@ -81,8 +81,8 @@ export function apply(
   const incumbent = competingDaemon()
   if (incumbent !== undefined) {
     ctx.logger?.error?.(
-      `reins-bridle did not start: another Bridle is already serving this identity (pid ${String(incumbent.pid)}, ${incumbent.version}). `
-      + 'Stop it and restart dsh, or give it its own home with REINS_HOME.',
+      `rowel-bridle did not start: another Bridle is already serving this identity (pid ${String(incumbent.pid)}, ${incumbent.version}). `
+      + 'Stop it and restart dsh, or give it its own home with ROWEL_HOME.',
     )
     return
   }
@@ -156,7 +156,7 @@ export function apply(
       await start()
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      ctx.logger?.error?.(`reins-bridle failed to start: ${detail}`)
+      ctx.logger?.error?.(`rowel-bridle failed to start: ${detail}`)
       publish('offline')
     }
   })()

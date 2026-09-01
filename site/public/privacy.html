@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy — Reins</title>
-<meta name="description" content="Exactly what the Reins relay can observe, what it stores, and for how long.">
+<title>Privacy — Rowel</title>
+<meta name="description" content="Exactly what the Rowel relay can observe, what it stores, and for how long.">
 <link rel="stylesheet" href="/_/style.css">
 </head>
 <body>
 
 <header>
-  <a class="wordmark" href="/">Reins</a>
+  <a class="wordmark" href="/">Rowel</a>
   <h1>Privacy</h1>
   <p class="lede">
-    What each part of Reins can see, stated precisely enough to be checked
+    What each part of Rowel can see, stated precisely enough to be checked
     against the source.
   </p>
   <p class="updated">Last updated 15 August 2026.</p>
@@ -48,7 +48,7 @@
   </tr>
   <tr>
     <th>Machine name</th>
-    <td>The display name Bridle reports, so the app can show you which Mac you are about to connect to. This is in the clear, and it defaults to your computer's name — edit <code>machineName</code> in <code>~/.reins/bridle.json</code> if that name says more about you than you would like.</td>
+    <td>The display name Bridle reports, so the app can show you which Mac you are about to connect to. This is in the clear, and it defaults to your computer's name — edit <code>machineName</code> in <code>~/.rowel/bridle.json</code> if that name says more about you than you would like.</td>
   </tr>
   <tr>
     <th>Bridle version</th>
@@ -117,7 +117,7 @@
 <h2>Cloudflare</h2>
 
 <p>
-  The relay runs at <code>reins-relay.novabox.ai</code>, and since August 2026 it
+  The relay runs at <code>rowel-relay.novabox.ai</code>, and since August 2026 it
   <em>is</em> a Cloudflare Worker rather than a program on a machine we rent.
   It has a hostname of its own, separate from this site, so that a rule aimed
   at these pages cannot reach the thing your phone depends on. Cloudflare therefore both terminates TLS and runs the code, and can
@@ -142,7 +142,7 @@
 
 <p>
   Bridle keeps its identity key and its list of paired phones under
-  <code>~/.reins</code>. Your conversations stay wherever the DeepSeek Harness
+  <code>~/.rowel</code>. Your conversations stay wherever the DeepSeek Harness
   already keeps them; Bridle does not copy them anywhere.
 </p>
 
@@ -161,7 +161,7 @@
   app and held only in memory, so closing it discards them. That is a
   consequence of the Mac being the only source of truth rather than a privacy
   feature we are claiming credit for — but the effect is the same, and it is
-  worth knowing that a phone with Reins on it is not carrying a copy of your
+  worth knowing that a phone with Rowel on it is not carrying a copy of your
   work.
 </p>
 
@@ -177,7 +177,7 @@
 <h2>The lock on the app</h2>
 
 <p>
-  Reins locks itself, because a paired iPhone can approve commands on your Mac
+  Rowel locks itself, because a paired iPhone can approve commands on your Mac
   and your phone being unlocked in someone else's hands is the gap the system
   lock does not cover. It asks for Face ID, Touch ID, or your passcode on
   launch and after an idle timeout you choose, and it covers the screen the
@@ -243,7 +243,7 @@
 
 <h2>Children</h2>
 
-<p>Reins is a developer tool and is not directed at children under 13.</p>
+<p>Rowel is a developer tool and is not directed at children under 13.</p>
 
 <h2>Changes</h2>
 

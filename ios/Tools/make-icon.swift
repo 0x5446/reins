@@ -3,7 +3,7 @@
 // Generated rather than drawn in a design tool so it is reviewable, diffable,
 // and reproducible: the geometry below is the source, and the PNG is output.
 //
-//   swift ios/Tools/make-icon.swift ios/Reins/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+//   swift ios/Tools/make-icon.swift ios/Rowel/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 //
 // The mark is a tether: a filled dot (the phone in your hand), a ring (the
 // machine doing the work), and one taut rein between them. Two objects and a
@@ -109,7 +109,7 @@ func curve(_ p0: CGPoint, _ p1: CGPoint, _ p2: CGPoint, _ p3: CGPoint, _ t: Doub
 
 /// Fill a stroke that narrows along its length.
 ///
-/// Reins are leather and taper; a constant-width stroke reads as a post, which
+/// Rowel are leather and taper; a constant-width stroke reads as a post, which
 /// is what turned the first attempt at this mark into a piece of furniture. The
 /// taper is also the perspective: wide is the end in your hand, narrow is the
 /// end that has gone off into the distance.

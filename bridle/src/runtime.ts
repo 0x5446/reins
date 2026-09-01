@@ -10,7 +10,7 @@
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { reinsHome } from './identity.ts'
+import { rowelHome } from './identity.ts'
 
 /** Snapshot written by a running daemon. */
 export interface RuntimeInfo {
@@ -37,7 +37,7 @@ export interface RuntimeInfo {
 }
 
 function runtimePath(): string {
-  return join(reinsHome(), 'runtime.json')
+  return join(rowelHome(), 'runtime.json')
 }
 
 /**
@@ -45,7 +45,7 @@ function runtimePath(): string {
  * @param info - the snapshot to write.
  */
 export function writeRuntime(info: RuntimeInfo): void {
-  mkdirSync(reinsHome(), { recursive: true, mode: 0o700 })
+  mkdirSync(rowelHome(), { recursive: true, mode: 0o700 })
   const path = runtimePath()
   const temporary = `${path}.${String(process.pid)}.tmp`
   writeFileSync(temporary, `${JSON.stringify(info, null, 2)}\n`, { mode: 0o600 })
@@ -64,13 +64,13 @@ export function clearRuntime(): void {
 /**
  * The other Bridle already serving this identity, if one is running.
  *
- * Two Bridles reading the same REINS_HOME sign in at the Relay as the same
+ * Two Bridles reading the same ROWEL_HOME sign in at the Relay as the same
  * machine, and the Relay always believes the newest registration — so they
  * displace each other in a loop, at retry speed, forever. Nothing on either
  * side errors: each one is "online" right up until it is knocked off again.
  * Observed in the wild as four and a half thousand Relay requests in two
  * hours, from one standalone Bridle and one dsh plugin that had quietly
- * inherited the same `~/.reins`.
+ * inherited the same `~/.rowel`.
  *
  * Asked at startup by both doorways — the CLI daemon and the dsh plugin —
  * because the collision is between doorways: nobody runs the same one twice,

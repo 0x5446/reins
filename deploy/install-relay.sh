@@ -16,20 +16,20 @@
 
 set -euo pipefail
 
-REPO="${REINS_REPO:-https://github.com/0x5446/reins.git}"
+REPO="${ROWEL_REPO:-https://github.com/0x5446/rowel.git}"
 # HEAD, not a release tag. `install.sh` pins the *user-facing* install to a tag
 # because a user should get a version someone shipped on purpose; an operator
 # deploying their own relay is choosing the version by choosing when to run this.
-REF="${REINS_REF:-main}"
-PREFIX="${REINS_PREFIX:-/opt/reins}"
-SERVICE_USER="${REINS_USER:-reins}"
+REF="${ROWEL_REF:-main}"
+PREFIX="${ROWEL_PREFIX:-/opt/rowel}"
+SERVICE_USER="${ROWEL_USER:-rowel}"
 # A tarball to unpack instead of a clone. While the repository is private, a
 # host with no GitHub credentials cannot clone it, and putting a deploy key on
 # the relay would give a relay compromise a way into the source:
-#   git archive --format=tar HEAD | gzip > /tmp/reins-src.tgz
-#   scp /tmp/reins-src.tgz <host>:/tmp/
-#   ssh <host> 'sudo REINS_TARBALL=/tmp/reins-src.tgz bash /tmp/deploy/install-relay.sh'
-TARBALL="${REINS_TARBALL:-}"
+#   git archive --format=tar HEAD | gzip > /tmp/rowel-src.tgz
+#   scp /tmp/rowel-src.tgz <host>:/tmp/
+#   ssh <host> 'sudo ROWEL_TARBALL=/tmp/rowel-src.tgz bash /tmp/deploy/install-relay.sh'
+TARBALL="${ROWEL_TARBALL:-}"
 
 [ "$(id -u)" -eq 0 ] || { echo "run this with sudo" >&2; exit 1; }
 
@@ -93,15 +93,15 @@ chmod -R a+rX "$PREFIX"
 # --- Service -----------------------------------------------------------------
 
 step "Installing the unit"
-install -m 0644 "$PREFIX/deploy/relay.service" /etc/systemd/system/reins-relay.service
+install -m 0644 "$PREFIX/deploy/relay.service" /etc/systemd/system/rowel-relay.service
 systemctl daemon-reload
-systemctl enable --now reins-relay
+systemctl enable --now rowel-relay
 
 sleep 2
 step "Checking"
-systemctl is-active --quiet reins-relay && echo "service: active" || {
+systemctl is-active --quiet rowel-relay && echo "service: active" || {
   echo "service failed to start:" >&2
-  journalctl -u reins-relay -n 30 --no-pager >&2
+  journalctl -u rowel-relay -n 30 --no-pager >&2
   exit 1
 }
 curl -fsS --max-time 5 http://127.0.0.1:8787/healthz && echo
@@ -115,15 +115,15 @@ dashboard-managed one: the login below writes a cert that can create the DNS
 record itself, and the ingress lives in a file you can diff.
 
   cloudflared tunnel login
-  cloudflared tunnel create reins-relay
-  cloudflared tunnel route dns reins-relay reins-relay.novabox.ai
+  cloudflared tunnel create rowel-relay
+  cloudflared tunnel route dns rowel-relay rowel-relay.novabox.ai
 
 Then put the ingress in /etc/cloudflared/config.yml —
 
   tunnel: <id printed by create>
-  credentials-file: /etc/cloudflared/reins-relay.json
+  credentials-file: /etc/cloudflared/rowel-relay.json
   ingress:
-    - hostname: reins-relay.novabox.ai
+    - hostname: rowel-relay.novabox.ai
       service: http://127.0.0.1:8787
     - service: http_status:404
 
@@ -134,5 +134,5 @@ Then put the ingress in /etc/cloudflared/config.yml —
 
 Verify from somewhere else, not from this host:
 
-  curl -fsS https://reins-relay.novabox.ai/healthz
+  curl -fsS https://rowel-relay.novabox.ai/healthz
 DONE

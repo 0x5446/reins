@@ -1,5 +1,5 @@
 /**
- * The Reins Relay: a content-blind switchboard between phones and the Bridles
+ * The Rowel Relay: a content-blind switchboard between phones and the Bridles
  * on people's machines — the same one `relay/` implements, on Workers.
  *
  * It exists for one reason. A laptop behind NAT cannot accept an inbound
@@ -198,7 +198,7 @@ async function upgradeApp(request: Request, env: Env, url: URL): Promise<Respons
  * Turn a phone away with a reason it can show someone.
  *
  * A completed upgrade that immediately closes, not an HTTP error: the app reads
- * these close codes (`ios/Reins/Net/WebSocketCarrier.swift` turns 4404 into
+ * these close codes (`ios/Rowel/Net/WebSocketCarrier.swift` turns 4404 into
  * "That Mac is offline"), and a 503 would arrive as an unhelpful transport
  * failure indistinguishable from having no signal.
  * @param code - the close code.

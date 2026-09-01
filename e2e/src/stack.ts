@@ -1,5 +1,5 @@
 /**
- * A whole Reins deployment in one process: a Relay on an ephemeral port, a
+ * A whole Rowel deployment in one process: a Relay on an ephemeral port, a
  * Bridle with its own throwaway identity directory, and whichever DeepSeek
  * Harness the tests were pointed at.
  *
@@ -23,12 +23,12 @@ import {
   saveState,
   type BridleState,
   type Invitation,
-} from '@reins/bridle'
-import { RelayServer } from '@reins/relay'
+} from '@rowel/bridle'
+import { RelayServer } from '@rowel/relay'
 
 /** Options for {@link startStack}. */
 export interface StackOptions {
-  /** dsh base URL; defaults to `REINS_E2E_DSH_URL`, then a port probe. */
+  /** dsh base URL; defaults to `ROWEL_E2E_DSH_URL`, then a port probe. */
   dshUrl?: string
   /** Skip the LAN listener, to force traffic through the Relay. */
   noDirect?: boolean
@@ -84,9 +84,9 @@ const VERSION = '0.1.0-test'
  * @throws {@link Error} when no harness can be found.
  */
 export async function startStack(options: StackOptions = {}): Promise<Stack> {
-  const dshUrl = options.dshUrl ?? process.env['REINS_E2E_DSH_URL'] ?? await probeDsh()
+  const dshUrl = options.dshUrl ?? process.env['ROWEL_E2E_DSH_URL'] ?? await probeDsh()
   if (dshUrl === undefined) {
-    throw new Error('no DeepSeek Harness found; set REINS_E2E_DSH_URL to a running web server')
+    throw new Error('no DeepSeek Harness found; set ROWEL_E2E_DSH_URL to a running web server')
   }
 
   let relay: RelayServer | undefined
@@ -96,9 +96,9 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     relayUrl = `http://127.0.0.1:${String(await relay.listen())}`
   }
 
-  const home = mkdtempSync(join(tmpdir(), 'reins-e2e-'))
-  const previousHome = process.env['REINS_HOME']
-  process.env['REINS_HOME'] = home
+  const home = mkdtempSync(join(tmpdir(), 'rowel-e2e-'))
+  const previousHome = process.env['ROWEL_HOME']
+  process.env['ROWEL_HOME'] = home
   const state = loadState()
   state.relayUrl = relayUrl
   state.dshUrl = dshUrl
@@ -139,8 +139,8 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       core.stop()
       // Only close a Relay this stack started. A deployed one outlives the test.
       await relay?.close()
-      if (previousHome === undefined) delete process.env['REINS_HOME']
-      else process.env['REINS_HOME'] = previousHome
+      if (previousHome === undefined) delete process.env['ROWEL_HOME']
+      else process.env['ROWEL_HOME'] = previousHome
       rmSync(home, { recursive: true, force: true })
     },
   }

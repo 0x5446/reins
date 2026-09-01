@@ -13,14 +13,14 @@ import {
   encodePairingLink,
   signPairOffer,
   type PairingBundle,
-} from '@reins/protocol'
+} from '@rowel/protocol'
 import { openPairingOffer, signingKeys, staticKeys, type BridleState } from './identity.ts'
 
 /** Everything the operator needs to show, in the three forms a person might use. */
 export interface Invitation {
   /** The full bundle, for the QR. */
   bundle: PairingBundle
-  /** `reins://pair#…` deep link the QR encodes. */
+  /** `rowel://pair#…` deep link the QR encodes. */
   link: string
   /** Typed alternative, e.g. `KTPQ-3WRM`. */
   code: string

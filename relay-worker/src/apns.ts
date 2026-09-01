@@ -108,10 +108,10 @@ let minting: Promise<string> | undefined
  * @returns whether APNs accepted it, and why not when it did not.
  */
 export async function wake(env: Env, target: WakeTarget, now: number = Date.now()): Promise<WakeOutcome> {
-  const key = env.REINS_APNS_KEY
-  const keyId = env.REINS_APNS_KEY_ID
-  const teamId = env.REINS_APNS_TEAM_ID
-  const topic = env.REINS_APNS_TOPIC
+  const key = env.ROWEL_APNS_KEY
+  const keyId = env.ROWEL_APNS_KEY_ID
+  const teamId = env.ROWEL_APNS_TEAM_ID
+  const topic = env.ROWEL_APNS_TOPIC
   if (!key && !keyId && !teamId && !topic) return { ok: false, reason: 'unconfigured', detail: 'push is not configured' }
   // Some but not all is a different thing from none, and has to be loud: it is
   // a deployment someone meant to finish, and every push silently disappears
@@ -136,7 +136,7 @@ export async function wake(env: Env, target: WakeTarget, now: number = Date.now(
   const body = JSON.stringify({
     aps: {
       alert: {
-        title: 'Reins',
+        title: 'Rowel',
         body: target.machine === undefined ? ALERT_BODY : `${ALERT_BODY} · ${target.machine}`,
       },
       sound: 'default',

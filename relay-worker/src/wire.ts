@@ -1,7 +1,7 @@
 /**
  * The Relay wire, in terms the Workers runtime speaks.
  *
- * `@reins/protocol` already implements all of this, but against `Buffer` and
+ * `@rowel/protocol` already implements all of this, but against `Buffer` and
  * `node:crypto`, neither of which exists here without dragging in a
  * compatibility layer for the sake of four functions. These are the same bytes
  * — docs/protocol.md §5 and §2.4 are the shared authority, and the end-to-end

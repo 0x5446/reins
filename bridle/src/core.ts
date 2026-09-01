@@ -11,8 +11,8 @@ import { basename } from 'node:path'
 import { DshClient, type DshHealth } from './dsh/client.ts'
 import type { AgentClient } from './agents/types.ts'
 import { EventLog } from './tunnel/event-log.ts'
-import { loadState, reinsHome, saveState, statePath, staticKeys, type BridleState } from './identity.ts'
-import type { StaticKeyPair } from '@reins/protocol'
+import { loadState, rowelHome, saveState, statePath, staticKeys, type BridleState } from './identity.ts'
+import type { StaticKeyPair } from '@rowel/protocol'
 
 /**
  * What makes one pending request distinguishable from another.
@@ -61,7 +61,7 @@ export class BridleCore {
    * An approval or a question crosses the wire once, as a live event. A phone
    * that is not attached at that instant never learns the machine has stopped
    * — and "not attached at that instant" is the normal case for this app,
-   * whose whole premise is that you are somewhere else. Opening Reins to find
+   * whose whole premise is that you are somewhere else. Opening Rowel to find
    * out why the agent went quiet showed a conversation that simply stopped.
    *
    * dsh does not have this problem because it re-sends pending requests to
@@ -309,7 +309,7 @@ export class BridleCore {
   private watchState(): void {
     const name = basename(statePath())
     try {
-      this.watcher = watch(reinsHome(), { persistent: false }, (_event, filename) => {
+      this.watcher = watch(rowelHome(), { persistent: false }, (_event, filename) => {
         if (filename !== null && filename !== name) return
         if (this.writing) return
         this.refreshState()

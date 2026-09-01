@@ -6,7 +6,7 @@
 
 import { RelayServer } from './server.ts'
 
-const installScript = process.env['REINS_INSTALL_SCRIPT']
+const installScript = process.env['ROWEL_INSTALL_SCRIPT']
 
 const server = new RelayServer({
   port: Number(process.env['PORT'] ?? '8787'),

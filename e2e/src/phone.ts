@@ -3,7 +3,7 @@
  *
  * This is the reference implementation of the app side of the tunnel: the same
  * Noise IK handshake, the same frames, the same resume semantics that
- * `ios/Reins/Protocol` implements in Swift. Keeping it here does two things —
+ * `ios/Rowel/Protocol` implements in Swift. Keeping it here does two things —
  * it lets the end-to-end tests drive a real Bridle against a real harness with
  * no simulator in the loop, and it gives the Swift code something authoritative
  * to be checked against.
@@ -23,7 +23,7 @@ import {
   type ServerFrame,
   type StaticKeyPair,
   type StreamName,
-} from '@reins/protocol'
+} from '@rowel/protocol'
 
 /** The result shape every dsh method answers with. */
 export type CallResult =
@@ -37,7 +37,7 @@ export interface PhoneEvent {
   frame: unknown
 }
 
-/** Options for {@link ReinsPhone}. */
+/** Options for {@link RowelPhone}. */
 export interface PhoneOptions {
   /** The pairing bundle scanned or claimed. */
   bundle: PairingBundle
@@ -74,7 +74,7 @@ export class HandshakeRefused extends Error {
 let requestCounter = 0
 
 /** An app-side tunnel to one Bridle. */
-export class ReinsPhone {
+export class RowelPhone {
   readonly keys: StaticKeyPair
   private socket: WebSocket | undefined
   private channel: SecureChannel | undefined
@@ -114,7 +114,7 @@ export class ReinsPhone {
       // negotiation": omit the key entirely rather than sending an empty list.
       ...(offered.length === 0 ? {} : { versions: offered }),
       name: this.options.name ?? 'iPhone',
-      client: this.options.client ?? 'reins-reference/0.1.0',
+      client: this.options.client ?? 'rowel-reference/0.1.0',
       ...(this.options.pairing === false ? {} : { token: this.options.bundle.token }),
     }
 

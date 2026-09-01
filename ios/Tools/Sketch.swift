@@ -69,6 +69,6 @@ img.unlockFocus()
 let tiff = img.tiffRepresentation!
 let rep = NSBitmapImageRep(data: tiff)!
 let png = rep.representation(using: .png, properties: [:])!
-let target = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/reins-sketch.png"
+let target = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/rowel-sketch.png"
 try! png.write(to: URL(fileURLWithPath: target))
 print("wrote \(target)")

@@ -5,7 +5,7 @@
  *   node scripts/lan-webui.mjs            # http://<your-lan-ip>:3081
  *
  * A throwaway for answering one question — "how good is the web UI on a phone"
- * — and not part of the product. Reins exists precisely so that this is not how
+ * — and not part of the product. Rowel exists precisely so that this is not how
  * anyone reaches their harness.
  *
  * **Read this before running it.** dsh executes shell commands. Binding it to a

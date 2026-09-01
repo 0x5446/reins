@@ -21,8 +21,8 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { FakeAgent, ReinsPhone, startStack, waitFor } from '../lib/index.js'
-import { RelayServer } from '@reins/relay'
+import { FakeAgent, RowelPhone, startStack, waitFor } from '../lib/index.js'
+import { RelayServer } from '@rowel/relay'
 
 /** A dsh mux request, shaped as the wire carries it. */
 function request(type, sessionId, extra = {}) {
@@ -45,7 +45,7 @@ test('a machine with nobody attached rings the phone it was given', { timeout: 6
 
   // The phone attaches once, says where it can be rung, and leaves — which is
   // what a phone does: it is in a pocket a minute later.
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -69,7 +69,7 @@ test('a machine somebody is watching does not ring anyone', { timeout: 60_000 },
   await stack.waitForRelay(20_000)
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -91,7 +91,7 @@ test('a phone that turns notifications off stops being rung', { timeout: 60_000 
   await stack.waitForRelay(20_000)
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -115,7 +115,7 @@ test('the token survives the phone reconnecting, and is not asked for again', { 
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
   const invitation = stack.invite()
-  const first = new ReinsPhone(invitation)
+  const first = new RowelPhone(invitation)
   await first.connect()
   first.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -125,7 +125,7 @@ test('the token survives the phone reconnecting, and is not asked for again', { 
   // onto Wi-Fi. Same keys and no pairing token, because the pairing already
   // happened; a token that did not survive this would mean the machine could
   // only ring a phone that had connected since the last restart.
-  const again = new ReinsPhone({ bundle: invitation.bundle, keys: first.keys, pairing: false, prefer: 'relay' })
+  const again = new RowelPhone({ bundle: invitation.bundle, keys: first.keys, pairing: false, prefer: 'relay' })
   await again.connect()
   assert.equal(stack.state.peers[0].push, TOKEN)
   again.close()
@@ -149,7 +149,7 @@ test('a request that arrives while the relay is down is rung when it comes back'
   await stack.waitForRelay(20_000)
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -187,7 +187,7 @@ test('one phone holding two pairings is rung once, not twice', { timeout: 60_000
   // identity but the same APNs token, so the old peer sits there holding the
   // same address.
   for (const name of ['before the reset', 'after the reset']) {
-    const phone = new ReinsPhone({ ...stack.invite(), name })
+    const phone = new RowelPhone({ ...stack.invite(), name })
     await phone.connect()
     phone.wake(TOKEN)
     phone.close()
@@ -217,7 +217,7 @@ test('a question answered while the relay was down does not ring afterwards', { 
   await stack.waitForRelay(20_000)
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -252,7 +252,7 @@ test('a question asked while somebody was attached rings once they leave', { tim
   await stack.waitForRelay(20_000)
   await waitFor(() => agent.isPumping('mux'), 10_000, 'the Bridle to subscribe')
 
-  const phone = new ReinsPhone(stack.invite())
+  const phone = new RowelPhone(stack.invite())
   await phone.connect()
   phone.wake(TOKEN)
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')

@@ -1,9 +1,9 @@
-# Product Hunt Launch — Reins
+# Product Hunt Launch — Rowel
 
 ## Name
 
 ```
-Reins
+Rowel
 ```
 
 ## Tagline (limit 60 chars)
@@ -22,7 +22,7 @@ Your Mac runs the agent. Your phone answers.
 ## Description (limit 260 chars)
 
 ```
-The agent runs on your Mac, with your code and your keys. Reins is the iPhone side: approve commands with the full diff, read streaming output, get woken only when it needs you. End-to-end encrypted — the relay only ever sees ciphertext. Free, open source.
+The agent runs on your Mac, with your code and your keys. Rowel is the iPhone side: approve commands with the full diff, read streaming output, get woken only when it needs you. End-to-end encrypted — the relay only ever sees ciphertext. Free, open source.
 ```
 (256 characters)
 
@@ -34,8 +34,8 @@ Developer Tools, Artificial Intelligence, Open Source, iOS, Privacy
 
 - App Store: `<APP STORE URL>` (fill after approval; launch PH only once the
   store link is live — a "build it with Xcode" CTA dies on PH)
-- GitHub: https://github.com/0x5446/reins
-- Website: https://reins.novabox.ai
+- GitHub: https://github.com/0x5446/rowel
+- Website: https://rowel.novabox.ai
 
 ## Gallery
 
@@ -48,12 +48,12 @@ card — it is the one screen that explains the product without words.
 ```
 Hi PH — maker here.
 
-Reins exists because of a specific, repeating moment: you leave your desk
+Rowel exists because of a specific, repeating moment: you leave your desk
 while a coding agent is mid-task, and forty minutes later you discover it
 stopped almost immediately — to ask permission to run a command. The work
 didn't fail. It just waited, because you weren't there to say yes.
 
-Reins is the iPhone side of the agent already running on your Mac (currently
+Rowel is the iPhone side of the agent already running on your Mac (currently
 DeepSeek Harness / dsh). The Mac keeps the code, the API keys, and the agent.
 The phone gets the part that shouldn't require a desk:
 
@@ -86,7 +86,7 @@ phone happens on the Mac, where it can't be faked.
 
 Everything is MIT and public — the app, the Mac companion, the relay (one
 Cloudflare Worker; self-host it if you don't trust ours):
-https://github.com/0x5446/reins
+https://github.com/0x5446/rowel
 
 I'll be here all day — happy to answer anything, especially the skeptical
 questions about the crypto and what the relay can still observe (metadata:

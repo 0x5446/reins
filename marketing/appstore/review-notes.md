@@ -1,4 +1,4 @@
-# App Review Strategy and Notes — Reins v1.0
+# App Review Strategy and Notes — Rowel v1.0
 
 The structural problem: the reviewer does not have a Mac running dsh, and
 pairing tokens are single-use with a ~10-minute TTL
@@ -18,7 +18,7 @@ already runs** — a category with long-standing precedent on the store:
   user self-hosts; first launch is a connect screen. All approved, all
   category leaders.
 
-Reins is that shape: the agent runs on the user's Mac with the user's API
+Rowel is that shape: the agent runs on the user's Mac with the user's API
 keys; the app reads results and sends approvals over an end-to-end encrypted
 channel. It is *not* a chatbot service, *not* a remote desktop, and *not* an
 app that executes code.
@@ -31,7 +31,7 @@ submitting. ~3.3 KB, under the 4000-byte limit.
 ```
 WHAT THIS APP IS
 
-Reins is a companion client for a coding agent that runs on the user's own
+Rowel is a companion client for a coding agent that runs on the user's own
 Mac — the same shape as an SSH client or the Home Assistant app: it is
 useless until the user pairs it with software they already run themselves.
 It renders its own native SwiftUI interface from structured JSON received
@@ -95,7 +95,7 @@ PERMISSIONS
   encrypted tunnel and writes the real notification locally.
 
 The full source of the app, the Mac companion, and the relay is public:
-https://github.com/0x5446/reins — including an end-to-end test asserting the
+https://github.com/0x5446/rowel — including an end-to-end test asserting the
 relay only ever sees ciphertext.
 ```
 
@@ -115,7 +115,7 @@ To be recorded by the main session. Requirements that make it land:
   lock-screen notification arrives, tap through, answer it; ⑦ attach a photo
   of a hand-drawn sketch, agent starts building; ⑧ model picker; ⑨ Trace and
   cost panel, 5 seconds each.
-- Hygiene: neutral machine name (edit `machineName` in `~/.reins/bridle.json`),
+- Hygiene: neutral machine name (edit `machineName` in `~/.rowel/bridle.json`),
   throwaway demo repo, no API keys or real paths on screen.
 - Host as **unlisted YouTube or Vimeo**; also attach the file itself in App
   Review Information → Attachment if under the size limit (belt and braces —
@@ -123,10 +123,10 @@ To be recorded by the main session. Requirements that make it land:
 
 ## 4. First-launch-without-a-Mac audit (is this an "empty app"?)
 
-Verified against `ios/Reins/Views/RootView.swift` (the `model.isNew` branch)
+Verified against `ios/Rowel/Views/RootView.swift` (the `model.isNew` branch)
 and `OnboardingView.swift`. What a reviewer actually sees:
 
-1. Brand screen: icon, "Reins", tagline "Your coding agent, in your pocket.",
+1. Brand screen: icon, "Rowel", tagline "Your coding agent, in your pocket.",
    three promise rows (E2E encryption / no account / LAN direct), one primary
    button "Connect a Mac" + "Takes about a minute."
 2. Tapping it: a two-step pairing sheet — install command with copy button,
@@ -146,7 +146,7 @@ are the mitigation.
   immediately classifies it as a companion app rather than a thin client to
   a missing service.
 - The pairing sheet's install step already says what Bridle is; one extra
-  sentence — "Nothing to sign up for: Reins only talks to your own Mac" —
+  sentence — "Nothing to sign up for: Rowel only talks to your own Mac" —
   would preempt the "where is the login" reaction.
 - Both are `Text()` string changes in `OnboardingView.swift` if ever wanted;
   neither is required for submission, and the Review Notes carry the same

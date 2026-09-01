@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BridleCore, TunnelSession } from '@reins/bridle'
+import { BridleCore, TunnelSession } from '@rowel/bridle'
 
 /** A core that answers nothing, since only the ready frame matters here. */
 function core() {

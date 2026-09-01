@@ -1,6 +1,6 @@
-# Reins 技术架构
+# Rowel 技术架构
 
-本文档描述 Reins 的整体设计、每个接缝的契约、以及新功能应该落在哪里。它同时是一份**扩展指南**——未做的功能（推送、定时任务、多 agent、trace）在这里有明确的落点，实施时不需要重新设计。
+本文档描述 Rowel 的整体设计、每个接缝的契约、以及新功能应该落在哪里。它同时是一份**扩展指南**——未做的功能（推送、定时任务、多 agent、trace）在这里有明确的落点，实施时不需要重新设计。
 
 写作原则：每个决策给出理由和代价。没有理由的决策是巧合，没有代价的决策是谎话。
 
@@ -28,14 +28,14 @@
 
 | 组件 | 是什么 | 跑在哪 | 代码 |
 |---|---|---|---|
-| **Reins** | iOS app | iPhone | `ios/` |
+| **Rowel** | iOS app | iPhone | `ios/` |
 | **Bridle** | 伴生进程，套住本机 agent | 与 agent 同机 | `bridle/` `dsh-plugin/` |
 | **Relay** | 内容盲交换机 | 公网 | `relay/` |
-| **protocol** | 两端共享的线上格式 | 两端各一份实现 | `protocol/`（TS）+ `ios/Reins/Protocol/`（Swift） |
+| **protocol** | 两端共享的线上格式 | 两端各一份实现 | `protocol/`（TS）+ `ios/Rowel/Protocol/`（Swift） |
 
-一句话：**Bridle 套住 agent，Relay 传递密文，Reins 握在手里。**
+一句话：**Bridle 套住 agent，Relay 传递密文，Rowel 别在骑手身上。**
 
-命名不是装饰。缰绳、笼头、中继——三个词各自说清了自己那一端的职责边界，读代码的人不需要记住一张缩写表。
+命名不是装饰。笼头戴在马身上，马刺轮戴在人身上，中继在两者之间——三个词各自说清了自己那一端的职责边界，读代码的人不需要记住一张缩写表。这也是分界线的形状：Bridle 贴着 agent，Rowel 贴着人，Relay 谁都不属于，因此它什么也读不到。
 
 ---
 
@@ -78,7 +78,7 @@ dsh 不发送渲染结果，它发送自己那份 append-only 事件日志，每
 
 ### 3.1 新方法：透传，零改动
 
-dsh 有 44 个客户端方法。app 调用其中任意一个，只需要在 `ios/Reins/Net/Harness.swift` 加一个函数：
+dsh 有 44 个客户端方法。app 调用其中任意一个，只需要在 `ios/Rowel/Net/Harness.swift` 加一个函数：
 
 ```swift
 public func fork(sessionId: String) async throws -> String {
@@ -219,7 +219,7 @@ interface AgentClient {
 | 密钥 | 存哪 | 生命周期 |
 |---|---|---|
 | 手机静态私钥 | iOS Keychain，`afterFirstUnlockThisDeviceOnly` | 装机时生成，重置才换 |
-| 机器静态私钥 | `~/.reins/bridle.json`，0600 | 首次运行生成 |
+| 机器静态私钥 | `~/.rowel/bridle.json`，0600 | 首次运行生成 |
 | 机器签名密钥（Ed25519） | 同上 | 同上，与静态密钥**分离** |
 | 每连接临时密钥 | 内存 | 一次连接。**不可用于推送**——推送发生时它已不存在，见 §10.2 |
 | 手机推送私钥（X25519） | Keychain 共享组，`afterFirstUnlockThisDeviceOnly` | 长期，可轮换；app 与通知扩展共用 |
@@ -234,7 +234,7 @@ interface AgentClient {
 **短码**（扫不了码时）：手机从 Relay 换取配对载荷，而 Relay 可能撒谎。所以握手完成后**两端各显示一个 6 位数字**，从 handshake hash 派生：
 
 ```
-digits = BE_uint32(sha256("reins-confirm" ‖ handshakeHash)[0..4]) mod 10^6
+digits = BE_uint32(sha256("rowel-confirm" ‖ handshakeHash)[0..4]) mod 10^6
 ```
 
 数字相同 ⇒ 两端的握手记录一致 ⇒ 没有中间人。这是 Bluetooth 数字比对的同一套逻辑。
@@ -257,7 +257,7 @@ Bridle 补回了 dsh 故意不做的认证：
 
 上面那条推论有个直接后果：一部**已解锁**的已配对手机，就是一个不再需要任何凭证的远程 shell。系统锁屏挡不住这个场景——手机被递出去、在餐桌上被顺走、放在工位上没锁——它本来就是解锁状态。
 
-app 自己那把锁（`ios/Reins/Store/AppLock.swift`）不解决这件事，它只给这个窗口设一个上限：
+app 自己那把锁（`ios/Rowel/Store/AppLock.swift`）不解决这件事，它只给这个窗口设一个上限：
 
 | 机制 | 做什么 | 为什么是这个选择 |
 |---|---|---|
@@ -350,7 +350,7 @@ Bridle 有两种装法，共享同一个 `BridleCore`：
 | 形态 | 命令 | 适合 |
 |---|---|---|
 | 独立进程 | `bridle` | 需要独立托管，或以后指向别的 agent |
-| dsh 插件 | `dsh plugin --profile web add @reins/bridle-plugin` | 常见场景：一条命令，跟着 dsh 起停 |
+| dsh 插件 | `dsh plugin --profile web add @rowel/bridle-plugin` | 常见场景：一条命令，跟着 dsh 起停 |
 
 **插件仍然走 loopback HTTP 连它自己所在的那个 dsh。**看起来浪费，实际不是：调用不出机器，与独立二进制同一条路径、同一套测试覆盖，**两者不会漂移**。插件文件因此是生命周期包装（约 100 行），不是第二份实现。
 
@@ -358,12 +358,12 @@ Bridle 有两种装法，共享同一个 `BridleCore`：
 
 ### 8.1 一个身份只许一个 Bridle
 
-两个入口带来一种真实碰撞：独立进程还在跑，用户又装了插件（或反过来）。两个 Bridle 读同一个 `REINS_HOME`，就以同一身份注册到 Relay——Relay 永远信最新的注册，于是两边互相顶替，以重试速度无限循环。两台机器都显示"在线"（每一方在被踢下去之前确实在线），没有任何一处报错，唯一的痕迹是 Relay 的请求量。实测过一次：两小时四千多次注册。
+两个入口带来一种真实碰撞：独立进程还在跑，用户又装了插件（或反过来）。两个 Bridle 读同一个 `ROWEL_HOME`，就以同一身份注册到 Relay——Relay 永远信最新的注册，于是两边互相顶替，以重试速度无限循环。两台机器都显示"在线"（每一方在被踢下去之前确实在线），没有任何一处报错，唯一的痕迹是 Relay 的请求量。实测过一次：两小时四千多次注册。
 
 三层防御，各挡各的：
 
-1. **门口的锁**：两个入口启动时都先查 `runtime.json`——pid 还活着且不是自己，就拒绝启动并说明谁占着、怎么办（停掉那个，或用 `REINS_HOME` 分家）。检查在一切副作用之前：插件若晚于 heartbeat 创建才退出，失败者会每 5 秒覆盖赢家的快照。
-2. **退避靠稳定挣来**：注册成功不再重置重试间隔——身份战争里每次注册都"成功"。只有连接活过 `2 × RETRY_MAX`（60 秒）才回到 1 秒起点；战争中每一方恰好活对方的重试间隔那么久（上限 30 秒），所以门槛必须高于上限，否则战争会把速度挣回去。这挡的是锁够不着的场景：`~/.reins` 被 dotfile 同步复制到第二台机器。
+1. **门口的锁**：两个入口启动时都先查 `runtime.json`——pid 还活着且不是自己，就拒绝启动并说明谁占着、怎么办（停掉那个，或用 `ROWEL_HOME` 分家）。检查在一切副作用之前：插件若晚于 heartbeat 创建才退出，失败者会每 5 秒覆盖赢家的快照。
+2. **退避靠稳定挣来**：注册成功不再重置重试间隔——身份战争里每次注册都"成功"。只有连接活过 `2 × RETRY_MAX`（60 秒）才回到 1 秒起点；战争中每一方恰好活对方的重试间隔那么久（上限 30 秒），所以门槛必须高于上限，否则战争会把速度挣回去。这挡的是锁够不着的场景：`~/.rowel` 被 dotfile 同步复制到第二台机器。
 3. **Relay 记一行**：`register` 顶替旧连接时 `console.warn` 设备 id 和上一次注册距今的毫秒数。一次是笔记本睡醒，每隔几秒一次是战争——这是唯一能同时看见双方的视角。
 
 ---
@@ -458,14 +458,14 @@ Relay **不持久化** token——只在振铃那一刻从 Bridle 手里拿到�
 |---|---|
 | `protocol/src/frames.ts` | `wake` 帧（app→Bridle） |
 | `protocol/src/mux.ts` | `MuxType.Wake`（双向：请求振铃 / 回传失效 token） |
-| `ios/Reins/App/Push.swift` | 每次启动和回前台向 iOS 要 token |
-| `ios/Reins/Net/Tunnel.swift` | 每次 `ready` 重发 token |
+| `ios/Rowel/App/Push.swift` | 每次启动和回前台向 iOS 要 token |
+| `ios/Rowel/Net/Tunnel.swift` | 每次 `ready` 重发 token |
 | `bridle/src/core.ts` | `onWaiting` 钩子、接入计数 |
 | `bridle/src/relay-client.ts` | 判断无人接入、按 token 去重、欠账补发 |
 | `relay-worker/src/apns.ts` | ES256 签名、生产→沙盒回退、错误分类 |
-| `ios/Reins/Reins.entitlements` | `aps-environment`（付费会员才签得下来） |
+| `ios/Rowel/Rowel.entitlements` | `aps-environment`（付费会员才签得下来） |
 
-配置见 `docs/deployment.md` 的 APNs 一节：四条 `REINS_APNS_*` secret，缺一个则 Relay 不振铃任何人，其余功能不受影响。
+配置见 `docs/deployment.md` 的 APNs 一节：四条 `ROWEL_APNS_*` secret，缺一个则 Relay 不振铃任何人，其余功能不受影响。
 
 ---
 
@@ -539,7 +539,7 @@ app 和 Bridle 各自更新，不保证同步。上架之后这不是例外而�
 
 ### 14.1 之前的设计是错的
 
-原设计把隧道版本混进 Noise prologue（`reins-tunnel/v1`），版本不匹配则握手失败，并声称此时发 `fault{reason:"version"}` 让 app 提示"更新较旧的那一端"。
+原设计把隧道版本混进 Noise prologue（`rowel-tunnel/v1`），版本不匹配则握手失败，并声称此时发 `fault{reason:"version"}` 让 app 提示"更新较旧的那一端"。
 
 **这句话做不到。**prologue 不同会让响应方在解密握手消息一时就失败——此时安全通道还没建立，任何拒绝都发不出去，也无法被认证。客户端只能看到"握手失败"，无法区分三种完全不同的情况：版本偏斜、连错了机器、被中间人篡改。
 
@@ -548,7 +548,7 @@ app 和 Bridle 各自更新，不保证同步。上架之后这不是例外而�
 ### 14.2 版本移出 prologue，进握手载荷
 
 ```
-prologue = "reins-tunnel"        ← 稳定的协议族标识，永不变
+prologue = "rowel-tunnel"        ← 稳定的协议族标识，永不变
 ```
 
 版本改为在**握手载荷里协商**。这行得通的原因是一个不对称性：响应方**总能**解密消息一（prologue 一致即可），因此总能读到发起方声明的版本，也总能用消息二发回一个**已认证的**拒绝。
@@ -572,7 +572,7 @@ prologue = "reins-tunnel"        ← 稳定的协议族标识，永不变
 
 ### 14.4 这次改动本身会断一次
 
-把版本移出 prologue 是**破坏性的**：现有 v1 客户端的 prologue 是 `reins-tunnel/v1`，改后握手必然失败，所有已配对设备需要重新配对。
+把版本移出 prologue 是**破坏性的**：现有 v1 客户端的 prologue 是 `rowel-tunnel/v1`，改后握手必然失败，所有已配对设备需要重新配对。
 
 **因此这件事必须在公开发布之前做完。**当前只有一台已配对设备（开发者自己的手机），代价是一次重新配对；上架之后再做，代价是全部用户。
 
@@ -613,7 +613,7 @@ UI          6（XCUITest，真机或模拟器，连真 Bridle）
 
 > 早期文档声称 e2e 已经覆盖审批。它没有——一条都没有，"代码存在"顶替了"链路能用"。这是 deep review 抓到的，也是四层测试本该在 e2e 层抓到却漏掉的。
 
-**UI 测试与单元测试分属两个 scheme**（`Reins` / `ReinsUI`）：单元测试到处都能跑、几秒钟；UI 测试需要一台配对好的机器、几分钟。合在一起会让每次 `npm run test:ios` 都等一台可能没开的电脑。
+**UI 测试与单元测试分属两个 scheme**（`Rowel` / `RowelUI`）：单元测试到处都能跑、几秒钟；UI 测试需要一台配对好的机器、几分钟。合在一起会让每次 `npm run test:ios` 都等一台可能没开的电脑。
 
 ---
 
@@ -690,7 +690,7 @@ UI          6（XCUITest，真机或模拟器，连真 Bridle）
 | 横向甘特图 trace | 见 §13 |
 | P2P 打洞 | 见 §7 |
 | Android | 不是不做，是现在不做。协议与折叠逻辑可移植，UI 不可 |
-| 一机一配对 + dsh 实例多路复用 | 考虑过并否决（`docs/one-pair-per-mac.md`）：多 dsh 是罕见场景，已由第二 `REINS_HOME` 身份覆盖（锁/后缀/工具俱全）；为它新建协议字段与引擎层是给罕见场景买优雅，维护面不划算 |
+| 一机一配对 + dsh 实例多路复用 | 考虑过并否决（`docs/one-pair-per-mac.md`）：多 dsh 是罕见场景，已由第二 `ROWEL_HOME` 身份覆盖（锁/后缀/工具俱全）；为它新建协议字段与引擎层是给罕见场景买优雅，维护面不划算 |
 
 **把电脑的管理面搬到手机上，只会让界面变成 webui 的缩小版**——那正是要避免的。
 

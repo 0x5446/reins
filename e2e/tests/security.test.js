@@ -11,12 +11,12 @@ import assert from 'node:assert/strict'
 import { Socket, createServer } from 'node:net'
 import test from 'node:test'
 import WebSocket from 'ws'
-import { probeDsh, revokePeer } from '@reins/bridle'
-import { generateKeyPair } from '@reins/protocol'
-import { HandshakeRefused, ReinsPhone, startStack, waitFor } from '../lib/index.js'
+import { probeDsh, revokePeer } from '@rowel/bridle'
+import { generateKeyPair } from '@rowel/protocol'
+import { HandshakeRefused, RowelPhone, startStack, waitFor } from '../lib/index.js'
 
-const DSH_URL = process.env.REINS_E2E_DSH_URL ?? await probeDsh()
-const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set REINS_E2E_DSH_URL' : false
+const DSH_URL = process.env.ROWEL_E2E_DSH_URL ?? await probeDsh()
+const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set ROWEL_E2E_DSH_URL' : false
 
 test('a device with no pairing token is refused', { skip, timeout: 60_000 }, async (t) => {
   const stack = await startStack({ dshUrl: DSH_URL })
@@ -24,7 +24,7 @@ test('a device with no pairing token is refused', { skip, timeout: 60_000 }, asy
   await stack.waitForRelay()
 
   const bundle = { ...stack.invite().bundle }
-  const stranger = new ReinsPhone({ bundle, pairing: false, prefer: 'relay', name: 'Stranger' })
+  const stranger = new RowelPhone({ bundle, pairing: false, prefer: 'relay', name: 'Stranger' })
   t.after(() => { stranger.close() })
 
   await assert.rejects(() => stranger.connect(), (error) => {
@@ -41,13 +41,13 @@ test('a stolen pairing token works exactly once', { skip, timeout: 60_000 }, asy
   await stack.waitForRelay()
   const bundle = stack.invite().bundle
 
-  const owner = new ReinsPhone({ bundle, prefer: 'relay', name: 'Owner iPhone' })
+  const owner = new RowelPhone({ bundle, prefer: 'relay', name: 'Owner iPhone' })
   t.after(() => { owner.close() })
   await owner.connect()
 
   // Someone photographed the QR over the owner's shoulder. The token is already
   // spent, so their device is just another unpaired stranger.
-  const thief = new ReinsPhone({ bundle, prefer: 'relay', name: 'Thief iPhone' })
+  const thief = new RowelPhone({ bundle, prefer: 'relay', name: 'Thief iPhone' })
   t.after(() => { thief.close() })
   await assert.rejects(() => thief.connect(), (error) => error.reason === 'unpaired')
   assert.equal(stack.state.peers.length, 1)
@@ -62,7 +62,7 @@ test('a device believing the wrong machine key cannot complete a handshake', { s
   // a bundle the phone did not scan. Noise IK encrypts the initiator's first
   // message to the key it believes, so the real Bridle simply cannot open it.
   const forged = { ...stack.invite().bundle, key: generateKeyPair().publicKey.toString('base64url') }
-  const phone = new ReinsPhone({ bundle: forged, prefer: 'relay', name: 'Misled iPhone' })
+  const phone = new RowelPhone({ bundle: forged, prefer: 'relay', name: 'Misled iPhone' })
   t.after(() => { phone.close() })
 
   await assert.rejects(() => phone.connect())
@@ -75,14 +75,14 @@ test('a revoked device cannot come back', { skip, timeout: 60_000 }, async (t) =
   await stack.waitForRelay()
   const bundle = stack.invite().bundle
 
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Lost iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Lost iPhone' })
   await phone.connect()
   phone.close()
 
   const removed = revokePeer(stack.state, phone.keys.publicKey.toString('base64url'))
   assert.equal(removed?.name, 'Lost iPhone')
 
-  const returning = new ReinsPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  const returning = new RowelPhone({ bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
   t.after(() => { returning.close() })
   await assert.rejects(() => returning.connect(), (error) => error.reason === 'unpaired')
 })
@@ -104,7 +104,7 @@ test('the relay only ever sees ciphertext', { skip, timeout: 120_000 }, async (t
   t.after(() => { tap.close() })
 
   const bundle = { ...stack.invite().bundle, relay: `http://127.0.0.1:${String(tap.address().port)}` }
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Tapped iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Tapped iPhone' })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -133,7 +133,7 @@ test('a tampered frame tears the tunnel down instead of being accepted', { skip,
   await stack.waitForRelay()
   const bundle = stack.invite().bundle
 
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Honest iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Honest iPhone' })
   t.after(() => { phone.close() })
   await phone.connect()
   assert.equal((await phone.call('host.describe', {})).ok, true)
@@ -189,7 +189,7 @@ test('a client from the future is refused in a way it can act on', { skip, timeo
   const stack = await startStack({ dshUrl: DSH_URL })
   t.after(() => stack.stop())
 
-  const phone = new ReinsPhone({
+  const phone = new RowelPhone({
     bundle: stack.invite().bundle,
     prefer: 'direct',
     versions: [99],
@@ -213,7 +213,7 @@ test('a client that predates negotiation still connects', { skip, timeout: 60_00
   const stack = await startStack({ dshUrl: DSH_URL })
   t.after(() => stack.stop())
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [] })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [] })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -226,7 +226,7 @@ test('a client offering several versions gets the highest shared one', { skip, t
 
   // Offers a version this build does not have, plus one it does. The machine
   // must fall back rather than refuse.
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [7, 1] })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'direct', versions: [7, 1] })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()

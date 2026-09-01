@@ -9,10 +9,10 @@
  * else. Untested, "the object is addressed by the code" is a sentence in a
  * README.
  *
- * Skipped unless REINS_WORKER_URL is set, because it needs a Worker somewhere:
+ * Skipped unless ROWEL_WORKER_URL is set, because it needs a Worker somewhere:
  *
- *   npx wrangler dev --config relay-worker/wrangler.jsonc --var REINS_SWEEP_INTERVAL_MS:2000
- *   REINS_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
+ *   npx wrangler dev --config relay-worker/wrangler.jsonc --var ROWEL_SWEEP_INTERVAL_MS:2000
+ *   ROWEL_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
  *
  * The sweep interval is not optional. Two tests need a sweep to happen inside
  * their lifetime rather than ten minutes later, and one of them needs it only
@@ -24,13 +24,13 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { RelayClient, createInvitation, publishInvitation } from '@reins/bridle'
-import { FakeAgent, ReinsPhone, startStack, waitFor } from '@reins/e2e'
+import { RelayClient, createInvitation, publishInvitation } from '@rowel/bridle'
+import { FakeAgent, RowelPhone, startStack, waitFor } from '@rowel/e2e'
 
-const RELAY_URL = process.env.REINS_WORKER_URL
+const RELAY_URL = process.env.ROWEL_WORKER_URL
 
 const skip = RELAY_URL === undefined
-  ? 'no worker running; set REINS_WORKER_URL to one'
+  ? 'no worker running; set ROWEL_WORKER_URL to one'
   : false
 
 /** Local, but still an upgrade and several Durable Object round trips. */
@@ -99,7 +99,7 @@ test('a short code buys the bundle exactly once', { skip, timeout: TIMEOUT_MS },
   // The claimed bundle has to be usable, not merely equal: that is the whole
   // point of the short-code path, and a Relay handing back a plausible-looking
   // bundle nobody can pair with would pass every check above.
-  const phone = new ReinsPhone({ bundle, prefer: 'relay', name: 'Typed Code' })
+  const phone = new RowelPhone({ bundle, prefer: 'relay', name: 'Typed Code' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Worker Short Code')
@@ -158,7 +158,7 @@ test('a multi-megabyte frame crosses intact in both directions', { skip, timeout
   agent.answers.set('echo', { ok: true, value: { payload } })
   const stack = await bridle(t, 'Worker Big Frame', agent)
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Big Frame' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Big Frame' })
   t.after(() => { phone.close() })
   await phone.connect()
 
@@ -170,7 +170,7 @@ test('a multi-megabyte frame crosses intact in both directions', { skip, timeout
 
 test('a circuit still routes after a long idle', { skip, timeout: 90_000 }, async (t) => {
   const stack = await bridle(t, 'Worker Hibernation')
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Sleeper' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Sleeper' })
   t.after(() => { phone.close() })
   await phone.connect()
   assert.equal((await phone.call('host.describe', {})).ok, true)
@@ -203,7 +203,7 @@ test('a second socket for the same machine displaces the first', { skip, timeout
   const after = await health()
   assert.equal(after.machines, before.machines, 'one machine, not two')
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'After' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'After' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Worker Displacement', 'phones reach the surviving socket')
@@ -259,7 +259,7 @@ test('the sweep does not evict a machine that is still there', { skip, timeout: 
   // through the path that already worked. What can be tested is the failure
   // that would actually hurt — a sweep that mistakes a live machine for a dead
   // one and cuts off someone who is using it. Run this against a Worker with
-  // REINS_SWEEP_INTERVAL_MS set low enough for several sweeps to pass.
+  // ROWEL_SWEEP_INTERVAL_MS set low enough for several sweeps to pass.
   const before = (await health()).machines
   const stack = await bridle(t, 'Still Here')
   assert.equal((await health()).machines, before + 1)
@@ -271,7 +271,7 @@ test('the sweep does not evict a machine that is still there', { skip, timeout: 
   assert.equal(stack.relayClient.connectionState, 'online', 'the Bridle was cut off by its own Relay')
 
   // And it is still usable, not merely counted.
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, name: 'After the sweep' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, name: 'After the sweep' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.machine, 'Still Here')
@@ -289,7 +289,7 @@ test('a Relay with no push key survives being asked to ring a phone', { skip, ti
   await waitFor(() => agent.isPumping('mux'), TIMEOUT_MS, 'the Bridle to subscribe')
 
   const invitation = stack.invite()
-  const phone = new ReinsPhone({ bundle: invitation.bundle, prefer: 'relay', name: 'Sleeper' })
+  const phone = new RowelPhone({ bundle: invitation.bundle, prefer: 'relay', name: 'Sleeper' })
   await phone.connect()
   phone.wake('b'.repeat(64))
   await waitFor(() => stack.state.peers[0]?.push !== undefined, 5_000, 'the token to be stored')
@@ -311,7 +311,7 @@ test('a Relay with no push key survives being asked to ring a phone', { skip, ti
   assert.equal(machine.machines >= 1, true, 'the machine left the directory')
 
   agent.answers.set('host.describe', { ok: true, value: { alive: true } })
-  const again = new ReinsPhone({ bundle: invitation.bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
+  const again = new RowelPhone({ bundle: invitation.bundle, keys: phone.keys, pairing: false, prefer: 'relay' })
   t.after(() => { again.close() })
   await again.connect()
   const described = await again.call('host.describe', {})

@@ -13,21 +13,21 @@ export interface Env {
   /** One per outstanding short code. */
   PAIR_CODE: DurableObjectNamespace<PairCode>
   /** Global machine ceiling; see `limits.ts`. */
-  REINS_MAX_MACHINES?: string
+  ROWEL_MAX_MACHINES?: string
   /** Seconds between directory sweeps; only a test ever sets it. */
-  REINS_SWEEP_INTERVAL_MS?: string
+  ROWEL_SWEEP_INTERVAL_MS?: string
   /** Global circuit ceiling; see `limits.ts`. */
-  REINS_MAX_CIRCUITS?: string
+  ROWEL_MAX_CIRCUITS?: string
   // APNs. All four or none: any missing and the Relay simply never wakes
   // anyone, which is the state it shipped in and every other function tolerates.
   /** The `.p8` contents. A secret — `wrangler secret put`, never a var. */
-  REINS_APNS_KEY?: string
+  ROWEL_APNS_KEY?: string
   /** The APNs key's ten-character id. */
-  REINS_APNS_KEY_ID?: string
+  ROWEL_APNS_KEY_ID?: string
   /** The paid team's ten-character id. */
-  REINS_APNS_TEAM_ID?: string
+  ROWEL_APNS_TEAM_ID?: string
   /** The app's bundle id, which APNs calls the topic. */
-  REINS_APNS_TOPIC?: string
+  ROWEL_APNS_TOPIC?: string
 }
 
 /** The name of the one Exchange. There is exactly one, and this is why. */

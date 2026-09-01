@@ -3,7 +3,7 @@
  * Emit the cross-implementation test vectors.
  *
  * There are two implementations of this protocol — the TypeScript one in
- * `protocol/src` and the Swift one in `ios/Reins/Protocol` — and a wire protocol
+ * `protocol/src` and the Swift one in `ios/Rowel/Protocol` — and a wire protocol
  * with two implementations is a wire protocol with two dialects unless something
  * forces them to agree. This is that something: fixed keys and fixed ephemerals
  * make the whole handshake deterministic, so the Swift tests can assert on exact
@@ -58,7 +58,7 @@ const initiatorEphemeral = pair(FIXTURES.initiatorEphemeral)
 const responderEphemeral = pair(FIXTURES.responderEphemeral)
 const signing = { privateKey: Buffer.from(FIXTURES.bridleSigning, 'hex'), publicKey: signingPublicKeyOf(Buffer.from(FIXTURES.bridleSigning, 'hex')) }
 
-const helloPayload = Buffer.from(JSON.stringify({ versions: [1], name: 'Test iPhone', client: 'reins-vectors/1' }), 'utf8')
+const helloPayload = Buffer.from(JSON.stringify({ versions: [1], name: 'Test iPhone', client: 'rowel-vectors/1' }), 'utf8')
 const replyPayload = Buffer.from(JSON.stringify({ ok: true, machine: 'Vector Mac', bridle: '0.1.0' }), 'utf8')
 
 const initiator = new NoiseInitiator(app, bridle.publicKey, TUNNEL_PROLOGUE, initiatorEphemeral)
@@ -78,7 +78,7 @@ const bridleToApp = ['{"t":"ready","version":1,"bridle":"0.1.0","machine":"Vecto
 
 const bundle = {
   v: 1,
-  relay: 'https://relay.reins.app',
+  relay: 'https://relay.rowel.app',
   direct: ['ws://192.168.1.20:61000'],
   device: deviceIdFor(signing.publicKey),
   key: bridle.publicKey.toString('base64url'),
@@ -131,10 +131,10 @@ const vectors = {
   // the bare nonce would interoperate right up until it did not.
   relayAuth: {
     nonce,
-    registrationBody: `reins-relay-registration/v1\n${nonce}`,
+    registrationBody: `rowel-relay-registration/v1\n${nonce}`,
     registrationSignature: signRegistration(signing.privateKey, nonce),
     pairOfferCode: 'KTPQ-3WRM',
-    pairOfferBody: 'reins-pair-offer/v1\nKTPQ-3WRM',
+    pairOfferBody: 'rowel-pair-offer/v1\nKTPQ-3WRM',
     pairOfferSignature: signPairOffer(signing.privateKey, 'KTPQ-3WRM'),
   },
   frames: [
@@ -158,6 +158,6 @@ if (!read.remoteStatic.equals(app.publicKey)) throw new Error('responder authent
 if (decodePairingLink(vectors.pairing.link).token !== bundle.token) throw new Error('pairing link does not round trip')
 
 const here = dirname(fileURLToPath(import.meta.url))
-const target = join(here, '..', '..', 'ios', 'ReinsTests', 'Fixtures', 'protocol-vectors.json')
+const target = join(here, '..', '..', 'ios', 'RowelTests', 'Fixtures', 'protocol-vectors.json')
 writeFileSync(target, `${JSON.stringify(vectors, null, 2)}\n`)
 process.stdout.write(`wrote ${target}\n`)

@@ -12,7 +12,7 @@ pairing identity) so the shots never contain a real project path, a real
 conversation, or a name belonging to whoever is running it. The sample repo it
 works in is `~/code/checkout-api`, seeded by the script.
 
-The driver is `ios/ReinsUITests/Screenshots.swift`. Each shot asserts it is
+The driver is `ios/RowelUITests/Screenshots.swift`. Each shot asserts it is
 looking at the right screen before it saves, because a screenshot taken on
 faith reaches the store listing showing the wrong page and nothing fails to say
 so.
@@ -44,5 +44,5 @@ dashboard) so the marketing page stays under a megabyte. The originals here are
 
 `streaming.mp4` is a real turn arriving over the tunnel — thinking, tool cards,
 then the answer a word at a time. It is deliberately **not** committed (see
-`.gitignore`): regenerate it with `ios/ReinsUITests/Recording.swift`, which sits
+`.gitignore`): regenerate it with `ios/RowelUITests/Recording.swift`, which sits
 in the conversation while a prompt is sent from the machine side.

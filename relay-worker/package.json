@@ -1,7 +1,7 @@
 {
-  "name": "@reins/relay-worker",
+  "name": "@rowel/relay-worker",
   "version": "0.1.2",
-  "description": "Reins Relay on Cloudflare Workers and Durable Objects.",
+  "description": "Rowel Relay on Cloudflare Workers and Durable Objects.",
   "license": "MIT",
   "type": "module",
   "private": true,

@@ -6,12 +6,12 @@ body:
     attributes:
       value: |
         Before anything else: **do not paste a transcript, a diff, a command the
-        agent ran, or the contents of `~/.reins/bridle.json`.** That file holds
+        agent ran, or the contents of `~/.rowel/bridle.json`.** That file holds
         this machine's private key. Redact freely — a report with the interesting
         parts removed is still useful, and one that leaks a key is not recoverable.
 
         If this is a security problem, close this and read
-        [SECURITY.md](https://github.com/0x5446/reins/blob/main/SECURITY.md) instead.
+        [SECURITY.md](https://github.com/0x5446/rowel/blob/main/SECURITY.md) instead.
 
   - type: textarea
     id: what

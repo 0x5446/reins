@@ -9,7 +9,7 @@
  * listening, numbers every downlink frame, and replays the gap on reconnect.
  */
 
-import type { StreamName } from '@reins/protocol'
+import type { StreamName } from '@rowel/protocol'
 
 /** One buffered downlink frame. */
 export interface LoggedEvent {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The whole computer-side surface of Reins: one command, sensible defaults, and
+ * The whole computer-side surface of Rowel: one command, sensible defaults, and
  * a first run that ends with a QR code on screen and nothing else to decide.
  *
  * `bridle` finds the harness, starts it if it is not running, opens a tunnel
@@ -13,13 +13,13 @@ import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
-import { keyFingerprint } from '@reins/protocol'
+import { keyFingerprint } from '@rowel/protocol'
 import { BridleCore } from './core.ts'
 import { DirectServer } from './direct-server.ts'
 import { DshClient } from './dsh/client.ts'
 import { dshHomeUrl, ensureDsh, probeDsh } from './dsh/discovery.ts'
-import { loadState, reinsHome, revokePeer, saveState, signingKeys, staticKeys } from './identity.ts'
-import { deviceIdFor } from '@reins/protocol'
+import { loadState, rowelHome, revokePeer, saveState, signingKeys, staticKeys } from './identity.ts'
+import { deviceIdFor } from '@rowel/protocol'
 import { BackupError, describeBackup, exportIdentity, importIdentity } from './backup.ts'
 import { createInvitation, publishInvitation, toHttpUrl, type Invitation } from './pair.ts'
 import { RelayClient } from './relay-client.ts'
@@ -137,11 +137,11 @@ async function start(options: Options): Promise<void> {
   // One Bridle per identity, refused before anything is touched. Two of them
   // register at the Relay as the same machine and displace each other in a
   // silent loop at retry speed; the usual way it happens is not running this
-  // command twice but running it while the dsh plugin already holds ~/.reins.
+  // command twice but running it while the dsh plugin already holds ~/.rowel.
   const incumbent = competingDaemon()
   if (incumbent !== undefined) {
     say(`a Bridle for this identity is already running (pid ${String(incumbent.pid)}, ${incumbent.version}) — likely the dsh plugin or an installed service.`)
-    say('Stop that one first, or give this one its own home with REINS_HOME.')
+    say('Stop that one first, or give this one its own home with ROWEL_HOME.')
     process.exitCode = 1
     return
   }
@@ -171,7 +171,7 @@ async function start(options: Options): Promise<void> {
   }
   const dshOverride = flagString(options, 'dsh')
 
-  say(`Reins Bridle ${VERSION} · ${state.machineName}`)
+  say(`Rowel Bridle ${VERSION} · ${state.machineName}`)
   // Binding resolution, strongest anchor first:
   //   --dsh <url>        a person named an address        → pinned
   //   --dsh-home <path>  a person named a *world*; its own
@@ -340,11 +340,11 @@ async function printInvitation(invitation: Invitation, state: ReturnType<typeof 
   const drawable = process.stdout.isTTY === true
   if (drawable) {
     const qr = await QRCode.toString(invitation.link, { type: 'terminal', small: true, errorCorrectionLevel: 'M' })
-    say('Scan this in the Reins app:')
+    say('Scan this in the Rowel app:')
     process.stdout.write(`\n${qr}\n`)
     say(`or type this code:   ${invitation.code}`)
   } else {
-    say('Pair the Reins app with either of these:')
+    say('Pair the Rowel app with either of these:')
     say(`code:                ${invitation.code}`)
   }
   if (forceLink || !drawable) say(`link:                ${invitation.link}`)
@@ -356,13 +356,13 @@ async function printInvitation(invitation: Invitation, state: ReturnType<typeof 
   say(`identity:            ${keyFingerprint(staticKeys(state).publicKey)}`)
   say(`expires:             ${new Date(invitation.expiresAt).toLocaleTimeString()}`)
   say('')
-  say('No app yet? Get it at https://reins.novabox.ai/get')
+  say('No app yet? Get it at https://rowel.novabox.ai/get')
 }
 
 /**
  * Write an encrypted copy of this machine's identity.
  *
- * Without this, `~/.reins/bridle.json` is a single point of failure with no
+ * Without this, `~/.rowel/bridle.json` is a single point of failure with no
  * recovery: lose it and every paired phone stops recognising the machine, with
  * no way to tell them apart from an impostor.
  * @param options - parsed command line; the positional argument is the path.
@@ -506,7 +506,7 @@ async function status(): Promise<void> {
   say(`machine   ${state.machineName}`)
   say(`identity  ${keyFingerprint(staticKeys(state).publicKey)}`)
   say(`device    ${state.deviceId}`)
-  say(`state     ${join(reinsHome(), 'bridle.json')}`)
+  say(`state     ${join(rowelHome(), 'bridle.json')}`)
   if (runtime === undefined) {
     say('bridle    not running · start it with "bridle start"')
   } else {
@@ -580,7 +580,7 @@ function service(options: Options): void {
 /**
  * Every identity on this machine, one glance.
  *
- * Everything else in this file speaks about one REINS_HOME; this is the
+ * Everything else in this file speaks about one ROWEL_HOME; this is the
  * command that answers the question that comes before all of them. Read
  * fresh from each home's own files — the index remembers only paths.
  */
@@ -590,9 +590,9 @@ function instances(): void {
     say('no identities on this machine yet · "bridle start" creates one')
     return
   }
-  const current = reinsHome()
+  const current = rowelHome()
   for (const instance of found) {
-    say(instance.home === current ? `${instance.home}   ← current REINS_HOME` : instance.home)
+    say(instance.home === current ? `${instance.home}   ← current ROWEL_HOME` : instance.home)
     say(`  machine   ${instance.machineName}`)
     say(`  device    ${instance.deviceId}`)
     if (instance.running === undefined) {
@@ -606,7 +606,7 @@ function instances(): void {
     say('')
   }
   say('Commands act on one identity at a time:')
-  say('  REINS_HOME=<path> bridle status | pair | revoke | reset')
+  say('  ROWEL_HOME=<path> bridle status | pair | revoke | reset')
 }
 
 /**
@@ -619,7 +619,7 @@ function instances(): void {
  * one-way: every paired phone keeps a dead entry it must forget by hand.
  */
 async function reset(options: Options): Promise<void> {
-  const home = reinsHome()
+  const home = rowelHome()
   if (!holdsIdentity(home)) {
     say(`nothing to reset · ${home} holds no identity`)
     return
@@ -652,7 +652,7 @@ async function reset(options: Options): Promise<void> {
 async function doctor(): Promise<void> {
   const state = loadState()
   const major = Number(process.versions.node.split('.')[0] ?? '0')
-  check(major >= 22, `node ${process.versions.node}`, 'Reins needs Node 22 or newer')
+  check(major >= 22, `node ${process.versions.node}`, 'Rowel needs Node 22 or newer')
   const found = await probeDsh(state.dshUrl)
   check(found !== undefined, `harness at ${found ?? state.dshUrl}`, 'no dsh web server answered; "bridle start" can launch one')
   let relayReachable = false
@@ -673,14 +673,14 @@ function check(ok: boolean, good: string, bad: string): void {
 }
 
 function usage(): void {
-  process.stdout.write(`Reins Bridle ${VERSION} — reach your local DeepSeek Harness from your phone.
+  process.stdout.write(`Rowel Bridle ${VERSION} — reach your local DeepSeek Harness from your phone.
 
   bridle                    start the bridle (and pair, on first run)
   bridle pair               show a new pairing QR and short code
   bridle status             machine, relay, harness, and paired devices
   bridle devices            list paired devices
   bridle instances          every identity on this machine, and who runs it
-  bridle reset              erase this identity (REINS_HOME picks which)
+  bridle reset              erase this identity (ROWEL_HOME picks which)
   bridle revoke <prefix>    remove a paired device
   bridle service install    keep the bridle running after login
   bridle service uninstall  remove the background service
@@ -697,7 +697,7 @@ Options for start:
   --direct-port <n>   fixed port for the local-network tunnel
   --advertise <url>   extra address(es) to put in the pairing code, comma
                       separated. For a tunnel hostname the machine cannot
-                      discover itself, e.g. wss://reins.example.com. LAN and
+                      discover itself, e.g. wss://rowel.example.com. LAN and
                       Tailscale addresses are found automatically.
   --no-direct         do not listen on the local network
   --no-auto-start     never launch the harness

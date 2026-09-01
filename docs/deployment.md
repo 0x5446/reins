@@ -4,9 +4,9 @@
 
 | 域名 | 是什么 |
 |---|---|
-| `reins-relay.novabox.ai` | Relay。app 和 Bridle 拨的就是这个，别的什么都没有 |
-| `reins.novabox.ai` | 官网四个页面 + `/install` 重定向。**不承载任何中继路径** |
-| `reins-relay-standby.novabox.ai` | Node relay 的常驻备用地址，见 §1.6 |
+| `rowel-relay.novabox.ai` | Relay。app 和 Bridle 拨的就是这个，别的什么都没有 |
+| `rowel.novabox.ai` | 官网四个页面 + `/install` 重定向。**不承载任何中继路径** |
+| `rowel-relay-standby.novabox.ai` | Node relay 的常驻备用地址，见 §1.6 |
 
 它们共用过一天同一个域名，那是个错误：站点是公开营销页，Relay 是基础设施，而 Cloudflare 的每一项控制（缓存规则、WAF 规则、"我正被攻击"开关）都是**按主机名生效的**。一条冲着页面去的规则会连 Relay 一起命中，而 Relay 是不能挂的那一半。共用还意味着任一侧的 Worker 写出 `/*` 路由就能把另一侧整个吞掉。
 
@@ -30,13 +30,13 @@
 | 项 | 值 |
 |---|---|
 | 主机 | 阿里云北京，Ubuntu 26.04，2 核 / 1.5 GB |
-| Relay | systemd `reins-relay`，监听 `127.0.0.1:8787`，**不开公网端口** |
-| 源码路径 | `/opt/reins`，`root:root` 只读，服务账号 `reins`（nologin） |
-| 入口 | Cloudflare Tunnel `reins-relay`，systemd `cloudflared` |
+| Relay | systemd `rowel-relay`，监听 `127.0.0.1:8787`，**不开公网端口** |
+| 源码路径 | `/opt/rowel`，`root:root` 只读，服务账号 `rowel`（nologin） |
+| 入口 | Cloudflare Tunnel `rowel-relay`，systemd `cloudflared` |
 | 隧道配置 | `/etc/cloudflared/config.yml`（本地管理，不是面板管理） |
-| `reins-relay.novabox.ai` | Cloudflare Worker `reins-relay`（custom domain），Durable Objects |
-| `reins-relay-standby.novabox.ai` | 北京那台的 Node relay，经隧道 |
-| `reins.novabox.ai` | Worker `reins-site`（静态资源，无源站）+ `/install` 重定向规则 |
+| `rowel-relay.novabox.ai` | Cloudflare Worker `rowel-relay`（custom domain），Durable Objects |
+| `rowel-relay-standby.novabox.ai` | 北京那台的 Node relay，经隧道 |
+| `rowel.novabox.ai` | Worker `rowel-site`（静态资源，无源站）+ `/install` 重定向规则 |
 
 站点那个域名按路径分：
 
@@ -51,7 +51,7 @@
 验证方式是 `e2e/tests/deployed.test.js`，它打的是真实公网地址而不是进程内的 Relay：
 
 ```sh
-REINS_E2E_RELAY_URL=wss://reins-relay.novabox.ai npm run build && \
+ROWEL_E2E_RELAY_URL=wss://rowel-relay.novabox.ai npm run build && \
   node --test e2e/tests/deployed.test.js
 
 # 或者两套 Relay 一起验，确认随时可切：
@@ -80,7 +80,7 @@ PORT=8787 node relay/lib/main.js
 |---|---|---|
 | `PORT` | `8787` | 监听端口 |
 | `HOST` | `0.0.0.0` | 监听地址 |
-| `REINS_INSTALL_SCRIPT` | 仓库里的 `install.sh` | `/install` 返回哪个文件；设成空字符串就关掉这个路由 |
+| `ROWEL_INSTALL_SCRIPT` | 仓库里的 `install.sh` | `/install` 返回哪个文件；设成空字符串就关掉这个路由 |
 
 ### 路由
 
@@ -94,7 +94,7 @@ PORT=8787 node relay/lib/main.js
 | `WS` | `/v1/bridle` | Bridle 的常连 |
 | `WS` | `/v1/app` | app 的连接 |
 
-`/install` 这条路由**默认关闭**（`REINS_INSTALL_SCRIPT=` 空字符串）。
+`/install` 这条路由**默认关闭**（`ROWEL_INSTALL_SCRIPT=` 空字符串）。
 
 它存在是给自托管的人用的——自己跑一套时，一个域名一次部署确实省事。但**官方部署不开它**：把安装脚本和公网中继放在同一个部署单元，等于把一次中继入侵放大成对所有新用户的供应链投毒。官方的安装脚本从仓库直接取（§2）。
 
@@ -105,7 +105,7 @@ Relay 自己不做 TLS。放在 Caddy / nginx / 云厂商的 LB 后面，证书�
 Caddy 够用，两行：
 
 ```
-reins.novabox.ai {
+rowel.novabox.ai {
 	reverse_proxy 127.0.0.1:8787
 }
 ```
@@ -116,18 +116,18 @@ WebSocket 不用额外配置，Caddy 默认透传 upgrade。
 
 DNS 在 Cloudflare，所以最省事的两条路：
 
-**A. 有公网机器** —— A 记录 `reins` 指向那台机器，橙云（proxied）打开。Cloudflare 的代理支持 WebSocket，不用额外开关。源站上放 Caddy 或者直接让 Cloudflare 回源到 8787。
+**A. 有公网机器** —— A 记录 `rowel` 指向那台机器，橙云（proxied）打开。Cloudflare 的代理支持 WebSocket，不用额外开关。源站上放 Caddy 或者直接让 Cloudflare 回源到 8787。
 
 **B. Cloudflare Tunnel** —— 现在用的就是这条。理由见下面的备案一节；简单说是：这台机器在中国大陆，备案这条路对 `.ai` 是死的，隧道让执法链条够不着。**注意这是"够不着"，不是"不适用"**——早先这里写的是"不监听公网端口就不构成对外提供服务"，那句话是错的。
 
 ```sh
 cloudflared tunnel login                      # 浏览器授权，写出 ~/.cloudflared/cert.pem
-cloudflared tunnel create reins-relay
-cloudflared tunnel route dns reins-relay reins.novabox.ai
+cloudflared tunnel create rowel-relay
+cloudflared tunnel route dns rowel-relay rowel.novabox.ai
 sudo cloudflared service install              # 读 /etc/cloudflared/config.yml
 ```
 
-`config.yml` 里配 ingress（`reins.novabox.ai` → `http://127.0.0.1:8787`，兜底 `http_status:404`）。
+`config.yml` 里配 ingress（`rowel.novabox.ai` → `http://127.0.0.1:8787`，兜底 `http_status:404`）。
 
 **为什么用本地管理的隧道而不是面板管理的**：面板管理需要写 `PUT /accounts/*/cfd_tunnel/*/configurations`，而 Cloudflare 的 WAF 会拦掉从 dashboard 会话发出的程序化写请求（403 + "Attention Required" 页面），Zero Trust 那套 UI 又要先走 onboarding。`cloudflared tunnel login` 拿到的 `cert.pem` 直接带 DNS 写权限，一条命令建记录，绕开这两处。配置在 `/etc/cloudflared/config.yml` 里也更容易和仓库对上。
 
@@ -157,8 +157,8 @@ sudo cloudflared service install              # 读 /etc/cloudflared/config.yml
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `REINS_MAX_MACHINES` | 1000 | 机器身份就是一对密钥，谁都能造一万个。没有全局上限，这个免费中继就是别人出钱的通用加密转发器 |
-| `REINS_MAX_CIRCUITS` | 4000 | 很多机器各开几条时的内存兜底 |
+| `ROWEL_MAX_MACHINES` | 1000 | 机器身份就是一对密钥，谁都能造一万个。没有全局上限，这个免费中继就是别人出钱的通用加密转发器 |
+| `ROWEL_MAX_CIRCUITS` | 4000 | 很多机器各开几条时的内存兜底 |
 
 按每连接约 40 KB 估：1000 台机器 + 4000 条线路 ≈ 200 MB，一台 1 GB 的小机器扛得住。**机器更大就往上调，不要留着默认值假装容量更大。**
 
@@ -240,7 +240,7 @@ Relay 看不到明文、看不到你的 dsh 地址、看不到会话内容。它
 
    换个可备案域名是必要条件，不是充分条件。备案是**通过境内接入服务商**办理的，所以中国区版本要凑齐三样：可备案域名（`.com` / `.cn`，注册商也须在工信部批复名单里）、境内备案主体、以及**跑在境内服务器上的服务**——最后这条意味着不能指向境外 Relay。再加上 App 备案。
 
-   所以中国区不是"改个域名指向"，是**另一套部署**：境内 Relay + 另一个域名 + 独立备案。好在它和现在这套不冲突——Bridle 和 app 代码不变，变的只是 app 里那一个 relay 地址（`ios/Reins/Net/RelayDirectory.swift` 的 `defaultRelayURL`，以及 `bridle/src/identity.ts` 的 `DEFAULT_RELAY_URL`）。真要做的时候按 §1.5 这一节重新评估一遍，不要照抄现在这套的结论。
+   所以中国区不是"改个域名指向"，是**另一套部署**：境内 Relay + 另一个域名 + 独立备案。好在它和现在这套不冲突——Bridle 和 app 代码不变，变的只是 app 里那一个 relay 地址（`ios/Rowel/Net/RelayDirectory.swift` 的 `defaultRelayURL`，以及 `bridle/src/identity.ts` 的 `DEFAULT_RELAY_URL`）。真要做的时候按 §1.5 这一节重新评估一遍，不要照抄现在这套的结论。
 2. **被动牵连停机**：他人把未备案域名解析到这台 ECS 的公网 IP，触发平台巡检直接停机。跟我们怎么部署无关，纯看运气，有真实案例。
 3. **配合调查时无法自证**：一台境内机器跑端到端加密中继、拿不出明文、没有日志。真被问到时，解释成本远高于备案本身。
 4. 备案罚则本身（33 号令：责令改正 + 1 万元罚款）——需要管局立案，常规入口是接入商转达，而那条链断了。
@@ -266,15 +266,15 @@ Relay 看不到明文、看不到你的 dsh 地址、看不到会话内容。它
 
 | 类型 | 名称 | 内容 | 代理 |
 |---|---|---|---|
-| `CNAME` | `reins` | `a553d87c-715d-4045-9e2d-012ee543c96c.cfargotunnel.com` | 橙云开 |
+| `CNAME` | `rowel` | `a553d87c-715d-4045-9e2d-012ee543c96c.cfargotunnel.com` | 橙云开 |
 
-自己重建的话不用手动填，跑 `cloudflared tunnel route dns <隧道名> reins.novabox.ai`。
+自己重建的话不用手动填，跑 `cloudflared tunnel route dns <隧道名> rowel.novabox.ai`。
 
 验证：
 
 ```sh
-dig +short reins.novabox.ai
-curl -fsSL https://reins.novabox.ai/healthz
+dig +short rowel.novabox.ai
+curl -fsSL https://rowel.novabox.ai/healthz
 ```
 
 `dig` 出来了但 `curl` 说解析不了，是本机解析器缓存了刚才那次 NXDOMAIN（SOA 的 negative TTL 是 1800 秒）。macOS 上 `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`。
@@ -284,27 +284,27 @@ curl -fsSL https://reins.novabox.ai/healthz
 **不挂在 Relay 上**（见 §1）。仓库转公开后直接从 GitHub 取：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/0x5446/reins/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/0x5446/rowel/main/install.sh | sh
 ```
 
 短地址已经配好了，是一条 Cloudflare **Redirect Rule**（不是 Worker，不用写代码）：
 
 ```
-reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/reins/main/install.sh
+rowel.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/rowel/main/install.sh
 ```
 
-这样 app 里那行 `curl -fsSL https://reins.novabox.ai/install | sh` 仍然成立，但中继被攻破**不会**污染安装链路——两者是不同的信任域。
+这样 app 里那行 `curl -fsSL https://rowel.novabox.ai/install | sh` 仍然成立，但中继被攻破**不会**污染安装链路——两者是不同的信任域。
 
 重定向本身现在就生效，但跟过去是 404：仓库还是私有的。**仓库转公开的那一刻它自己就通了**，不需要再动 Cloudflare。
 
-指向 `main` 而不是某个 tag，是有意的：这一层是引导脚本，永远取最新；`install.sh` 内部再用 `REINS_REF` 把真正 checkout 的源码钉到发布 tag 上。两层分开，改发布版本不用动 Cloudflare 规则。
+指向 `main` 而不是某个 tag，是有意的：这一层是引导脚本，永远取最新；`install.sh` 内部再用 `ROWEL_REF` 把真正 checkout 的源码钉到发布 tag 上。两层分开，改发布版本不用动 Cloudflare 规则。
 
 ### 转公开之前必须做完的
 
 仓库一旦公开，提交历史收不回来。这几条是不可绕过的：
 
 - [ ] **全历史秘密扫描**（`gitleaks detect --no-git` 与 `--log-opts=--all` 各一遍）
-- [ ] **打 tag**：`install.sh` 默认 checkout `REINS_REF`（现在是 `v0.1.0`）。这个 tag 不存在的话，安装脚本会在 `git clone --branch` 那步失败——私有期间没人跑得到，公开的第一分钟就有人跑得到
+- [ ] **打 tag**：`install.sh` 默认 checkout `ROWEL_REF`（现在是 `v0.1.0`）。这个 tag 不存在的话，安装脚本会在 `git clone --branch` 那步失败——私有期间没人跑得到，公开的第一分钟就有人跑得到
 - [x] LICENSE 就位（MIT）
 - [x] 包元数据不再是 `UNLICENSED` / `private`
 - [ ] 依赖许可证核对（`npm ls --all` 里没有 GPL 传染项）
@@ -315,7 +315,7 @@ reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/rei
 
 安装脚本本身能从 Relay 拿到，但它里面 `git clone` 的是私有仓库——没有 GitHub 访问权的人跑到那一步会失败，脚本会明确说是私有仓库并给出手动 clone 命令。要真正对外，仓库得转公开，或者改成从发布产物安装。
 
-脚本是幂等的（重跑是更新不是重装），装完把 `bridle` 链接到 `~/.local/bin`。app 里那行命令要改的话，改 `ios/Reins/App/Links.swift` 一处。
+脚本是幂等的（重跑是更新不是重装），装完把 `bridle` 链接到 `~/.local/bin`。app 里那行命令要改的话，改 `ios/Rowel/App/Links.swift` 一处。
 
 ---
 
@@ -323,10 +323,10 @@ reins.novabox.ai/install  →  302  https://raw.githubusercontent.com/0x5446/rei
 
 ### 上真机 / TestFlight
 
-签名已开。bundle id 是 `ai.novabox.reins`，team 从环境变量来：
+签名已开。bundle id 是 `ai.novabox.rowel`，team 从环境变量来：
 
 ```sh
-REINS_TEAM_ID=<你的 Team ID> xcodegen generate
+ROWEL_TEAM_ID=<你的 Team ID> xcodegen generate
 ```
 
 **免费个人 team 与付费的区别，是整个发布计划的分水岭：**
@@ -341,14 +341,14 @@ REINS_TEAM_ID=<你的 Team ID> xcodegen generate
 
 **一个决策卡三件事**：TestFlight、推送、上架的共同前置都是这 $99。
 
-付费会员是**另一个 team**，不是把个人 team 升级。个人 team 会继续以免费身份存在，`AVKUVD4FPN` 就是它——`isFreeProvisioningTeam: true`。所以 `REINS_TEAM_ID` 在付费之后要换成新的那个 10 位 id，用旧的会一路签到导出才报错。
+付费会员是**另一个 team**，不是把个人 team 升级。个人 team 会继续以免费身份存在，`AVKUVD4FPN` 就是它——`isFreeProvisioningTeam: true`。所以 `ROWEL_TEAM_ID` 在付费之后要换成新的那个 10 位 id，用旧的会一路签到导出才报错。
 
 ### 用 API key 发布，不要用 Xcode 登录
 
 `ios/release.sh` 做归档、导出、校验、上传，认证走 App Store Connect API key：
 
 ```sh
-REINS_TEAM_ID=<付费 team id> \
+ROWEL_TEAM_ID=<付费 team id> \
 ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> \
 ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<key id>.p8 \
 ios/release.sh
@@ -365,10 +365,10 @@ key 在 App Store Connect → Users and Access → Integrations 生成，`.p8` *
 推送要四个值，全都配上才生效，缺一个 Relay 就不叫醒任何人 —— 其余功能不受影响。
 
 ```sh
-npx wrangler secret put REINS_APNS_KEY --config relay-worker/wrangler.jsonc   # .p8 全文，粘进去
-npx wrangler secret put REINS_APNS_KEY_ID --config relay-worker/wrangler.jsonc
-npx wrangler secret put REINS_APNS_TEAM_ID --config relay-worker/wrangler.jsonc
-npx wrangler secret put REINS_APNS_TOPIC --config relay-worker/wrangler.jsonc  # ai.novabox.reins
+npx wrangler secret put ROWEL_APNS_KEY --config relay-worker/wrangler.jsonc   # .p8 全文，粘进去
+npx wrangler secret put ROWEL_APNS_KEY_ID --config relay-worker/wrangler.jsonc
+npx wrangler secret put ROWEL_APNS_TEAM_ID --config relay-worker/wrangler.jsonc
+npx wrangler secret put ROWEL_APNS_TOPIC --config relay-worker/wrangler.jsonc  # ai.novabox.rowel
 ```
 
 密钥在 https://developer.apple.com/account/resources/authkeys/list 建，勾 **Apple Push Notifications service (APNs)**。`.p8` **只能下载一次**。
@@ -387,7 +387,7 @@ npx wrangler secret put REINS_APNS_TOPIC --config relay-worker/wrangler.jsonc  #
 - **本地网络权限**：同 Wi-Fi 直连电脑。`INFOPLIST_KEY_NSLocalNetworkUsageDescription` 说明了为什么。
 - **ATS 例外**：`NSAllowsLocalNetworking: true`。直连是局域网内的明文 WebSocket，里面搬的全是 Noise 密文——底下再套一层 TLS 是给一个没人能签发证书的名字做认证，没有意义。走 Relay 的路径是 `wss`，没有例外。
 - **加密出口合规**：`ITSAppUsesNonExemptEncryption: true` 已写进 Info.plist。这是实话——app 用 CryptoKit 实现 Noise（Curve25519 + ChaCha20-Poly1305）加密用户输入，不属于苹果列出的任何一项豁免（非医疗、非仅认证、非版权保护、非 56 位以下）。填 false 能少答一道题，但那是在出口声明上说假话。代价是 App Store Connect 会问一次是否按大众市场自分类（ECCN 5D992.c，是），随之而来的是每年一次给 BIS 的自分类报告。不阻塞任何构建。
-- **隐私清单**：`ios/Reins/PrivacyInfo.xcprivacy`。不追踪、不收集、无第三方 SDK；唯一需要声明理由的 API 是 `UserDefaults`，理由码 `CA92.1`（本 app 自己的数据，不用于追踪）。
+- **隐私清单**：`ios/Rowel/PrivacyInfo.xcprivacy`。不追踪、不收集、无第三方 SDK；唯一需要声明理由的 API 是 `UserDefaults`，理由码 `CA92.1`（本 app 自己的数据，不用于追踪）。
 - **后台模式**：一个都不声明。曾经写着 `remote-notification` 却没有一行注册推送的代码，那是 Guideline 2.5.4 的直接拒审理由。做推送时连同实现一起加回来。
 
 ### 发布关键路径
@@ -399,7 +399,7 @@ npx wrangler secret put REINS_APNS_TOPIC --config relay-worker/wrangler.jsonc  #
 | 1 | 版本协商落地 | 新旧双向互通测试通过 | — ✅ 已完成 |
 | 2 | 部署 Relay | `deployed.test.js` 打公网地址全绿 | — ✅ 已完成 |
 | 3 | 写 `/help` 与 `/privacy` | 隐私页说清 Relay 能观测到什么 | — ✅ 已完成 |
-| 4 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `REINS_REF` 指的那个 tag | 只差打 tag |
+| 4 | 仓库转公开 | 全历史秘密扫描通过、LICENSE 就位、包元数据非 UNLICENSED、打出 `install.sh` 里 `ROWEL_REF` 指的那个 tag | 只差打 tag |
 | 5 | 购买 Developer Program | 账号可签发 APNs key | — ✅ 已完成 |
 | 6 | 签 Paid Applications 协议 | ASC → Business → Agreements 显示 Active | 人工 |
 | 7 | 建 ASC API key | `ios/release.sh` 能跑到上传 | 人工 |

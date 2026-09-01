@@ -12,14 +12,14 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
-import { reinsHome } from './identity.ts'
+import { rowelHome } from './identity.ts'
 
 /** Reverse-DNS label used for the launchd agent and the systemd unit. */
-export const SERVICE_LABEL = 'app.reins.bridle'
+export const SERVICE_LABEL = 'app.rowel.bridle'
 
 /** Where the service writes its log, on either platform. */
 export function serviceLogPath(): string {
-  return join(reinsHome(), 'bridle.log')
+  return join(rowelHome(), 'bridle.log')
 }
 
 /** What a service install did, so the CLI can explain it. */
@@ -54,7 +54,7 @@ function executable(): { command: string; args: string[] } {
 export function installService(): ServiceOutcome {
   const { command, args } = executable()
   const log = serviceLogPath()
-  mkdirSync(reinsHome(), { recursive: true, mode: 0o700 })
+  mkdirSync(rowelHome(), { recursive: true, mode: 0o700 })
   if (platform() === 'darwin') {
     const path = launchAgentPath()
     mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
@@ -136,7 +136,7 @@ ${programArguments}
 
 function systemdUnit(command: string, args: string[]): string {
   return `[Unit]
-Description=Reins Bridle
+Description=Rowel Bridle
 After=network-online.target
 
 [Service]

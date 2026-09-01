@@ -1,7 +1,7 @@
 /**
  * Finding, and if necessary starting, the dsh a Bridle should serve.
  *
- * The friction this removes is real: a person installing Reins should not have
+ * The friction this removes is real: a person installing Rowel should not have
  * to know which port their harness picked, or start it by hand before opening
  * the app. Bridle probes the ports dsh actually uses, and can launch one itself
  * when nothing answers.

@@ -10,9 +10,9 @@ VERDICT: NEEDS_FIX
 > Cursor：disabled（design 类型不启用）
 > 维度：基础 goalfit + consistency + feasibility + 信号触发 无
 > Phase 2 验证：5 条已派（0 条免验——三组共识全为同引擎，按规则必验）；结果 5 VERIFIED / 0 FALSE_POSITIVE / 0 UNVERIFIABLE
-> Repo: /Users/alpha/.walkcode/workspace/reins
+> Repo: /Users/alpha/.walkcode/workspace/rowel
 > HeadSHA: 224d988（run 启动时）；报告时 HEAD=38d59db —— 偏差已核：前进的提交内容 = 被审文档本身入库 + 与目标无关的 bridle 心跳修复；被审文档三个时点（审查时工作区 / 38d59db / 报告时工作区）字节一致（git diff 证明）
-> RunDir: /var/folders/00/s7tt4dgj53v123y8671yb3b00000gn/T/deep-review-reins-224d988-1788105345.VJWm
+> RunDir: /var/folders/00/s7tt4dgj53v123y8671yb3b00000gn/T/deep-review-rowel-224d988-1788105345.VJWm
 > 规模：82 行 / 1 文件
 > 运行备注：codex work 代理（llm-proxy）不可达（HTTP 000），首轮三维度全部超时；经 DEEP_REVIEW_CODEX_PROFILE="" 切默认 ChatGPT 路由重跑成功，模型不变（gpt-5.6-sol high）
 > 模式：默认报告模式（--plan-only，未动被审文件）
@@ -37,9 +37,9 @@ VERDICT: NEEDS_FIX
 - **Category**: Completeness ｜ **Requirement**: R4
 - **Confidence**: goalfit 1.0, consistency 0.99, feasibility 0.99
 - **来源**: goalfit + consistency + feasibility（三维共识）
-- **证据**: §4.4 只列"bridle 层死 / dsh 层死"两档；§6 承认 runtime.json 不记安装形态；`bridle/src/identity.ts` 未设 `REINS_HOME` 时固定 `~/.reins`——多身份机器上裸跑 `bridle status`/`bridle start` 默认操作主身份，不一定是手机指的那条。
+- **证据**: §4.4 只列"bridle 层死 / dsh 层死"两档；§6 承认 runtime.json 不记安装形态；`bridle/src/identity.ts` 未设 `ROWEL_HOME` 时固定 `~/.rowel`——多身份机器上裸跑 `bridle status`/`bridle start` 默认操作主身份，不一定是手机指的那条。
 - **问题**: 实现者拿到的不是可交付的定案；照写会误导插件用户跑独立 Bridle，还可能触发 §8.1 的同身份进程冲突（有单实例锁兜底，但用户看到的是莫名拒绝）。
-- **修复**: 三档决策表写全；采用无须识别形态的统一话术（先 `bridle status`，插件形态→重启 dsh，独立形态→`bridle start`）；ready 帧顺带实例目录提示，命令带 `REINS_HOME=<目录>` 前缀，未知时并列两分支并明说；删除对应待议项。
+- **修复**: 三档决策表写全；采用无须识别形态的统一话术（先 `bridle status`，插件形态→重启 dsh，独立形态→`bridle start`）；ready 帧顺带实例目录提示，命令带 `ROWEL_HOME=<目录>` 前缀，未知时并列两分支并明说；删除对应待议项。
 - **回证**: VERIFIED @ 52-58, 79-81
 
 ### 2. [Warning] §4.3 三档诊断缺结构化且新鲜的证据 (Symbol: 4.3 分层诊断)

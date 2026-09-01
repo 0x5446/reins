@@ -45,7 +45,7 @@ jobs:
       - run: npm ci
 
       # Builds all five workspaces, runs check:docs, then the unit tests.
-      # check:docs reads ios/Reins/Protocol/Frames.swift, ios/Reins/Store/
+      # check:docs reads ios/Rowel/Protocol/Frames.swift, ios/Rowel/Store/
       # Conversation.swift and relay-worker/src/wire.ts, so this job needs a
       # full checkout even though it never compiles either of them.
       - run: npm test
@@ -55,7 +55,7 @@ jobs:
       # path, and waking a phone that is not running. The rest of e2e/ wants a
       # harness serving locally and would skip here, turning a hollow run green.
       #
-      # REINS_E2E_DSH_URL points at a closed port on purpose. These three files
+      # ROWEL_E2E_DSH_URL points at a closed port on purpose. These three files
       # drive a FakeAgent and never dial a harness, but `startStack` still
       # insists on having a harness URL and will go looking for one when it is
       # not given a value. On a runner that scan is the slowest thing in the
@@ -63,7 +63,7 @@ jobs:
       # dead address skips it and changes nothing else.
       - name: end to end, the parts that stand alone
         env:
-          REINS_E2E_DSH_URL: http://127.0.0.1:9
+          ROWEL_E2E_DSH_URL: http://127.0.0.1:9
         run: >
           node --test --test-concurrency=1
           e2e/tests/approval.test.js
@@ -85,14 +85,14 @@ jobs:
 
       # run-tests.sh picks the newest iPhone simulator that exists on the
       # machine rather than naming one, because that list differs between Xcode
-      # versions and between a laptop and a runner. Set REINS_SIM to pin it.
+      # versions and between a laptop and a runner. Set ROWEL_SIM to pin it.
       - run: npm run test:ios
 
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: xcresult
-          path: ios/build/Reins.xcresult
+          path: ios/build/Rowel.xcresult
           retention-days: 7
 
 # Not here, and why:

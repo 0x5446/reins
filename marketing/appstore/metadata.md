@@ -1,4 +1,4 @@
-# App Store Metadata — Reins v1.0
+# App Store Metadata — Rowel v1.0
 
 Everything on this page is calibrated against the repo (README, CHANGELOG,
 `site/public/*.html`, `ios/` source) and against the policy research in
@@ -13,38 +13,38 @@ Keywords 100).
 **Primary choice:**
 
 ```
-Reins
+Rowel
 ```
 (5 characters)
 
 Availability check (iTunes Search API, US store, 2026-09-01): no live app is
-named exactly `Reins`. The closest are `Reins: for Ollama & LM Studio`
+named exactly `Rowel`. The closest are `Rowel: for Ollama & LM Studio`
 (Developer Tools — a local-LLM client, different product), `Reigns` (a game),
-and `Reins: Claim Your Share` (Business). ASC name uniqueness is
-exact-string, so `Reins` is very likely claimable — but a name can be
+and `Rowel: Claim Your Share` (Business). ASC name uniqueness is
+exact-string, so `Rowel` is very likely claimable — but a name can be
 *reserved* by an unpublished app, and only App Store Connect knows. Try
-`Reins` first; if ASC refuses it, fall back in this order:
+`Rowel` first; if ASC refuses it, fall back in this order:
 
 | Fallback | Chars | Notes |
 |---|---|---|
-| `Reins — Remote Coding Agent` | 27 | Recommended fallback. Adds three indexed search words. |
-| `Reins: Coding Agent Remote` | 26 | Same words, colon form. |
-| `Reins — Agent Remote Control` | 28 | If "coding" collides with something. |
+| `Rowel — Remote Coding Agent` | 27 | Recommended fallback. Adds three indexed search words. |
+| `Rowel: Coding Agent Remote` | 26 | Same words, colon form. |
+| `Rowel — Agent Remote Control` | 28 | If "coding" collides with something. |
 
-**Do not use `Reins — Remote for dsh`.** Two reasons: (1) Guideline 2.3.7 /
+**Do not use `Rowel — Remote for dsh`.** Two reasons: (1) Guideline 2.3.7 /
 5.2.1 — names and subtitles must not reference other apps or carry third-party
 marks, and "dsh" is DeepSeek's product name; the description is the only safe
 place for it (referential use). (2) It wastes the most valuable index slots on
 a term the App Store audience doesn't search yet, versus "remote coding agent"
 which is a real query.
 
-Note: the existing `Reins: for Ollama & LM Studio` sits in the same category.
+Note: the existing `Rowel: for Ollama & LM Studio` sits in the same category.
 Not a blocker (different product, different full name), but expect it adjacent
-in search results for "reins".
+in search results for "rowel".
 
 ## Subtitle (limit 30)
 
-**With Name = `Reins`:**
+**With Name = `Rowel`:**
 
 ```
 Drive your Mac's coding agent
@@ -69,9 +69,9 @@ The agent keeps working while you're away. Approve a command from your phone wit
 ## Description (limit 4000 — not indexed by App Store search; keep it honest, it feeds web search and App Store Tags)
 
 ```
-Reins is the iPhone side of the coding agent already running on your Mac.
+Rowel is the iPhone side of the coding agent already running on your Mac.
 
-The agent runs where your code and your API keys already are. Reins gives you
+The agent runs where your code and your API keys already are. Rowel gives you
 the part that does not need to be at the desk: reading what it did, approving
 what it wants to do next, and starting the next thing from wherever you are.
 
@@ -119,7 +119,7 @@ because a paired phone can approve commands on your Mac.
 
 HOW IT CONNECTS
 
-Reins talks to Bridle, a small companion program you install on your Mac with
+Rowel talks to Bridle, a small companion program you install on your Mac with
 one command. Pairing is a QR code: run one command on the Mac, point the phone
 at the screen, done. There is no account to create, no server address to type,
 and no password. Bridle dials out, so there is no port forwarding and nothing
@@ -143,15 +143,15 @@ when you open the app and held only in memory.
 
 REQUIREMENTS
 
-A Mac running the companion program, and a coding agent installed on it. Reins
+A Mac running the companion program, and a coding agent installed on it. Rowel
 currently works with DeepSeek Harness (dsh). Setup takes about a minute and is
-documented at reins.novabox.ai. The app is free and the source is public.
+documented at rowel.novabox.ai. The app is free and the source is public.
 ```
 
 (3636 characters — verified under 4000.)
 
 Notes on the wording:
-- `Reins currently works with DeepSeek Harness (dsh)` is the only third-party
+- `Rowel currently works with DeepSeek Harness (dsh)` is the only third-party
   mention: referential, factual, under REQUIREMENTS, not a headline
   (2.3.7/5.2.1-safe). Do not claim multi-agent support — only dsh is
   implemented.
@@ -172,7 +172,7 @@ First release.
 
 ## Keywords (limit 100, comma-separated, no spaces, English only)
 
-**With Name = `Reins` + Subtitle = `Drive your Mac's coding agent`:**
+**With Name = `Rowel` + Subtitle = `Drive your Mac's coding agent`:**
 
 ```
 ssh,terminal,remote,ai,llm,developer,devtools,code,shell,encrypted,e2ee,tunnel,git,diff,cli,harness
@@ -201,7 +201,7 @@ Selection logic (search intent, then rules):
   `deepseek`, `claude`, `codex`, `copilot`, `cursor`. "Claude Code" analogies
   belong in press/social copy, never in keywords.
 - **Excluded — already indexed via name/subtitle** (Apple: don't duplicate):
-  `reins`, `drive`, `mac`, `coding`, `agent` (and `remote` in the fallback
+  `rowel`, `drive`, `mac`, `coding`, `agent` (and `remote` in the fallback
   variant).
 - **No plurals, no spaces after commas** (spaces count against the limit;
   Apple stems words).
@@ -221,9 +221,9 @@ Selection logic (search intent, then rules):
 
 | Field | Value | Verified |
 |---|---|---|
-| Support URL (required) | `https://reins.novabox.ai/help` | HTTP 200 (2026-09-01) |
-| Marketing URL (optional) | `https://reins.novabox.ai` | HTTP 200 |
-| Privacy Policy URL (required) | `https://reins.novabox.ai/privacy` | HTTP 200 |
+| Support URL (required) | `https://rowel.novabox.ai/help` | HTTP 200 (2026-09-01) |
+| Marketing URL (optional) | `https://rowel.novabox.ai` | HTTP 200 |
+| Privacy Policy URL (required) | `https://rowel.novabox.ai/privacy` | HTTP 200 |
 
 **Important:** use the extensionless URLs. The `.html` variants
 (`/help.html`, `/privacy.html`) return **404 in production** — the site's

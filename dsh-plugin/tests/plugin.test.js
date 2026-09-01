@@ -1,7 +1,7 @@
 /**
  * The plugin's contract with its host.
  *
- * Two properties matter and neither is about Reins: `apply` must return without
+ * Two properties matter and neither is about Rowel: `apply` must return without
  * waiting, because Cordis mounts plugins concurrently and a slow one holds up
  * the harness; and `dispose` must not throw, because a plugin that throws on
  * unload takes the reload down with it.
@@ -13,7 +13,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { readRuntime } from '@reins/bridle'
+import { readRuntime } from '@rowel/bridle'
 import { apply, name } from '../lib/index.js'
 
 /** A stand-in for the Cordis context, capturing the dispose hook. */
@@ -34,26 +34,26 @@ function fakeContext() {
 }
 
 /**
- * Keep this run's identity and state out of the developer's real ~/.reins.
+ * Keep this run's identity and state out of the developer's real ~/.rowel.
  *
  * Set once for the whole file rather than per test, and never restored. The
  * per-test version looked tidier and was wrong: `apply` leaves a heartbeat
  * running, so any test that did not dispose kept publishing — and by then the
- * variable had been put back, so it published into the real ~/.reins. That
+ * variable had been put back, so it published into the real ~/.rowel. That
  * happened, with a stub's `http://127.0.0.1:9` in it, and `bridle status` on a
  * live machine reported the harness as down.
  */
-process.env.REINS_HOME = mkdtempSync(join(tmpdir(), 'reins-plugin-'))
+process.env.ROWEL_HOME = mkdtempSync(join(tmpdir(), 'rowel-plugin-'))
 // The machine-level index gets the same isolation: apply() registers the
 // home it starts, and a test must not put its scratch identity on the
 // developer's real map.
-process.env.REINS_INSTANCES = join(process.env.REINS_HOME, 'instances-index.json')
+process.env.ROWEL_INSTANCES = join(process.env.ROWEL_HOME, 'instances-index.json')
 // And a state file with the relay switched off, seeded before any test runs
 // apply(): a fresh identity's default relayUrl is the production Relay, so
 // every `npm test` was registering a throwaway machine there — visible as a
 // third row on /healthz until the sweep collected it, and pure noise pollution
 // against a live service. dsh is pointed at a dead port for the same reason.
-writeFileSync(join(process.env.REINS_HOME, 'bridle.json'), JSON.stringify({
+writeFileSync(join(process.env.ROWEL_HOME, 'bridle.json'), JSON.stringify({
   version: 1,
   deviceId: 'plugin-test',
   privateKey: Buffer.alloc(32).toString('base64url'),
@@ -66,16 +66,16 @@ writeFileSync(join(process.env.REINS_HOME, 'bridle.json'), JSON.stringify({
 
 /** Kept as a no-op so each test still reads as isolating itself. */
 function isolateHome() {
-  return process.env.REINS_HOME
+  return process.env.ROWEL_HOME
 }
 
 test('the plugin names itself for the harness plugin list', () => {
-  assert.equal(name, 'reins-bridle')
+  assert.equal(name, 'rowel-bridle')
 })
 
 test('apply returns immediately and registers exactly one teardown', async (t) => {
   const previous = isolateHome()
-  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+  t.after(() => { if (previous === undefined) delete process.env.ROWEL_HOME; else process.env.ROWEL_HOME = previous })
 
   const ctx = fakeContext()
   const started = Date.now()
@@ -95,7 +95,7 @@ test('apply returns immediately and registers exactly one teardown', async (t) =
 
 test('disposing twice is not an error', async (t) => {
   const previous = isolateHome()
-  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+  t.after(() => { if (previous === undefined) delete process.env.ROWEL_HOME; else process.env.ROWEL_HOME = previous })
 
   const ctx = fakeContext()
   apply(ctx, { dsh: 'http://127.0.0.1:9', relay: '', noDirect: true })
@@ -106,7 +106,7 @@ test('disposing twice is not an error', async (t) => {
 
 test('a Bridle inside dsh still answers "bridle status"', async (t) => {
   const previous = isolateHome()
-  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+  t.after(() => { if (previous === undefined) delete process.env.ROWEL_HOME; else process.env.ROWEL_HOME = previous })
 
   // The gap this closes was found by installing the plugin and then running the
   // command the help page tells people to run when something is broken. It said
@@ -128,7 +128,7 @@ test('a Bridle inside dsh still answers "bridle status"', async (t) => {
 
 test('a Bridle that cannot start does not take dsh with it', async (t) => {
   const previous = isolateHome()
-  t.after(() => { if (previous === undefined) delete process.env.REINS_HOME; else process.env.REINS_HOME = previous })
+  t.after(() => { if (previous === undefined) delete process.env.ROWEL_HOME; else process.env.ROWEL_HOME = previous })
 
   // Hold the port the plugin is told to use, the way a restart overlapping its
   // predecessor does. This crashed a running harness: EADDRINUSE surfaced as an

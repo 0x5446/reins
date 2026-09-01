@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { deviceIdFor, generateKeyPair } from '@reins/protocol'
+import { deviceIdFor, generateKeyPair } from '@rowel/protocol'
 import {
   acceptPeer,
   findPeer,
@@ -24,18 +24,18 @@ import {
 } from '../lib/index.js'
 
 /**
- * Run a body against a throwaway REINS_HOME.
+ * Run a body against a throwaway ROWEL_HOME.
  * @param {(home: string) => void} body - the test body.
  */
 function withHome(body) {
-  const home = mkdtempSync(join(tmpdir(), 'reins-identity-'))
-  const previous = process.env.REINS_HOME
-  process.env.REINS_HOME = home
+  const home = mkdtempSync(join(tmpdir(), 'rowel-identity-'))
+  const previous = process.env.ROWEL_HOME
+  process.env.ROWEL_HOME = home
   try {
     body(home)
   } finally {
-    if (previous === undefined) delete process.env.REINS_HOME
-    else process.env.REINS_HOME = previous
+    if (previous === undefined) delete process.env.ROWEL_HOME
+    else process.env.ROWEL_HOME = previous
     rmSync(home, { recursive: true, force: true })
   }
 }
@@ -78,11 +78,11 @@ test('a state file from a newer bridle is refused rather than misread', () => {
 test('an environment override is applied but never written back', () => {
   withHome(() => {
     loadState()
-    process.env.REINS_DSH_URL = 'http://127.0.0.1:9999'
+    process.env.ROWEL_DSH_URL = 'http://127.0.0.1:9999'
     try {
       assert.equal(loadState().dshUrl, 'http://127.0.0.1:9999')
     } finally {
-      delete process.env.REINS_DSH_URL
+      delete process.env.ROWEL_DSH_URL
     }
     assert.notEqual(loadState().dshUrl, 'http://127.0.0.1:9999')
   })

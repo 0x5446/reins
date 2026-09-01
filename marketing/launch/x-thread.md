@@ -21,7 +21,7 @@ Your coding agent hit a permission prompt 40 minutes ago.
 
 You were on a train. It's still waiting.
 
-Reins puts that approval on your iPhone — end-to-end encrypted to your own Mac, with the full command and the diff in front of you before you say yes.
+Rowel puts that approval on your iPhone — end-to-end encrypted to your own Mac, with the full command and the diff in front of you before you say yes.
 ```
 
 **2/**
@@ -65,7 +65,7 @@ The edges, stated plainly: iPhone only. Works with DeepSeek Harness (dsh) only, 
 ```
 Free. MIT. No accounts — pairing is a QR code your terminal prints. Don't trust our relay? Run your own; it's one Cloudflare Worker.
 
-github.com/0x5446/reins
+github.com/0x5446/rowel
 ```
 
 ---

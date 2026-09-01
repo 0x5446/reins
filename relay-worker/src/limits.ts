@@ -36,7 +36,7 @@ export const MAX_BODY_BYTES = 64 * 1024
  */
 export const RUNTIME_MAX_FRAME_BYTES = 32 * 1024 * 1024
 
-/** Machines the whole Relay will hold at once, when `REINS_MAX_MACHINES` is unset. */
+/** Machines the whole Relay will hold at once, when `ROWEL_MAX_MACHINES` is unset. */
 /**
  * How often the Exchange checks its directory against reality.
  *
@@ -50,7 +50,7 @@ export const SWEEP_INTERVAL_MS = 10 * 60 * 1000
 
 export const DEFAULT_MAX_MACHINES = 1_000
 
-/** Circuits across every machine, when `REINS_MAX_CIRCUITS` is unset. */
+/** Circuits across every machine, when `ROWEL_MAX_CIRCUITS` is unset. */
 export const DEFAULT_MAX_CIRCUITS = 4_000
 
 /** Burst and refill for `GET /v1/pair/claim`, per caller address. */

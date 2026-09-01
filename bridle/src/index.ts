@@ -25,7 +25,7 @@ export {
   loadState,
   offerAccepts,
   openPairingOffer,
-  reinsHome,
+  rowelHome,
   revokePeer,
   saveState,
   signingKeys,

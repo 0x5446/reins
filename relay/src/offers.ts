@@ -7,7 +7,7 @@
  * bundle is a convenience for people who cannot scan, not a trust anchor.
  */
 
-import type { PairingBundle } from '@reins/protocol'
+import type { PairingBundle } from '@rowel/protocol'
 
 /** A bundle waiting to be claimed. */
 interface HeldOffer {

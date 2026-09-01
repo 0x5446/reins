@@ -1,7 +1,7 @@
 /**
  * The machine's identity, taken somewhere else.
  *
- * The failure this guards against is quiet and total: `~/.reins/bridle.json`
+ * The failure this guards against is quiet and total: `~/.rowel/bridle.json`
  * goes missing, the Bridle generates a fresh identity, and every paired phone
  * sees a machine whose key does not match the one it pinned — indistinguishable
  * from an impostor. There was no way back before this existed.
@@ -71,8 +71,8 @@ test('a file that is not a backup says so instead of throwing something obscure'
 test('a future format is refused by name', () => {
   // Reading a v2 archive with v1 rules would be worse than refusing: it might
   // half-work and write a broken identity to disk.
-  const archive = JSON.stringify({ magic: 'reins-identity/v2', machineName: 'x' })
-  assert.throws(() => describeBackup(archive), /reins-identity\/v1/u)
+  const archive = JSON.stringify({ magic: 'rowel-identity/v2', machineName: 'x' })
+  assert.throws(() => describeBackup(archive), /rowel-identity\/v1/u)
 })
 
 test('a too-short passphrase is refused at export, not discovered at restore', () => {

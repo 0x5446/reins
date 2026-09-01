@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { thinRoster } from '@reins/bridle'
+import { thinRoster } from '@rowel/bridle'
 
 /**
  * A real row, captured from a live dsh and neutralised.

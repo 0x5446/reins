@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
-import { probeDsh } from '@reins/bridle'
+import { probeDsh } from '@rowel/bridle'
 
 /** A fake dsh: answers host.describe the way the health probe expects. */
 function fakeDsh() {

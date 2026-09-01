@@ -1,5 +1,5 @@
 {
-  // The public site. `reins.novabox.ai` is the site and nothing else — the
+  // The public site. `rowel.novabox.ai` is the site and nothing else — the
   // relay lives on `relay.novabox.ai`, so a rule aimed at these pages can no
   // longer reach it.
   //
@@ -13,7 +13,7 @@
   //
   //   npx wrangler deploy --config site/wrangler.jsonc
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "reins-site",
+  "name": "rowel-site",
   "compatibility_date": "2026-08-15",
   "assets": {
     "directory": "./public",
@@ -28,10 +28,10 @@
   // file rather than one file plus a route nobody remembers to add. `/_/` can
   // never collide with the Relay, whose routes are fixed and listed above.
   "routes": [
-    { "pattern": "reins.novabox.ai/", "zone_name": "novabox.ai" },
-    { "pattern": "reins.novabox.ai/get", "zone_name": "novabox.ai" },
-    { "pattern": "reins.novabox.ai/help", "zone_name": "novabox.ai" },
-    { "pattern": "reins.novabox.ai/privacy", "zone_name": "novabox.ai" },
-    { "pattern": "reins.novabox.ai/_/*", "zone_name": "novabox.ai" }
+    { "pattern": "rowel.novabox.ai/", "zone_name": "novabox.ai" },
+    { "pattern": "rowel.novabox.ai/get", "zone_name": "novabox.ai" },
+    { "pattern": "rowel.novabox.ai/help", "zone_name": "novabox.ai" },
+    { "pattern": "rowel.novabox.ai/privacy", "zone_name": "novabox.ai" },
+    { "pattern": "rowel.novabox.ai/_/*", "zone_name": "novabox.ai" }
   ]
 }

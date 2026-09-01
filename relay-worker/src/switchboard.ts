@@ -266,7 +266,7 @@ export class Switchboard extends DurableObject<Env> {
     // anywhere else: nothing errors, no user sees anything, the phone simply
     // stays quiet. A half-finished deployment or an expired key would be
     // invisible until someone noticed they had stopped being notified.
-    console.error(`reins-relay: wake failed (${outcome.reason}): ${outcome.detail}`)
+    console.error(`rowel-relay: wake failed (${outcome.reason}): ${outcome.detail}`)
   }
 
   private forwardFromBridle(bytes: ArrayBuffer): void {

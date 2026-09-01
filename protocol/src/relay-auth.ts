@@ -24,10 +24,10 @@ import {
 } from 'node:crypto'
 
 /** Domain separator so a registration signature can never be replayed elsewhere. */
-const REGISTRATION_CONTEXT = 'reins-relay-registration/v1'
+const REGISTRATION_CONTEXT = 'rowel-relay-registration/v1'
 
 /** Domain separator for publishing a short-code pairing offer. */
-const PAIR_OFFER_CONTEXT = 'reins-pair-offer/v1'
+const PAIR_OFFER_CONTEXT = 'rowel-pair-offer/v1'
 
 const DER_ED25519_PUBLIC_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 const DER_ED25519_PRIVATE_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
@@ -75,7 +75,7 @@ export function signingPublicKeyOf(privateKey: Buffer): Buffer {
  * @returns a base64url device id, safe to print in a QR payload.
  */
 export function deviceIdFor(publicKey: Buffer): string {
-  return createHash('sha256').update('reins-device').update(publicKey).digest().subarray(0, 16).toString('base64url')
+  return createHash('sha256').update('rowel-device').update(publicKey).digest().subarray(0, 16).toString('base64url')
 }
 
 /**

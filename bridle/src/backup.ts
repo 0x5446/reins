@@ -1,7 +1,7 @@
 /**
  * Taking the machine's identity with you.
  *
- * `~/.reins/bridle.json` holds the only copy of this machine's static key, its
+ * `~/.rowel/bridle.json` holds the only copy of this machine's static key, its
  * signing key, and the list of devices that trust it. If that file goes — a
  * reinstall, a new laptop, a bad disk, an `rm` in the wrong directory — the
  * Bridle silently generates a *new* identity, every paired phone stops
@@ -22,7 +22,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEq
 import type { BridleState } from './identity.ts'
 
 /** Format marker, so a future change can be refused rather than misread. */
-const MAGIC = 'reins-identity/v1'
+const MAGIC = 'rowel-identity/v1'
 
 /**
  * scrypt cost. N=2^15 lands near 100ms on a laptop of this era.
@@ -89,7 +89,7 @@ export function describeBackup(archive: string): BackupSummary {
   try {
     parsed = JSON.parse(archive) as Record<string, unknown>
   } catch {
-    throw new BackupError('that file is not a Reins identity backup')
+    throw new BackupError('that file is not a Rowel identity backup')
   }
   if (parsed['magic'] !== MAGIC) {
     throw new BackupError(`unrecognised backup format ${String(parsed['magic'] ?? 'unknown')}; this build reads ${MAGIC}`)

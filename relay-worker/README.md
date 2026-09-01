@@ -45,9 +45,9 @@ Bridle 上线
     → Worker: newUniqueId() 建一个 Switchboard，把升级请求转过去
     → Switchboard: acceptWebSocket，发 challenge，起 15s 闹钟
     ← Bridle: register{device,key,signature}
-    → Switchboard: 验签 + 验 deviceId == sha256("reins-device"‖key)[0..16]
+    → Switchboard: 验签 + 验 deviceId == sha256("rowel-device"‖key)[0..16]
     → Exchange.register(device, name, version, 自己的 DO id)
-        ├ 超过 REINS_MAX_MACHINES → 拒，Switchboard 回 4004
+        ├ 超过 ROWEL_MAX_MACHINES → 拒，Switchboard 回 4004
         ├ 该 device 已有别的 Switchboard → 让旧的 displace()（旧 socket 4000）
         └ 写 m:<device> → {switchboard, name, version, since, circuits}
     → Switchboard: 发 registered
@@ -237,8 +237,8 @@ Worker 请求只有 HTTP 和升级本身（WS 消息不再经过 Worker），约
 
 | | Node 版 | Worker 版 |
 |---|---|---|
-| `REINS_MAX_MACHINES` | 防止一台 1 GB 的机器耗尽文件描述符和内存 | 没有那台机器了。它现在防的是**别人用你的免费额度**：机器身份就是一对密钥，谁都能造一万个，一万条常连就是每天 108,000 GB-s |
-| `REINS_MAX_CIRCUITS` | 同上，兜内存 | 同上，且它是 `/healthz` 那个数字的兜底 |
+| `ROWEL_MAX_MACHINES` | 防止一台 1 GB 的机器耗尽文件描述符和内存 | 没有那台机器了。它现在防的是**别人用你的免费额度**：机器身份就是一对密钥，谁都能造一万个，一万条常连就是每天 108,000 GB-s |
+| `ROWEL_MAX_CIRCUITS` | 同上，兜内存 | 同上，且它是 `/healthz` 那个数字的兜底 |
 | 每机器 8 条 circuit | 协议 | **不变**，由 `Switchboard` 数自己的 socket 决定，是权威 |
 | 每设备 3 个待领短码 | 协议 | **不变**，由 `Exchange` 的槽位表决定 |
 
@@ -276,10 +276,10 @@ npx wrangler dev   --config relay-worker/wrangler.jsonc
 ```sh
 # 1) 部署验收标准，打本地 Worker
 npm run build
-REINS_E2E_RELAY_URL=ws://127.0.0.1:8787 node --test e2e/tests/deployed.test.js
+ROWEL_E2E_RELAY_URL=ws://127.0.0.1:8787 node --test e2e/tests/deployed.test.js
 
 # 2) 短码那条路（deployed.test.js 不覆盖）
-REINS_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
+ROWEL_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
 ```
 
 部署（**目前没有部署过**）：
@@ -291,7 +291,7 @@ npx wrangler deploy --config relay-worker/wrangler.jsonc
 切域名之前必须做的两件事：
 
 1. 把 `wrangler.jsonc` 里注释掉的 `routes` 打开——**只能是 `/healthz` 和 `/v1/*` 两条，绝不能是 `/*`**。`/*` 会同时吞掉 `/install` 的 Redirect Rule 和 `site` 那四个静态页，而它们全都还会返回 200，看起来一切正常。
-2. 先删掉（或改指向）`reins.novabox.ai` 那条指向 Cloudflare Tunnel 的 CNAME 之前，确认 Worker 路由已经生效——两者绑在同一个 hostname 上。
+2. 先删掉（或改指向）`rowel.novabox.ai` 那条指向 Cloudflare Tunnel 的 CNAME 之前，确认 Worker 路由已经生效——两者绑在同一个 hostname 上。
 
 ---
 

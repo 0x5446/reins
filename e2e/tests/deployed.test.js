@@ -9,27 +9,27 @@
  * from the machine that configured it. Each of those passes every other test
  * in this directory and breaks the product.
  *
- * Skipped unless REINS_E2E_RELAY_URL is set, because it needs the network and
+ * Skipped unless ROWEL_E2E_RELAY_URL is set, because it needs the network and
  * a Relay someone is paying for:
  *
- *   REINS_E2E_RELAY_URL=wss://reins-relay.novabox.ai node --test e2e/tests/deployed.test.js
+ *   ROWEL_E2E_RELAY_URL=wss://rowel-relay.novabox.ai node --test e2e/tests/deployed.test.js
  */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { probeDsh } from '@reins/bridle'
-import { FakeAgent, ReinsPhone, startStack, waitFor } from '../lib/index.js'
+import { probeDsh } from '@rowel/bridle'
+import { FakeAgent, RowelPhone, startStack, waitFor } from '../lib/index.js'
 
-const RELAY_URL = process.env.REINS_E2E_RELAY_URL
-const DSH_URL = process.env.REINS_E2E_DSH_URL ?? await probeDsh()
+const RELAY_URL = process.env.ROWEL_E2E_RELAY_URL
+const DSH_URL = process.env.ROWEL_E2E_DSH_URL ?? await probeDsh()
 
 const skip = RELAY_URL === undefined
-  ? 'no deployed relay; set REINS_E2E_RELAY_URL to test one'
+  ? 'no deployed relay; set ROWEL_E2E_RELAY_URL to test one'
   : false
 
 const skipLive = skip !== false
   ? skip
-  : DSH_URL === undefined ? 'no DeepSeek Harness is running; set REINS_E2E_DSH_URL' : false
+  : DSH_URL === undefined ? 'no DeepSeek Harness is running; set ROWEL_E2E_DSH_URL' : false
 
 /** A public Relay is a round trip to another continent, not a loopback hop. */
 const NET_TIMEOUT_MS = 60_000
@@ -89,7 +89,7 @@ test('a phone pairs and drives a machine through the deployed relay', { skip, ti
   const before = await health()
   assert.ok(before.machines >= 1, 'the bridle shows up in the relay census')
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Deploy Probe' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Deploy Probe' })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -122,7 +122,7 @@ test('the relay forgets a phone that hangs up', { skip, timeout: NET_TIMEOUT_MS 
   t.after(() => stack.stop())
   await stack.waitForRelay(NET_TIMEOUT_MS)
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Hang Up' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Hang Up' })
   await phone.connect()
   const busy = await health()
   phone.close()
@@ -146,7 +146,7 @@ test('a real harness is reachable through the deployed relay', { skip: skipLive,
   t.after(() => stack.stop())
   await stack.waitForRelay(NET_TIMEOUT_MS)
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Live Probe' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay', name: 'Live Probe' })
   t.after(() => { phone.close() })
   const ready = await phone.connect()
   assert.equal(ready.dshReachable, true, 'the bridle found its harness')

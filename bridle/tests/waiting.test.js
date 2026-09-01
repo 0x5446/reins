@@ -17,7 +17,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BridleCore } from '@reins/bridle'
+import { BridleCore } from '@rowel/bridle'
 
 /** A dsh mux frame, shaped as the wire carries it. */
 function frame(type, sessionId, extra = {}) {

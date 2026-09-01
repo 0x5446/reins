@@ -7,10 +7,10 @@
 # runner. A pairing token is single-use, so the link has to be minted per run.
 #
 # Environment:
-#   REINS_DEVICE   destination id. Defaults to a booted simulator; pass a real
+#   ROWEL_DEVICE   destination id. Defaults to a booted simulator; pass a real
 #                  device's UDID (from `xcrun devicectl list devices`) to run on
 #                  hardware.
-#   REINS_TEAM_ID  signing team. Required for a device run.
+#   ROWEL_TEAM_ID  signing team. Required for a device run.
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ started_bridle=""
 bridle_pid=""
 if ! pgrep -f "bridle/lib/cli.js" >/dev/null 2>&1; then
   say "Starting a Bridle"
-  ( cd "$root" && exec node bridle/lib/cli.js --direct-port 61000 >/tmp/reins-uitest-bridle.log 2>&1 ) &
+  ( cd "$root" && exec node bridle/lib/cli.js --direct-port 61000 >/tmp/rowel-uitest-bridle.log 2>&1 ) &
   bridle_pid=$!
   started_bridle="yes"
   sleep 8
@@ -46,11 +46,11 @@ cleanup() {
 trap cleanup EXIT
 
 link=$(cd "$root" && node bridle/lib/cli.js pair --link 2>/dev/null | sed -n 's/^link: *//p')
-[ -n "$link" ] || fail "Could not mint a pairing link. Check /tmp/reins-uitest-bridle.log"
+[ -n "$link" ] || fail "Could not mint a pairing link. Check /tmp/rowel-uitest-bridle.log"
 
 # --- Destination ------------------------------------------------------------
 
-device="${REINS_DEVICE:-}"
+device="${ROWEL_DEVICE:-}"
 if [ -z "$device" ]; then
   device=$(xcrun simctl list devices booted -j | python3 -c "
 import json,sys
@@ -60,30 +60,30 @@ for runtime in json.load(sys.stdin)['devices'].values():
             print(d['udid']); raise SystemExit
 ")
 fi
-[ -n "$device" ] || fail "No booted simulator and no REINS_DEVICE. Boot one, or pass a device UDID."
+[ -n "$device" ] || fail "No booted simulator and no ROWEL_DEVICE. Boot one, or pass a device UDID."
 
 # A simulator id and a device id take the same -destination form here, so the
 # only thing that changes between the two is whether signing is required.
 say "Testing on $device"
 
-REINS_TEAM_ID="${REINS_TEAM_ID:-}" xcodegen generate --quiet
+ROWEL_TEAM_ID="${ROWEL_TEAM_ID:-}" xcodegen generate --quiet
 
 # xcodebuild hands the test process only those variables prefixed TEST_RUNNER_,
 # and strips the prefix on the way through.
-export TEST_RUNNER_REINS_PAIR_LINK="$link"
+export TEST_RUNNER_ROWEL_PAIR_LINK="$link"
 
 args=(
-  -project Reins.xcodeproj
-  -scheme ReinsUI
+  -project Rowel.xcodeproj
+  -scheme RowelUI
   -configuration Debug
   -destination "id=$device"
   -derivedDataPath build/ui
-  -resultBundlePath build/ReinsUI.xcresult
+  -resultBundlePath build/RowelUI.xcresult
   -allowProvisioningUpdates
 )
-[ -n "${REINS_TEAM_ID:-}" ] && args+=("DEVELOPMENT_TEAM=$REINS_TEAM_ID")
+[ -n "${ROWEL_TEAM_ID:-}" ] && args+=("DEVELOPMENT_TEAM=$ROWEL_TEAM_ID")
 
-rm -rf build/ReinsUI.xcresult
+rm -rf build/RowelUI.xcresult
 if command -v xcbeautify >/dev/null 2>&1; then
   set -o pipefail
   xcodebuild "${args[@]}" test | xcbeautify

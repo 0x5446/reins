@@ -101,10 +101,10 @@ export class Exchange extends DurableObject<Env> {
   /** @param ctx - the object's own storage and scheduling. @param env - bindings. */
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    this.maxMachines = positiveInt(env.REINS_MAX_MACHINES, DEFAULT_MAX_MACHINES)
+    this.maxMachines = positiveInt(env.ROWEL_MAX_MACHINES, DEFAULT_MAX_MACHINES)
     // Overridable so a test can force a sweep without waiting ten minutes.
-    this.sweepInterval = positiveInt(env.REINS_SWEEP_INTERVAL_MS, SWEEP_INTERVAL_MS)
-    this.maxCircuits = positiveInt(env.REINS_MAX_CIRCUITS, DEFAULT_MAX_CIRCUITS)
+    this.sweepInterval = positiveInt(env.ROWEL_SWEEP_INTERVAL_MS, SWEEP_INTERVAL_MS)
+    this.maxCircuits = positiveInt(env.ROWEL_MAX_CIRCUITS, DEFAULT_MAX_CIRCUITS)
     // Armed here because this is the one place guaranteed to run.
     //
     // The first attempt armed it in `register`, which never fired: a Relay
@@ -174,7 +174,7 @@ export class Exchange extends DurableObject<Env> {
       // invisible from either machine, because each side is "online" right up
       // until it is knocked off again. This line is the only vantage point
       // that can see both fighters.
-      console.warn(`reins-relay: ${deviceId} re-registered from a new connection after ${String(Date.now() - existing.since)}ms; displacing the old one`)
+      console.warn(`rowel-relay: ${deviceId} re-registered from a new connection after ${String(Date.now() - existing.since)}ms; displacing the old one`)
     }
     await this.ctx.storage.put(`m:${deviceId}`, { switchboard, name, version, since: Date.now(), circuits: 0 } satisfies MachineRow)
     return { ok: true }

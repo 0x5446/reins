@@ -6,11 +6,11 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DIRECT_PATH, localAddresses, probeDsh } from '@reins/bridle'
-import { ReinsPhone, startStack } from '../lib/index.js'
+import { DIRECT_PATH, localAddresses, probeDsh } from '@rowel/bridle'
+import { RowelPhone, startStack } from '../lib/index.js'
 
-const DSH_URL = process.env.REINS_E2E_DSH_URL ?? await probeDsh()
-const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set REINS_E2E_DSH_URL' : false
+const DSH_URL = process.env.ROWEL_E2E_DSH_URL ?? await probeDsh()
+const skip = DSH_URL === undefined ? 'no DeepSeek Harness is running; set ROWEL_E2E_DSH_URL' : false
 
 test('a phone on the same network works with the relay switched off', { skip, timeout: 60_000 }, async (t) => {
   const stack = await startStack({ dshUrl: DSH_URL, machineName: 'Desk Mac' })
@@ -21,7 +21,7 @@ test('a phone on the same network works with the relay switched off', { skip, ti
   await stack.relay.close()
 
   const bundle = { ...stack.invite().bundle, direct: [`ws://127.0.0.1:${String(stack.direct.port)}`] }
-  const phone = new ReinsPhone({ bundle, prefer: 'direct', name: 'LAN iPhone' })
+  const phone = new RowelPhone({ bundle, prefer: 'direct', name: 'LAN iPhone' })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -48,7 +48,7 @@ test('a stale LAN address costs one failed connect, not the session', { skip, ti
   // The bundle was minted at home; the phone is now on cellular. Port 1 is
   // reserved and never listening, which is what a stale LAN address looks like.
   const bundle = { ...stack.invite().bundle, direct: ['ws://127.0.0.1:1'] }
-  const phone = new ReinsPhone({ bundle, name: 'Roaming iPhone' })
+  const phone = new RowelPhone({ bundle, name: 'Roaming iPhone' })
   t.after(() => { phone.close() })
 
   const ready = await phone.connect()
@@ -62,11 +62,11 @@ test('the same device is one identity on either path', { skip, timeout: 60_000 }
   await stack.waitForRelay()
   const base = stack.invite().bundle
 
-  const overRelay = new ReinsPhone({ bundle: base, prefer: 'relay', name: 'Dual iPhone' })
+  const overRelay = new RowelPhone({ bundle: base, prefer: 'relay', name: 'Dual iPhone' })
   await overRelay.connect()
   overRelay.close()
 
-  const overLan = new ReinsPhone({
+  const overLan = new RowelPhone({
     bundle: { ...base, direct: [`ws://127.0.0.1:${String(stack.direct.port)}`] },
     keys: overRelay.keys,
     pairing: false,

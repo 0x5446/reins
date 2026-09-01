@@ -1,10 +1,10 @@
-# Reins 线上协议规范
+# Rowel 线上协议规范
 
 本文档精确到字节。目标是：**一个人（或一个模型）只读这份文档，就能写出与现有实现互通的第三方客户端**，不需要读源码。
 
 规范性用词：**必须**（MUST）、**禁止**（MUST NOT）、**应当**（SHOULD）、**可以**（MAY）。
 
-一致性检验的唯一权威是 `protocol/scripts/emit-vectors.js` 生成的测试向量（`ios/ReinsTests/Fixtures/protocol-vectors.json`）。**本文档与向量冲突时，以向量为准**，并且这属于文档 bug，须修正。
+一致性检验的唯一权威是 `protocol/scripts/emit-vectors.js` 生成的测试向量（`ios/RowelTests/Fixtures/protocol-vectors.json`）。**本文档与向量冲突时，以向量为准**，并且这属于文档 bug，须修正。
 
 - 术语与总览：§1
 - 配对载荷：§2
@@ -53,7 +53,7 @@ WebSocket 二进制消息
 | 字段 | 类型 | 必需 | 含义 |
 |---|---|---|---|
 | `v` | number | 是 | 载荷版本。当前恒为 `1`。 |
-| `relay` | string | 是 | Relay 基址，如 `wss://reins.novabox.ai`。 |
+| `relay` | string | 是 | Relay 基址，如 `wss://rowel.novabox.ai`。 |
 | `direct` | string[] | 否 | 直连候选，`ws://host:port`，**最优在前**。字段为 `undefined` 时整个键省略。 |
 | `device` | string | 是 | 设备 id，见 §2.3。 |
 | `key` | string | 是 | Bridle 的 X25519 静态**公钥**，32 字节，base64url 无填充。 |
@@ -71,14 +71,14 @@ WebSocket 二进制消息
 ### 2.2 深链
 
 ```
-reins://pair#<base64url(JSON)>
+rowel://pair#<base64url(JSON)>
 ```
 
 载荷在 **fragment** 里，因此即使被粘进浏览器也不会发给任何服务器。
 
 解码方**必须**：
 
-1. 校验前缀为 `reins://pair`
+1. 校验前缀为 `rowel://pair`
 2. 取第一个 `#` 之后的全部内容
 3. base64url 解码（接受无填充；解码前按需补 `=`）
 4. JSON 解析
@@ -89,7 +89,7 @@ reins://pair#<base64url(JSON)>
 ### 2.3 设备 id
 
 ```
-device = base64url( sha256("reins-device" ‖ ed25519_signing_public_key)[0..16] )
+device = base64url( sha256("rowel-device" ‖ ed25519_signing_public_key)[0..16] )
 ```
 
 取 SHA-256 前 **16 字节**，base64url 无填充（22 字符）。
@@ -122,7 +122,7 @@ device = base64url( sha256("reins-device" ‖ ed25519_signing_public_key)[0..16]
 短码路径下，两端各自显示并由人工比对。
 
 ```
-digits = BE_uint32( sha256("reins-confirm" ‖ handshake_hash)[0..4] ) mod 1000000
+digits = BE_uint32( sha256("rowel-confirm" ‖ handshake_hash)[0..4] ) mod 1000000
 ```
 
 十进制，**左侧补零至 6 位**。
@@ -134,7 +134,7 @@ digits = BE_uint32( sha256("reins-confirm" ‖ handshake_hash)[0..4] ) mod 10000
 给人核对用（`bridle devices` 与 app 设置页显示同一个值）。
 
 ```
-hex = uppercase( hex( sha256("reins-identity" ‖ public_key) ) )
+hex = uppercase( hex( sha256("rowel-identity" ‖ public_key) ) )
 fingerprint = hex[0:4] "-" hex[4:8] "-" hex[8:12] "-" hex[12:16]
 ```
 
@@ -154,11 +154,11 @@ fingerprint = hex[0:4] "-" hex[4:8] "-" hex[8:12] "-" hex[12:16]
 | 哈希 | SHA-256 |
 | 密钥长度 | 32 字节 |
 | 认证标签 | 16 字节 |
-| prologue | UTF-8 `"reins-tunnel"` |
+| prologue | UTF-8 `"rowel-tunnel"` |
 
 prologue 是**稳定的协议族标识，不含版本**。版本在握手载荷里协商（§3.3、§4.6）。
 
-> 早期设计把版本写进 prologue（`reins-tunnel/v1`）。那是错的：版本不同会让响应方在解密消息一时就失败，此时安全通道尚未建立，任何拒绝都发不出去也无法被认证，客户端无法区分版本偏斜、连错机器、被篡改三种情况。
+> 早期设计把版本写进 prologue（`rowel-tunnel/v1`）。那是错的：版本不同会让响应方在解密消息一时就失败，此时安全通道尚未建立，任何拒绝都发不出去也无法被认证，客户端无法区分版本偏斜、连错机器、被篡改三种情况。
 
 遵循 Noise 规范的标准初始化：`h = SHA256(protocol_name)`（协议名恰好 32 字节则直接用），`ck = h`，随后 `MixHash(prologue)`。
 
@@ -193,7 +193,7 @@ EncryptAndHash(payload)               握手载荷密文
 |---|---|---|---|
 | `versions` | number[] | 是 | 发起方支持的隧道版本，**偏好在前**，如 `[2, 1]` |
 | `name` | string | 是 | 设备显示名 |
-| `client` | string | 是 | 客户端构建标识，如 `reins-ios/1.0 (1)` |
+| `client` | string | 是 | 客户端构建标识，如 `rowel-ios/1.0 (1)` |
 | `token` | string | 否 | 一次性配对令牌。**已知设备必须省略此键**（不是发 `null`） |
 
 省略 vs `null` 的区别是语义性的：省略表示"我已被认识"，`null` 会被当作"要兑换一个空令牌"。
@@ -332,7 +332,7 @@ App **应当**在每次 `ready` 之后重发一次：token 存在机器上，而
 | `bridle` | string | Bridle 版本 |
 | `machine` | string | 机器名 |
 | `dshReachable` | boolean | 本机 agent 当前是否可达 |
-| `harness` | object，可选 | `{ url, home }`：此身份指向的 agent 地址与 `REINS_HOME` 实际路径。一台机器可以跑多个 Bridle，app 靠它区分实例并在急救指引里带上正确目录。旧 Bridle 不发；app 缺省时不显示（§14） |
+| `harness` | object，可选 | `{ url, home }`：此身份指向的 agent 地址与 `ROWEL_HOME` 实际路径。一台机器可以跑多个 Bridle，app 靠它区分实例并在急救指引里带上正确目录。旧 Bridle 不发；app 缺省时不显示（§14） |
 | `host` | any | 可达时为 agent 的 `host.describe` 值；不可达时省略 |
 | `direct` | string[]，可选 | 本机当前可直连的地址，优先在前。空数组表示直连监听已关（app 应清掉存量地址）；缺省表示 Bridle 太老不发（app 保留存量地址） |
 | `seq` | number | Bridle 已产生的最高事件序号 |
@@ -392,7 +392,7 @@ Bridle **必须**限制单条隧道的在途 `req` 数量。当前实现为 **64
 
 应用层则**必须**向前兼容，且这条独立于版本协商：未知帧类型、未知事件类型、未知渲染意图一律容忍。即使版本相同，一端也可能带着另一端不认识的扩展。
 
-> **一次性破坏**：把版本移出 prologue 本身是破坏性的——旧客户端的 prologue 是 `reins-tunnel/v1`，改后握手必然失败。**这必须在公开发布之前完成**，那时代价是重新配对少数几台设备；上架之后再做，代价是全部用户。这是协议最后一次在没有协商机制的情况下破坏兼容。
+> **一次性破坏**：把版本移出 prologue 本身是破坏性的——旧客户端的 prologue 是 `rowel-tunnel/v1`，改后握手必然失败。**这必须在公开发布之前完成**，那时代价是重新配对少数几台设备；上架之后再做，代价是全部用户。这是协议最后一次在没有协商机制的情况下破坏兼容。
 
 ---
 
@@ -455,10 +455,10 @@ Relay **禁止**解析 `Data` 的 payload。
 连上 `/v1/bridle` 后，Relay 发一个随机 nonce，Bridle **必须**在 **15 秒**内回签名：
 
 ```
-signature = Ed25519_sign( "reins-relay-registration/v1" ‖ "\n" ‖ nonce )
+signature = Ed25519_sign( "rowel-relay-registration/v1" ‖ "\n" ‖ nonce )
 ```
 
-Relay 验签，并校验 `deviceId == base64url(sha256("reins-device" ‖ signing_public_key)[0..16])`。**这是 `device` 与签名密钥绑定的唯一强制点。**
+Relay 验签，并校验 `deviceId == base64url(sha256("rowel-device" ‖ signing_public_key)[0..16])`。**这是 `device` 与签名密钥绑定的唯一强制点。**
 
 同一 deviceId 重复注册时，**新连接顶掉旧连接**。
 
@@ -470,9 +470,9 @@ Relay 验签，并校验 `deviceId == base64url(sha256("reins-device" ‖ signin
 { "code", "device", "key", "signature", "bundle", "expiresAt" }
 ```
 
-`signature = Ed25519_sign("reins-pair-offer/v1" ‖ "\n" ‖ code)`。
+`signature = Ed25519_sign("rowel-pair-offer/v1" ‖ "\n" ‖ code)`。
 
-两个域分隔符（`reins-relay-registration/v1` / `reins-pair-offer/v1`）不同，因此一个签名**不能**被当作另一个用途重放。
+两个域分隔符（`rowel-relay-registration/v1` / `rowel-pair-offer/v1`）不同，因此一个签名**不能**被当作另一个用途重放。
 
 Relay 侧限制（硬编码，非配置项）：
 
@@ -531,7 +531,7 @@ Bridle 监听 `0.0.0.0:<port>`（`--direct-port`，`0` 表示由系统分配）�
 ## 9. 测试向量
 
 ```sh
-npm run vectors      # 生成 ios/ReinsTests/Fixtures/protocol-vectors.json
+npm run vectors      # 生成 ios/RowelTests/Fixtures/protocol-vectors.json
 ```
 
 固定静态密钥与固定临时密钥，使整个握手确定。覆盖：

@@ -96,8 +96,8 @@ const checks = [
   ['心跳间隔（毫秒）', constant(session, 'PING_INTERVAL_MS'), [protocolDoc, deployDoc], ['25 秒', '25s']],
   ['重放缓冲容量', constant(eventLog, 'DEFAULT_CAPACITY'), [protocolDoc], null],
   ['每机器线路上限', constant(registry, 'MAX_CIRCUITS_PER_MACHINE'), [deployDoc], null],
-  ['全局机器上限（默认）', envDefault(registry, 'REINS_MAX_MACHINES'), [deployDoc], null],
-  ['全局线路上限（默认）', envDefault(registry, 'REINS_MAX_CIRCUITS'), [deployDoc], null],
+  ['全局机器上限（默认）', envDefault(registry, 'ROWEL_MAX_MACHINES'), [deployDoc], null],
+  ['全局线路上限（默认）', envDefault(registry, 'ROWEL_MAX_CIRCUITS'), [deployDoc], null],
   ['每设备短码上限', constant(offers, 'MAX_OFFERS_PER_DEVICE'), [deployDoc], null],
 ]
 
@@ -131,12 +131,12 @@ for (const [label, value, docs, phrases] of checks) {
 
 const frames = read('protocol/src/frames.ts')
 const prologue = /TUNNEL_PROLOGUE.*?Buffer\.from\('([^']+)'/s.exec(frames)?.[1]
-expect(prologue === 'reins-tunnel',
-  `prologue 现在是 ${String(prologue)}；文档 §3.1 说它必须是稳定的、不含版本的 reins-tunnel`)
-expect(protocolDoc.includes('`"reins-tunnel"`'),
+expect(prologue === 'rowel-tunnel',
+  `prologue 现在是 ${String(prologue)}；文档 §3.1 说它必须是稳定的、不含版本的 rowel-tunnel`)
+expect(protocolDoc.includes('`"rowel-tunnel"`'),
   'protocol.md §3.1 没有写出当前的 prologue 值')
 
-const swiftPrologue = /tunnelPrologue = Data\("([^"]+)"/.exec(read('ios/Reins/Protocol/Frames.swift'))?.[1]
+const swiftPrologue = /tunnelPrologue = Data\("([^"]+)"/.exec(read('ios/Rowel/Protocol/Frames.swift'))?.[1]
 expect(swiftPrologue === prologue,
   `两端 prologue 不一致：TypeScript ${String(prologue)}，Swift ${String(swiftPrologue)}`)
 
@@ -154,7 +154,7 @@ for (const kind of FRAME_KINDS) {
 // list above is hand-written and would otherwise rot the moment someone adds a
 // frame without touching it — which is exactly what happened with `wake`.
 const tsKinds = [...read('protocol/src/frames.ts').matchAll(/^\s{2}t: '([a-z]+)'$/gm)].map(m => m[1])
-const swiftKinds = [...read('ios/Reins/Protocol/Frames.swift').matchAll(/^\s{4}public let t = "([a-z]+)"$/gm)].map(m => m[1])
+const swiftKinds = [...read('ios/Rowel/Protocol/Frames.swift').matchAll(/^\s{4}public let t = "([a-z]+)"$/gm)].map(m => m[1])
 for (const kind of new Set([...tsKinds, ...swiftKinds])) {
   expect(FRAME_KINDS.includes(kind), `\`${kind}\` 帧存在于源码，但 check-docs 的清单里没有`)
 }
@@ -186,7 +186,7 @@ for (const name of Object.keys(muxCopy)) {
 
 // --- Projections the fold doc claims are unfolded ----------------------------
 
-const conversation = read('ios/Reins/Store/Conversation.swift')
+const conversation = read('ios/Rowel/Store/Conversation.swift')
 const foldDoc = read('docs/fold.md')
 
 /**

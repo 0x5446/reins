@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { FakeAgent, ReinsPhone, startStack } from '../lib/index.js'
+import { FakeAgent, RowelPhone, startStack } from '../lib/index.js'
 
 /**
  * @param {Function} predicate - polled until it returns truthy.
@@ -39,7 +39,7 @@ async function connected(t) {
   const stack = await startStack({ agent, dshUrl: 'http://127.0.0.1:3080' })
   t.after(() => stack.stop())
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'direct' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'direct' })
   t.after(() => { phone.close() })
 
   const events = []
@@ -128,7 +128,7 @@ test('an answer too big for the tunnel fails the call instead of the connection'
   t.after(() => stack.stop())
   await stack.waitForRelay()
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
   t.after(() => { phone.close() })
   await phone.connect()
 
@@ -173,7 +173,7 @@ test('a history page too big to send comes back shorter instead of failing', { t
   t.after(() => stack.stop())
   await stack.waitForRelay()
 
-  const phone = new ReinsPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
+  const phone = new RowelPhone({ bundle: stack.invite().bundle, prefer: 'relay' })
   t.after(() => { phone.close() })
   await phone.connect()
 

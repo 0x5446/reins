@@ -25,9 +25,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 root="$(cd .. && pwd)"
-home="${REINS_SHOTS_HOME:-$HOME/reins-shots}"
-port="${REINS_SHOTS_PORT:-3082}"
-device="${REINS_SHOTS_DEVICE:-iPhone 17 Pro Max}"
+home="${ROWEL_SHOTS_HOME:-$HOME/rowel-shots}"
+port="${ROWEL_SHOTS_PORT:-3082}"
+device="${ROWEL_SHOTS_DEVICE:-iPhone 17 Pro Max}"
 sample="$HOME/code/checkout-api"
 
 if [ -t 1 ]; then bold=$(printf '\033[1m'); off=$(printf '\033[0m'); else bold=''; off=''; fi
@@ -86,14 +86,14 @@ YAML
 }
 
 start_bridle() {
-  if [ -f "$home/reins-home/runtime.json" ]; then
-    pid="$(python3 -c "import json;print(json.load(open('$home/reins-home/runtime.json'))['pid'])" 2>/dev/null || echo 0)"
+  if [ -f "$home/rowel-home/runtime.json" ]; then
+    pid="$(python3 -c "import json;print(json.load(open('$home/rowel-home/runtime.json'))['pid'])" 2>/dev/null || echo 0)"
     if [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; then
       say "bridle already running (pid $pid)"
       return
     fi
   fi
-  REINS_HOME="$home/reins-home" nohup node "$root/bridle/lib/cli.js" start \
+  ROWEL_HOME="$home/rowel-home" nohup node "$root/bridle/lib/cli.js" start \
     --dsh-home "$home/dsh-home" >> "$home/bridle.log" 2>&1 &
   sleep 6
   say "bridle up"
@@ -186,14 +186,14 @@ take() {
   open -a Simulator
 
   # A sketch to attach, so the photo shot has something to be of.
-  [ -f /tmp/reins-sketch.png ] || swift Tools/Sketch.swift /tmp/reins-sketch.png
-  xcrun simctl addmedia "$udid" /tmp/reins-sketch.png 2>/dev/null || true
+  [ -f /tmp/rowel-sketch.png ] || swift Tools/Sketch.swift /tmp/rowel-sketch.png
+  xcrun simctl addmedia "$udid" /tmp/rowel-sketch.png 2>/dev/null || true
 
   xcodegen generate --spec project.yml >/dev/null
   say "pair the simulator if it is not paired yet:"
-  say "  REINS_HOME=$home/reins-home node $root/bridle/lib/cli.js pair"
-  xcodebuild test -project Reins.xcodeproj -scheme ReinsUI \
-    -destination "id=$udid" -only-testing:ReinsUITests/Screenshots \
+  say "  ROWEL_HOME=$home/rowel-home node $root/bridle/lib/cli.js pair"
+  xcodebuild test -project Rowel.xcodeproj -scheme RowelUI \
+    -destination "id=$udid" -only-testing:RowelUITests/Screenshots \
     | grep -E "Test Case|error:" || true
 
   # The artifact the dashboard conversation built, rendered.

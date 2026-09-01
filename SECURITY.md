@@ -1,13 +1,13 @@
 # Security
 
-Reins hands a phone the same authority over a Mac that its own terminal has.
+Rowel hands a phone the same authority over a Mac that its own terminal has.
 That is the product, and it is why this file is longer than the template.
 
 ## Reporting a vulnerability
 
 **Do not open a public issue.**
 
-1. **GitHub private advisory** — [report it here](https://github.com/0x5446/reins/security/advisories/new).
+1. **GitHub private advisory** — [report it here](https://github.com/0x5446/rowel/security/advisories/new).
    Preferred, because the discussion, the fix, and the CVE all stay in one place.
 2. **Email** — `hi@novabox.ai`, subject starting with `SECURITY`. Use this if you
    would rather not have a GitHub account attached to the report. There is no
@@ -39,7 +39,7 @@ There is no bounty. There is no budget for one.
 ### Supported versions
 
 The tip of `main` and the most recent tag. There are no maintenance branches, and
-`install.sh` pins `REINS_REF` to a release tag, so a fix ships as a new tag.
+`install.sh` pins `ROWEL_REF` to a release tag, so a fix ships as a new tag.
 
 ## Scope
 
@@ -88,7 +88,7 @@ sides every connection; the transport keys absorb `ee` and `se`, so recorded
 traffic stays sealed if either static key is later compromised. **Handshake
 message one is the exception** — IK seals it under `es` and `ss`, both of which
 derive from the responder's *static* key. Someone who records a pairing handshake
-and later obtains `~/.reins/bridle.json` can decrypt that one message and recover
+and later obtains `~/.rowel/bridle.json` can decrypt that one message and recover
 the app's static public key, the device name, and the one-time pairing token.
 This is inherent to IK rather than a bug, and it is the reason the pairing token
 is single-use.
@@ -142,7 +142,7 @@ tear down a tunnel that is already open. The CLI says so and tells you to restar
 `bridle` to drop a live one.
 
 **A compromised Mac is a total loss.** The Bridle's static private key is in
-`~/.reins/bridle.json` at `0600`. It is not in the Keychain and not in the Secure
+`~/.rowel/bridle.json` at `0600`. It is not in the Keychain and not in the Secure
 Enclave. Anything that can read that file can impersonate the machine to every
 phone paired with it, and anything that can run as your user already has the
 harness anyway.
@@ -163,7 +163,7 @@ phone whose word should not be taken for it.
 **The relay learns metadata.** It cannot read your traffic and it stores nothing
 between sessions, but it necessarily observes: the machine's device id, its
 display name in clear text (it defaults to your computer's name — edit
-`machineName` in `~/.reins/bridle.json`), the Bridle version, that some phone has
+`machineName` in `~/.rowel/bridle.json`), the Bridle version, that some phone has
 a circuit open to some machine and when it opened, message sizes and timing, and
 your IP address. If you push, it also learns the association between an Apple
 device token and a machine, and it holds an APNs signing key — a relay that can
@@ -255,12 +255,12 @@ parts a security reader needs. If you are reading source instead:
 
 | | |
 |---|---|
-| The Noise implementation | `protocol/src/noise.ts`, `ios/Reins/Protocol/Noise.swift` |
+| The Noise implementation | `protocol/src/noise.ts`, `ios/Rowel/Protocol/Noise.swift` |
 | Pairing, short codes, the confirmation number | `protocol/src/pairing.ts` |
 | Handshake acceptance order and the tunnel | `bridle/src/tunnel/session.ts` |
 | The relay's content-blindness | `protocol/src/mux.ts`, `relay-worker/src/switchboard.ts` |
 | What the relay may and may not do with a wake | `relay-worker/src/apns.ts` |
-| Key storage | `bridle/src/identity.ts`, `ios/Reins/Net/Keychain.swift` |
+| Key storage | `bridle/src/identity.ts`, `ios/Rowel/Net/Keychain.swift` |
 | The properties as executable tests | `e2e/tests/security.test.js`, `e2e/tests/direct.test.js` |
 | Byte-level wire specification | `docs/protocol.md` (Chinese) |
 | Design rationale for all of the above | `docs/architecture.md` §5, §7, §14 (Chinese) |

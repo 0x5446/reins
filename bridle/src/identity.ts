@@ -19,7 +19,7 @@ import {
   PAIRING_TTL_MS,
   type SigningKeyPair,
   type StaticKeyPair,
-} from '@reins/protocol'
+} from '@rowel/protocol'
 
 /** On-disk format version; a newer file refuses to load on an older Bridle. */
 const STATE_VERSION = 1
@@ -87,12 +87,12 @@ export interface BridleState {
 }
 
 /** Default public Relay. Overridable per install; the Relay never sees plaintext either way. */
-export const DEFAULT_RELAY_URL = 'wss://reins-relay.novabox.ai'
+export const DEFAULT_RELAY_URL = 'wss://rowel-relay.novabox.ai'
 
 /**
  * Addresses this project used to ship as the default, and no longer serves.
  *
- * The relay moved off `reins.novabox.ai` so that the public site and the
+ * The relay moved off `rowel.novabox.ai` so that the public site and the
  * infrastructure stop sharing a hostname — one cache rule, one WAF rule, or one
  * "under attack" toggle aimed at the marketing pages would otherwise take the
  * relay with it, and the relay is the half that must not go down.
@@ -103,25 +103,25 @@ export const DEFAULT_RELAY_URL = 'wss://reins-relay.novabox.ai'
  * an address someone set themselves, or pointed at their own relay, is theirs
  * and is left alone.
  */
-const RETIRED_RELAY_URLS: readonly string[] = ['wss://reins.novabox.ai', 'wss://relay.novabox.ai']
+const RETIRED_RELAY_URLS: readonly string[] = ['wss://rowel.novabox.ai', 'wss://relay.novabox.ai']
 
 /** Default dsh loopback address, matching the web profile's own default port. */
 export const DEFAULT_DSH_URL = 'http://127.0.0.1:3080'
 
 /**
  * Resolve the Bridle home directory.
- * @returns `$REINS_HOME`, else `~/.reins`.
+ * @returns `$ROWEL_HOME`, else `~/.rowel`.
  */
-export function reinsHome(): string {
-  return process.env['REINS_HOME'] ?? join(homedir(), '.reins')
+export function rowelHome(): string {
+  return process.env['ROWEL_HOME'] ?? join(homedir(), '.rowel')
 }
 
 /**
  * Absolute path of the state file.
- * @returns `<REINS_HOME>/bridle.json`.
+ * @returns `<ROWEL_HOME>/bridle.json`.
  */
 export function statePath(): string {
-  return join(reinsHome(), 'bridle.json')
+  return join(rowelHome(), 'bridle.json')
 }
 
 function defaultMachineName(): string {
@@ -135,7 +135,7 @@ function defaultMachineName(): string {
  * @returns the current state, already written to disk.
  */
 export function loadState(): BridleState {
-  const home = reinsHome()
+  const home = rowelHome()
   mkdirSync(home, { recursive: true, mode: 0o700 })
   const path = statePath()
   let raw: string | undefined
@@ -175,14 +175,14 @@ export function loadState(): BridleState {
 
 /**
  * Overlay the environment on loaded state. The overrides are not persisted: a
- * `REINS_DSH_URL` set for one test run must not silently become the machine's
+ * `ROWEL_DSH_URL` set for one test run must not silently become the machine's
  * configuration.
  * @param state - state as read from disk.
  * @returns the same object with any overrides applied.
  */
 function applyEnvironment(state: BridleState): BridleState {
-  const relay = process.env['REINS_RELAY_URL']
-  const dsh = process.env['REINS_DSH_URL']
+  const relay = process.env['ROWEL_RELAY_URL']
+  const dsh = process.env['ROWEL_DSH_URL']
   if (relay !== undefined && relay.length > 0) state.relayUrl = relay
   if (dsh !== undefined && dsh.length > 0) state.dshUrl = dsh
   return state
@@ -193,7 +193,7 @@ function applyEnvironment(state: BridleState): BridleState {
  * @param state - the state to write.
  */
 export function saveState(state: BridleState): void {
-  const home = reinsHome()
+  const home = rowelHome()
   mkdirSync(home, { recursive: true, mode: 0o700 })
   const path = statePath()
   const temporary = `${path}.${String(process.pid)}.tmp`

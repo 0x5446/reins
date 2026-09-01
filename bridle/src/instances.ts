@@ -1,11 +1,11 @@
 /**
  * The machine-level index of Bridle homes.
  *
- * Every other command speaks about one `REINS_HOME`, and nothing could answer
+ * Every other command speaks about one `ROWEL_HOME`, and nothing could answer
  * the question that comes right before all of them: which identities live on
  * this machine at all? That is exactly what a person with a real Bridle and a
  * demo one asks the moment either misbehaves — and until now the only answer
- * was remembering which directories you had ever pointed `REINS_HOME` at.
+ * was remembering which directories you had ever pointed `ROWEL_HOME` at.
  *
  * The index remembers **paths and nothing else**. Everything shown about an
  * instance — name, device id, whether it is running, how many phones — is
@@ -14,20 +14,20 @@
  * those facts would drift the moment a daemon started or a phone paired; a
  * list of paths cannot drift, only shrink.
  *
- * It lives at a fixed location regardless of `REINS_HOME`, because its whole
+ * It lives at a fixed location regardless of `ROWEL_HOME`, because its whole
  * point is the view across homes.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { deviceIdFor } from '@reins/protocol'
-import { reinsHome, signingKeys, type BridleState } from './identity.ts'
+import { deviceIdFor } from '@rowel/protocol'
+import { rowelHome, signingKeys, type BridleState } from './identity.ts'
 import type { RuntimeInfo } from './runtime.ts'
 
 /** What `bridle instances` shows about one home; all of it read fresh. */
 export interface InstanceSummary {
-  /** The `REINS_HOME` this identity lives in. */
+  /** The `ROWEL_HOME` this identity lives in. */
   home: string
   machineName: string
   /** Relay device id, from the state file's signing key. */
@@ -44,10 +44,10 @@ export interface InstanceSummary {
  * Where the index lives.
  *
  * Overridable so a test does not write into the developer's real machine
- * view — the same seam `REINS_HOME` provides for everything else.
+ * view — the same seam `ROWEL_HOME` provides for everything else.
  */
 function indexPath(): string {
-  return process.env['REINS_INSTANCES'] ?? join(homedir(), '.reins', 'instances.json')
+  return process.env['ROWEL_INSTANCES'] ?? join(homedir(), '.rowel', 'instances.json')
 }
 
 /**
@@ -58,9 +58,9 @@ function indexPath(): string {
  * identity someone runs. Tolerant of every failure: an index that cannot be
  * written costs the machine view one entry, and that is not worth any
  * daemon's startup (the same lesson runtime.json taught with a full disk).
- * @param home - the `REINS_HOME` to remember; defaults to the current one.
+ * @param home - the `ROWEL_HOME` to remember; defaults to the current one.
  */
-export function rememberInstance(home: string = reinsHome()): void {
+export function rememberInstance(home: string = rowelHome()): void {
   try {
     const path = indexPath()
     const canonical = resolve(home)
@@ -88,8 +88,8 @@ export function rememberInstance(home: string = reinsHome()): void {
  */
 export function listInstances(): InstanceSummary[] {
   const homes = new Set<string>(readIndex())
-  homes.add(resolve(join(homedir(), '.reins')))
-  homes.add(resolve(reinsHome()))
+  homes.add(resolve(join(homedir(), '.rowel')))
+  homes.add(resolve(rowelHome()))
   const summaries: InstanceSummary[] = []
   for (const home of [...homes].sort()) {
     const summary = summarize(home)

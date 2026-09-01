@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { WebSocketServer } from 'ws'
-import { BridleCore, RelayClient } from '@reins/bridle'
+import { BridleCore, RelayClient } from '@rowel/bridle'
 
 /** A core whose dsh never answers; only the relay loop is under test. */
 function core(relayUrl) {

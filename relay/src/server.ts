@@ -1,5 +1,5 @@
 /**
- * The Reins Relay: a content-blind switchboard between phones and the Bridles
+ * The Rowel Relay: a content-blind switchboard between phones and the Bridles
  * on people's machines.
  *
  * It exists for one reason. A laptop behind NAT cannot accept an inbound
@@ -32,7 +32,7 @@ import {
   verifyRegistration,
   MAX_FRAME_BYTES,
   type PairingBundle,
-} from '@reins/protocol'
+} from '@rowel/protocol'
 import { OfferStore } from './offers.ts'
 import { RateLimiter } from './rate-limit.ts'
 import { CapacityError, Registry, type Machine } from './registry.ts'

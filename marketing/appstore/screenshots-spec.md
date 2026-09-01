@@ -35,7 +35,7 @@ text.** Reasons:
 - Status bar hygiene (simulator):
   `xcrun simctl status_bar booted override --time 9:41 --batteryLevel 100 --batteryState charged --cellularBars 4 --operatorName ""`
 - Content hygiene: neutral machine name (edit `machineName` in
-  `~/.reins/bridle.json`, e.g. `studio`), a throwaway demo repo with generic
+  `~/.rowel/bridle.json`, e.g. `studio`), a throwaway demo repo with generic
   paths, no API keys, no real project names. Dark and light both look
   intentional; pick **one** appearance for the whole set (dark reads more
   "terminal-native" for this audience).
@@ -56,7 +56,7 @@ models → photo.**
 | 1 | `approval.png` | An approval card: tool name, full command, diff, Approve/Deny buttons visible | Ask the agent to edit a file so the request carries a readable diff (a small, legible one — 5–10 lines) | **Nothing runs without you. The full command and diff, then your call.** |
 | 2 | `conversation.png` | A live session mid-stream: reasoning section open or freshly collapsed, a tool-call card, streaming text | Prompt something multi-step ("add a retry to the fetch helper") and shoot mid-run | **Watch it work — reasoning, tool calls, and diffs, streaming live.** |
 | 3 | `sessions.png` | Session list grouped by workspace, ≥2 workspaces, a waiting approval/question pinned at top, machine switcher visible | Two demo workspaces, one session left in a waiting state | **Everything running on your Mac. Whatever needs you is on top.** |
-| 4 | `push.png` | Lock screen showing a Reins notification, e.g. "Bash needs permission — <session> on studio" | Background the app, trigger an approval, lock the phone; shoot the lock screen. (This is the app's own local notification with the real words — accurate to how the product works, since the remote push carries no content.) | **The ask finds you. The content never touches anyone's servers.** |
+| 4 | `push.png` | Lock screen showing a Rowel notification, e.g. "Bash needs permission — <session> on studio" | Background the app, trigger an approval, lock the phone; shoot the lock screen. (This is the app's own local notification with the real words — accurate to how the product works, since the remote push carries no content.) | **The ask finds you. The content never touches anyone's servers.** |
 | 5 | `models.png` | Model picker with reasoning-effort control visible | Open the picker from a session | **Pick the model and how hard it thinks. Mid-conversation.** |
 | 6 | `photo.png` | Composer with an attached photo of a hand-drawn UI sketch, prompt text like "build this screen" | Photograph a real napkin/whiteboard sketch beforehand; attach via the photo button (up to 4 attach) | **Sketch it on paper, shoot it, send it. The agent takes it from there.** |
 

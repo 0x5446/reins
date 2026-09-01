@@ -11,10 +11,10 @@ import test from 'node:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { dshHomeUrl } from '@reins/bridle'
+import { dshHomeUrl } from '@rowel/bridle'
 
 function home(t, patch) {
-  const root = mkdtempSync(join(tmpdir(), 'reins-dshhome-'))
+  const root = mkdtempSync(join(tmpdir(), 'rowel-dshhome-'))
   t.after(() => { rmSync(root, { recursive: true, force: true }) })
   if (patch !== undefined) {
     mkdirSync(join(root, 'profiles', 'web'), { recursive: true })

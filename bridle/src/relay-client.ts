@@ -17,7 +17,7 @@ import {
   deviceIdFor,
   encodeMux,
   signRegistration,
-} from '@reins/protocol'
+} from '@rowel/protocol'
 import { TunnelSession } from './tunnel/session.ts'
 import { signingKeys } from './identity.ts'
 import type { BridleCore } from './core.ts'

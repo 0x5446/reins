@@ -1,23 +1,23 @@
-# Reins
+# Rowel
 
 **Drive the coding agent on your Mac from your iPhone.** End to end encrypted;
 the relay only ever sees ciphertext.
 
 The [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`)
-runs where your code and your keys already are. Reins is the other half: read
+runs where your code and your keys already are. Rowel is the other half: read
 what the agent did, approve what it wants to do next, answer the question it is
 blocked on, start the next thing from a train.
 
 | Piece | What it is | Where it runs |
 |---|---|---|
-| **Reins** | the iOS app | your iPhone |
+| **Rowel** | the iOS app | your iPhone |
 | **Bridle** | a companion process that speaks for the harness | the Mac running `dsh` |
 | **Relay** | a content-blind switchboard | the public internet — ours, or yours |
 
 ```
  iPhone                  internet                   your Mac
 ┌────────┐          ┌──────────┐          ┌──────────────────┐
-│ Reins  │◄──wss───►│  Relay    │◄──wss───►│ Bridle ──► dsh  │
+│ Rowel  │◄──wss───►│  Relay    │◄──wss───►│ Bridle ──► dsh  │
 └────────┘  sealed  └──────────┘  sealed  └──────────────────┘
      └────────── Noise_IK_25519_ChaChaPoly_SHA256 ─────────┘
 ```
@@ -33,18 +33,18 @@ There are no accounts. Pairing is a QR code in your terminal.
 
 The Mac side is finished and in daily use. The relay is deployed. **The app is not
 on the App Store yet** — getting it means building it with Xcode, which is free
-but comes with [a seven-day catch](https://reins.novabox.ai/get).
+but comes with [a seven-day catch](https://rowel.novabox.ai/get).
 
 ## Getting it running
 
 ### 1. Install Bridle on the Mac
 
 ```sh
-curl -fsSL https://reins.novabox.ai/install | sh
+curl -fsSL https://rowel.novabox.ai/install | sh
 ```
 
 Needs Node 22+ and git. The script installs neither — it stops and tells you what
-is missing. It writes nothing outside `~/.reins`, plus one symlink onto your PATH.
+is missing. It writes nothing outside `~/.rowel`, plus one symlink onto your PATH.
 It is 134 lines, a third of them comments, if you would rather read it before
 running it.
 
@@ -99,8 +99,8 @@ Useful flags on `bridle` itself:
 --link              also print the raw pairing link
 ```
 
-State lives in `~/.reins/bridle.json`, mode `0600`, and it holds this machine's
-private key. `REINS_HOME` moves it.
+State lives in `~/.rowel/bridle.json`, mode `0600`, and it holds this machine's
+private key. `ROWEL_HOME` moves it.
 
 ## What it is protecting, and what it is not
 

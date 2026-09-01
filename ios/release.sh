@@ -13,11 +13,11 @@
 #   ios/release.sh --no-upload     archive and export only, leave the .ipa
 #
 # Environment:
-#   REINS_TEAM_ID        the paid team's 10-character id. NOT the Personal Team.
+#   ROWEL_TEAM_ID        the paid team's 10-character id. NOT the Personal Team.
 #   ASC_KEY_ID           the App Store Connect key id, from the key's row.
 #   ASC_ISSUER_ID        the issuer id, shown once above the key list.
 #   ASC_KEY_PATH         path to the AuthKey_<id>.p8. Downloadable exactly once.
-#   REINS_BUILD          build number to stamp. Defaults to the commit count,
+#   ROWEL_BUILD          build number to stamp. Defaults to the commit count,
 #                        which rises monotonically and needs no bookkeeping.
 #
 # The key file is a private key. Keep it out of the repo — .gitignore has the
@@ -31,8 +31,8 @@ cd "$(dirname "$0")/.."
 UPLOAD=1
 [ "${1:-}" = "--no-upload" ] && UPLOAD=0
 
-ARCHIVE="${TMPDIR:-/tmp}/Reins.xcarchive"
-EXPORT="${TMPDIR:-/tmp}/ReinsExport"
+ARCHIVE="${TMPDIR:-/tmp}/Rowel.xcarchive"
+EXPORT="${TMPDIR:-/tmp}/RowelExport"
 
 missing() {
   echo "release: \$$1 is not set." >&2
@@ -40,7 +40,7 @@ missing() {
   exit 1
 }
 
-: "${REINS_TEAM_ID:?release: \$REINS_TEAM_ID is not set. It is the paid team, not the Personal Team.}"
+: "${ROWEL_TEAM_ID:?release: \$ROWEL_TEAM_ID is not set. It is the paid team, not the Personal Team.}"
 if [ "$UPLOAD" = 1 ]; then
   [ -n "${ASC_KEY_ID:-}" ]     || missing ASC_KEY_ID
   [ -n "${ASC_ISSUER_ID:-}" ]  || missing ASC_ISSUER_ID
@@ -50,27 +50,27 @@ fi
 
 # A build number App Store Connect will accept is one it has not seen. The
 # commit count is the cheapest thing that is always larger than last time.
-BUILD="${REINS_BUILD:-$(git rev-list --count HEAD)}"
-echo "release: building $BUILD for team $REINS_TEAM_ID"
+BUILD="${ROWEL_BUILD:-$(git rev-list --count HEAD)}"
+echo "release: building $BUILD for team $ROWEL_TEAM_ID"
 
-REINS_TEAM_ID="$REINS_TEAM_ID" xcodegen generate --spec ios/project.yml --quiet
+ROWEL_TEAM_ID="$ROWEL_TEAM_ID" xcodegen generate --spec ios/project.yml --quiet
 
 rm -rf "$ARCHIVE" "$EXPORT"
 
 xcodebuild archive \
-  -project ios/Reins.xcodeproj \
-  -scheme Reins \
+  -project ios/Rowel.xcodeproj \
+  -scheme Rowel \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
-  DEVELOPMENT_TEAM="$REINS_TEAM_ID" \
+  DEVELOPMENT_TEAM="$ROWEL_TEAM_ID" \
   CURRENT_PROJECT_VERSION="$BUILD"
 
 # The export options name the team too, because the archive records the team it
 # was signed by and the export can legitimately differ from it.
-OPTIONS="${TMPDIR:-/tmp}/ReinsExportOptions.plist"
-sed "s|<string>AVKUVD4FPN</string>|<string>$REINS_TEAM_ID</string>|" ios/ExportOptions.plist > "$OPTIONS"
+OPTIONS="${TMPDIR:-/tmp}/RowelExportOptions.plist"
+sed "s|<string>AVKUVD4FPN</string>|<string>$ROWEL_TEAM_ID</string>|" ios/ExportOptions.plist > "$OPTIONS"
 
 EXPORT_AUTH=()
 if [ "$UPLOAD" = 1 ]; then

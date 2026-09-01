@@ -1,10 +1,10 @@
 /**
  * One Bridle per identity.
  *
- * Two Bridles reading the same REINS_HOME register at the Relay as the same
+ * Two Bridles reading the same ROWEL_HOME register at the Relay as the same
  * machine and displace each other in a silent loop at retry speed — observed
  * as four and a half thousand Relay requests in two hours, from a standalone
- * daemon and a dsh plugin that had quietly inherited the same `~/.reins`.
+ * daemon and a dsh plugin that had quietly inherited the same `~/.rowel`.
  * `competingDaemon` is the check both doorways run before starting, and this
  * file is what keeps it honest.
  */
@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { clearRuntime, competingDaemon, writeRuntime } from '@reins/bridle'
+import { clearRuntime, competingDaemon, writeRuntime } from '@rowel/bridle'
 
 /** A plausible snapshot; only the pid matters to the check. */
 function snapshot(pid) {
@@ -33,18 +33,18 @@ function snapshot(pid) {
 }
 
 /**
- * Run a body against a throwaway REINS_HOME.
+ * Run a body against a throwaway ROWEL_HOME.
  * @param {(home: string) => Promise<void> | void} body - the test body.
  */
 async function withHome(body) {
-  const home = mkdtempSync(join(tmpdir(), 'reins-runtime-'))
-  const previous = process.env.REINS_HOME
-  process.env.REINS_HOME = home
+  const home = mkdtempSync(join(tmpdir(), 'rowel-runtime-'))
+  const previous = process.env.ROWEL_HOME
+  process.env.ROWEL_HOME = home
   try {
     await body(home)
   } finally {
-    if (previous === undefined) delete process.env.REINS_HOME
-    else process.env.REINS_HOME = previous
+    if (previous === undefined) delete process.env.ROWEL_HOME
+    else process.env.ROWEL_HOME = previous
   }
 }
 

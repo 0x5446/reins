@@ -99,7 +99,7 @@ test('an app that believes the wrong static key cannot complete the handshake', 
 })
 
 test('a prologue mismatch aborts the handshake', () => {
-  assert.throws(() => handshake({ responderPrologue: Buffer.from('reins-tunnel/v999') }), NoiseError)
+  assert.throws(() => handshake({ responderPrologue: Buffer.from('rowel-tunnel/v999') }), NoiseError)
 })
 
 test('a truncated first message is refused', () => {
@@ -125,7 +125,7 @@ test('the prologue carries no version, so a mismatch can be answered', () => {
   // which versions they speak, so the responder can always decrypt message one
   // and always send back an authenticated refusal. A version in the prologue
   // made the mismatch fail inside the handshake, where nothing can be said.
-  assert.equal(TUNNEL_PROLOGUE.toString('utf8'), 'reins-tunnel')
+  assert.equal(TUNNEL_PROLOGUE.toString('utf8'), 'rowel-tunnel')
   assert.ok(!TUNNEL_PROLOGUE.toString('utf8').includes('/v'))
 })
 

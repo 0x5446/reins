@@ -53,10 +53,10 @@ const MAX_CIRCUITS_PER_MACHINE = 8
  * under load fails everyone at once, where a Relay that refuses one machine
  * fails one machine.
  */
-const MAX_MACHINES = positiveInt(process.env['REINS_MAX_MACHINES'], 1_000)
+const MAX_MACHINES = positiveInt(process.env['ROWEL_MAX_MACHINES'], 1_000)
 
 /** Circuits across every machine. Bounds memory when many machines each hold a few. */
-const MAX_TOTAL_CIRCUITS = positiveInt(process.env['REINS_MAX_CIRCUITS'], 4_000)
+const MAX_TOTAL_CIRCUITS = positiveInt(process.env['ROWEL_MAX_CIRCUITS'], 4_000)
 
 /**
  * Read a positive integer from the environment.

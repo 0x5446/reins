@@ -43,7 +43,7 @@ export class DirectServer {
       // Anything that is not the tunnel upgrade gets a flat refusal; this
       // server is not a web server and should not look like one.
       response.writeHead(426, { 'content-type': 'text/plain' })
-      response.end('reins bridle: websocket upgrade required\n')
+      response.end('rowel bridle: websocket upgrade required\n')
     })
     this.wss = new WebSocketServer({ server: this.http, path: DIRECT_PATH, maxPayload: 64 * 1024 * 1024 })
     this.wss.on('connection', (socket: WebSocket) => { this.attach(socket) })

@@ -52,7 +52,7 @@ export const TUNNEL_VERSIONS: readonly number[] = [1]
  * the responder can always decrypt message one and can therefore always answer
  * with an *authenticated* refusal.
  */
-export const TUNNEL_PROLOGUE: Buffer = Buffer.from('reins-tunnel', 'utf8')
+export const TUNNEL_PROLOGUE: Buffer = Buffer.from('rowel-tunnel', 'utf8')
 
 /**
  * Choose the version two ends will speak.
@@ -184,7 +184,7 @@ export interface ReadyFrame {
    * Which harness this identity fronts (`url`) and where the identity lives
    * on disk (`home`). One machine can run several Bridles; this is how the
    * app tells them apart and how its rescue guidance names the right
-   * `REINS_HOME`. Optional: an older Bridle not sending it costs a label.
+   * `ROWEL_HOME`. Optional: an older Bridle not sending it costs a label.
    */
   harness?: { url: string; home: string }
   /** dsh `host.describe` value when reachable. */

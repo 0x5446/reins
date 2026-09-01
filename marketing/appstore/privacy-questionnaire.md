@@ -15,15 +15,15 @@ Resulting label: **Data Not Collected**. Tracking: **No** (no ATT prompt
 needed).
 
 This matches the shipped privacy manifest exactly —
-`ios/Reins/PrivacyInfo.xcprivacy` declares `NSPrivacyCollectedDataTypes = []`
+`ios/Rowel/PrivacyInfo.xcprivacy` declares `NSPrivacyCollectedDataTypes = []`
 and `NSPrivacyTracking = false`. The label and the manifest must agree, and
 they do. If you ever decide to declare anything on the label, update the
 manifest in the same release.
 
 ## Source-level verification (performed 2026-09-01)
 
-1. **No analytics / crash / tracking SDK.** Grep over `ios/Reins`,
-   `ios/ReinsTests`, `ios/project.yml` for
+1. **No analytics / crash / tracking SDK.** Grep over `ios/Rowel`,
+   `ios/RowelTests`, `ios/project.yml` for
    `analytics|firebase|sentry|crashlytics|amplitude|mixpanel|segment|appsflyer|adjust|bugsnag|datadog|posthog|telemetry|tracking|advertis`
    (case-insensitive). Every hit is benign: the `PrivacyInfo.xcprivacy`
    comment *stating* there is no analytics, the `NSPrivacyTracking(Domains)`
@@ -108,7 +108,7 @@ contact, `NSPrivacyTracking = false`, no tracking domains.
 
 - [ ] Label says Data Not Collected ↔ `PrivacyInfo.xcprivacy` has empty
       `NSPrivacyCollectedDataTypes`. (True today.)
-- [ ] Privacy policy URL (`https://reins.novabox.ai/privacy`) reachable —
+- [ ] Privacy policy URL (`https://rowel.novabox.ai/privacy`) reachable —
       verified HTTP 200 on 2026-09-01. **Do not use `/privacy.html` — it
       404s** (the Worker only routes the extensionless path).
 - [ ] The privacy policy already discloses relay metadata, the push-token
@@ -116,7 +116,7 @@ contact, `NSPrivacyTracking = false`, no tracking domains.
       label requires.
 - [ ] 5.1.2(i) note: the policy should also state plainly that prompts are
       ultimately sent to whatever model provider **the user configured on
-      their own Mac** — Reins neither chooses nor touches that provider.
+      their own Mac** — Rowel neither chooses nor touches that provider.
       `privacy.html` covers the relay side thoroughly; this one sentence
       about the user's own model provider is worth adding to the site
       (suggestion only, tracked in review-notes.md).

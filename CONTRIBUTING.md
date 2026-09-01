@@ -1,6 +1,6 @@
 # Contributing
 
-Reins is maintained by one person in the open. That shapes what is useful to
+Rowel is maintained by one person in the open. That shapes what is useful to
 send. A bug report with a reproduction is always welcome. A small fix is easy to
 take. A large feature is worth asking about before you build it — `docs/architecture.md`
 §17 lists the things that are deliberately *not* being built, and a pull request
@@ -50,7 +50,7 @@ was wrong by a factor of two inside a week. CI has the number.
 Losing any one of them loses something the others cannot cover.
 
 **Vectors.** `protocol/scripts/emit-vectors.js` runs the handshake with fixed
-keys and fixed ephemerals and writes `ios/ReinsTests/Fixtures/protocol-vectors.json`.
+keys and fixed ephemerals and writes `ios/RowelTests/Fixtures/protocol-vectors.json`.
 Swift compares byte for byte: handshake messages, the handshake hash, the
 six-digit confirmation, transport ciphertext, the pairing link, frame encoding.
 "My server talks to my client" proves nothing when both are mine. A failure here
@@ -76,21 +76,21 @@ behaviour and it is also a trap:
 - Without a harness serving on this machine, `cli`, `direct`, `security`, and
   `tunnel` in `e2e/tests/` all skip. A green `npm run test:e2e` on a machine with
   no `dsh` has run a small fraction of it. Read the skip lines.
-- `e2e/tests/deployed.test.js` skips unless `REINS_E2E_RELAY_URL` points at a
+- `e2e/tests/deployed.test.js` skips unless `ROWEL_E2E_RELAY_URL` points at a
   relay. Against the deployed one it is the only thing that catches a tunnel
   refusing WebSocket upgrades or a proxy buffering the stream into uselessness.
-- `relay-worker/tests/worker.test.js` skips unless `REINS_WORKER_URL` points at a
+- `relay-worker/tests/worker.test.js` skips unless `ROWEL_WORKER_URL` points at a
   running worker:
 
   ```sh
-  npx wrangler dev --config relay-worker/wrangler.jsonc --var REINS_SWEEP_INTERVAL_MS:2000
-  REINS_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
+  npx wrangler dev --config relay-worker/wrangler.jsonc --var ROWEL_SWEEP_INTERVAL_MS:2000
+  ROWEL_WORKER_URL=ws://127.0.0.1:8787 node --test relay-worker/tests/worker.test.js
   ```
 
   The sweep override is not optional. Without it the suite passes four times and
   fails the fifth, which is worse than failing every time.
 - `e2e/tests/site.test.js` fetches the public site by default. Point
-  `REINS_E2E_SITE_URL` somewhere else or expect it to need the network.
+  `ROWEL_E2E_SITE_URL` somewhere else or expect it to need the network.
 
 ## Changing the wire format
 
@@ -121,7 +121,7 @@ test vectors  >  tests  >  code  >  docs
 ```
 
 `check:docs` only knows things with one right answer. Everything else is on
-people. If you change `bridle/src`, `ios/Reins/Store`, a protocol frame, or a
+people. If you change `bridle/src`, `ios/Rowel/Store`, a protocol frame, or a
 harness method, either update the matching document or say in the commit message
 why it does not need one.
 

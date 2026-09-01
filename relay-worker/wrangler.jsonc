@@ -12,7 +12,7 @@
   // See ./README.md for the matching model, where short codes live, and the
   // limits this substrate imposes that the Node Relay does not have.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "reins-relay",
+  "name": "rowel-relay",
   "main": "src/index.ts",
 
   // Pinned to a behaviour, not to today. From 2026-04-07 the runtime answers a
@@ -59,8 +59,8 @@
   // variables, and the same defaults, though what they protect is different
   // here (README §容量上限).
   "vars": {
-    "REINS_MAX_MACHINES": "1000",
-    "REINS_MAX_CIRCUITS": "4000"
+    "ROWEL_MAX_MACHINES": "1000",
+    "ROWEL_MAX_CIRCUITS": "4000"
   },
 
   // Off, deliberately. Workers Logs would persist request URLs, and
@@ -76,7 +76,7 @@
   //
   // A hostname of its own, not a path on the site's.
   //
-  // They shared `reins.novabox.ai` for a day and that was a mistake worth
+  // They shared `rowel.novabox.ai` for a day and that was a mistake worth
   // naming: the site is public marketing and the relay is infrastructure, and
   // every zone-level control is applied per hostname. One cache rule, one WAF
   // rule, one "I'm under attack" toggle aimed at the pages would have taken the
@@ -89,7 +89,7 @@
   // not: a route on a name with no record resolves nowhere and fails in a way
   // that looks like the Worker is broken.
   //
-  // `reins-relay.` and not `relay.reins.` — which would read better — because
+  // `rowel-relay.` and not `relay.rowel.` — which would read better — because
   // Cloudflare's free Universal SSL covers the apex and *one* level of
   // subdomain only. A Worker custom domain would get its own certificate at
   // any depth, but the standby address behind the tunnel relies on the
@@ -97,6 +97,6 @@
   // not worth the Advanced Certificate Manager subscription it would take to
   // make them match.
   "routes": [
-    { "pattern": "reins-relay.novabox.ai", "custom_domain": true }
+    { "pattern": "rowel-relay.novabox.ai", "custom_domain": true }
   ]
 }

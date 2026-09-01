@@ -1,7 +1,7 @@
 # The Relay, as a systemd unit.
 #
-#   sudo cp deploy/relay.service /etc/systemd/system/reins-relay.service
-#   sudo systemctl daemon-reload && sudo systemctl enable --now reins-relay
+#   sudo cp deploy/relay.service /etc/systemd/system/rowel-relay.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rowel-relay
 #
 # Deliberately bound to loopback. The tunnel reaches it over loopback anyway, so
 # a public port would buy nothing, and on a mainland Chinese host serving a
@@ -13,28 +13,28 @@
 # docs/deployment.md §1.5 — it makes the enforcement path miss. Different thing.
 
 [Unit]
-Description=Reins Relay — content-blind switchboard
-Documentation=https://github.com/0x5446/reins/blob/main/docs/deployment.md
+Description=Rowel Relay — content-blind switchboard
+Documentation=https://github.com/0x5446/rowel/blob/main/docs/deployment.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=reins
-Group=reins
-WorkingDirectory=/opt/reins
-ExecStart=/usr/bin/node /opt/reins/relay/lib/main.js
+User=rowel
+Group=rowel
+WorkingDirectory=/opt/rowel
+ExecStart=/usr/bin/node /opt/rowel/relay/lib/main.js
 
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=8787
 # Sized for a 1 GB host at roughly 40 KB per connection. Raise these on a bigger
 # box rather than leaving the defaults and hoping.
-Environment=REINS_MAX_MACHINES=1000
-Environment=REINS_MAX_CIRCUITS=4000
+Environment=ROWEL_MAX_MACHINES=1000
+Environment=ROWEL_MAX_CIRCUITS=4000
 # The installer is served from the repository, not from here — a relay that also
 # hands out the install script turns one compromise into a supply-chain event.
-Environment=REINS_INSTALL_SCRIPT=
+Environment=ROWEL_INSTALL_SCRIPT=
 
 Restart=always
 RestartSec=2
@@ -64,7 +64,7 @@ LimitNOFILE=65535
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=reins-relay
+SyslogIdentifier=rowel-relay
 
 [Install]
 WantedBy=multi-user.target

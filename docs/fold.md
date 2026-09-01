@@ -4,7 +4,7 @@ agent 不发送渲染结果，它发送 append-only 事件日志，每个客户�
 
 **折叠是纯函数**：`items = fold(events)`。同一串事件必须得到同一个结果，与到达顺序、分页边界、断线重连无关。
 
-本文档规定折叠的确切语义。参考实现 `ios/Reins/Store/Conversation.swift`，回归测试 `ios/ReinsTests/StoreTests.swift`。
+本文档规定折叠的确切语义。参考实现 `ios/Rowel/Store/Conversation.swift`，回归测试 `ios/RowelTests/StoreTests.swift`。
 
 - 状态：§1
 - 事件信封：§2
@@ -376,7 +376,7 @@ diff     → diff(title, files: view.diffs)
 
 1. 保留完整的原始渲染意图（结构化载荷，不只是标题）
 2. 保留结果文本
-3. **明说这个版本画不了它** —— 例如"这个工具的展示需要更新 Reins"
+3. **明说这个版本画不了它** —— 例如"这个工具的展示需要更新 Rowel"
 
 第 3 条不是礼貌，是正确性。未知 card 可能带着位置信息或**可执行的动作**，降级成一张只读的通用卡片会让人以为"就这些了"，而实际上有操作被吞掉了——那正好重新制造这个品类的第二痛点（手机端只能看不能做）。
 

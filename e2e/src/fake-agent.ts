@@ -13,7 +13,7 @@
  * grown a sixth requirement, this file would not compile.
  */
 
-import type { AgentClient, AgentHealth, AgentResult, AgentStream } from '@reins/bridle'
+import type { AgentClient, AgentHealth, AgentResult, AgentStream } from '@rowel/bridle'
 
 /** One call the Bridle forwarded, recorded for assertions. */
 export interface RecordedCall {

@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 #
-# Install the Reins Bridle on this machine.
+# Install the Rowel Bridle on this machine.
 #
-# This is what `curl -fsSL https://reins.novabox.ai/install | sh` fetches — the
+# This is what `curl -fsSL https://rowel.novabox.ai/install | sh` fetches — the
 # Relay serves this very file at `GET /install`. It runs under plain `sh` with no
 # arguments and no assumptions, because the person running it has just been told
 # to paste a line into Terminal and is not going to debug it.
@@ -10,26 +10,26 @@
 # What it does, in order: check Node, fetch the source, build it, put `bridle` on
 # the PATH, and hand over to `bridle pair`. What it does not do: install Node,
 # touch the harness, ask for a password, or write anywhere outside
-# ~/.reins and one symlink.
+# ~/.rowel and one symlink.
 #
 # Environment:
-#   REINS_REPO    git URL to install from (default: the public repo)
-#   REINS_REF     tag to install (default: the current release tag). Pass a
+#   ROWEL_REPO    git URL to install from (default: the public repo)
+#   ROWEL_REF     tag to install (default: the current release tag). Pass a
 #                 branch name only when you mean to run unreleased code.
-#   REINS_SRC     where to keep the checkout (default: ~/.reins/src)
-#                 (not REINS_HOME — the Bridle uses that for its own state)
-#   REINS_BIN     where to link the `bridle` command (default: first writable
+#   ROWEL_SRC     where to keep the checkout (default: ~/.rowel/src)
+#                 (not ROWEL_HOME — the Bridle uses that for its own state)
+#   ROWEL_BIN     where to link the `bridle` command (default: first writable
 #                 of ~/.local/bin, /usr/local/bin)
 
 set -eu
 
-REPO="${REINS_REPO:-https://github.com/0x5446/reins.git}"
+REPO="${ROWEL_REPO:-https://github.com/0x5446/rowel.git}"
 # A tag, not a branch. `main` moves, which means the thing this script installs
 # is whatever was pushed most recently — including a push made thirty seconds
 # ago by someone who should not have been able to make it. A tag is a name for
 # one commit, and a release is a decision rather than a side effect of merging.
-REF="${REINS_REF:-v0.1.2}"
-SRC_DIR="${REINS_SRC:-$HOME/.reins/src}"
+REF="${ROWEL_REF:-v0.1.2}"
+SRC_DIR="${ROWEL_SRC:-$HOME/.rowel/src}"
 
 # Colour only when a human is watching. Piped output stays plain.
 if [ -t 1 ]; then
@@ -49,7 +49,7 @@ fail() { printf '%s%s%s\n' "$red" "$*" "$off" >&2; exit 1; }
 # installer untrustworthy, so this stops and says what to run instead.
 
 if ! command -v node >/dev/null 2>&1; then
-  say "Reins needs Node 22 or newer, and this Mac does not have Node."
+  say "Rowel needs Node 22 or newer, and this Mac does not have Node."
   say ""
   say "  ${bold}brew install node${off}"
   say ""
@@ -58,24 +58,24 @@ fi
 
 node_major=$(node -p 'process.versions.node.split(".")[0]')
 if [ "$node_major" -lt 22 ]; then
-  fail "Reins needs Node 22 or newer. This Mac has $(node -v). Try: brew upgrade node"
+  fail "Rowel needs Node 22 or newer. This Mac has $(node -v). Try: brew upgrade node"
 fi
 
-command -v git >/dev/null 2>&1 || fail "Reins needs git. Install the Xcode command line tools: xcode-select --install"
+command -v git >/dev/null 2>&1 || fail "Rowel needs git. Install the Xcode command line tools: xcode-select --install"
 
 # --- Source -----------------------------------------------------------------
 
 if [ -d "$SRC_DIR/.git" ]; then
-  step "Updating Reins in $SRC_DIR"
+  step "Updating Rowel in $SRC_DIR"
   git -C "$SRC_DIR" fetch --quiet --depth 1 origin "refs/tags/$REF:refs/tags/$REF" 2>/dev/null \
     || git -C "$SRC_DIR" fetch --quiet --depth 1 origin "$REF"
   git -C "$SRC_DIR" checkout --quiet FETCH_HEAD 2>/dev/null || git -C "$SRC_DIR" checkout --quiet "$REF"
 else
-  step "Downloading Reins into $SRC_DIR"
+  step "Downloading Rowel into $SRC_DIR"
   mkdir -p "$(dirname "$SRC_DIR")"
   rm -rf "$SRC_DIR"
   git clone --quiet --depth 1 --branch "$REF" "$REPO" "$SRC_DIR" 2>/dev/null \
-    || fail "Could not download Reins from $REPO. If this is a private repo, run: git clone $REPO $SRC_DIR"
+    || fail "Could not download Rowel from $REPO. If this is a private repo, run: git clone $REPO $SRC_DIR"
 fi
 
 step "Building"
@@ -100,11 +100,11 @@ target="$SRC_DIR/bridle/lib/cli.js"
 chmod +x "$target"
 
 bin=""
-for candidate in "${REINS_BIN:-}" "$HOME/.local/bin" /usr/local/bin; do
+for candidate in "${ROWEL_BIN:-}" "$HOME/.local/bin" /usr/local/bin; do
   [ -n "$candidate" ] || continue
   if mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ]; then bin="$candidate"; break; fi
 done
-[ -n "$bin" ] || fail "Nowhere writable to put the bridle command. Set REINS_BIN to a directory on your PATH."
+[ -n "$bin" ] || fail "Nowhere writable to put the bridle command. Set ROWEL_BIN to a directory on your PATH."
 
 ln -sf "$target" "$bin/bridle"
 step "Installed bridle to $bin/bridle"
@@ -123,8 +123,8 @@ esac
 # --- Hand over --------------------------------------------------------------
 
 say ""
-say "${bold}Reins Bridle is installed.${off}"
-say "${dim}Next: pair your iPhone. This prints a QR code — point Reins at it.${off}"
+say "${bold}Rowel Bridle is installed.${off}"
+say "${dim}Next: pair your iPhone. This prints a QR code — point Rowel at it.${off}"
 say ""
 
 # Running `bridle pair` directly would inherit the pipe from `curl | sh` as its

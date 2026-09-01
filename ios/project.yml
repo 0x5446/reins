@@ -1,4 +1,4 @@
-name: Reins
+name: Rowel
 options:
   bundleIdPrefix: ai.novabox
   deploymentTarget:
@@ -13,24 +13,24 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     # Overridable from the environment so a different machine, or CI, does not
     # have to edit a tracked file to build. Empty means simulator only.
-    DEVELOPMENT_TEAM: ${REINS_TEAM_ID}
+    DEVELOPMENT_TEAM: ${ROWEL_TEAM_ID}
     CODE_SIGN_STYLE: Automatic
     SWIFT_STRICT_CONCURRENCY: minimal
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
 targets:
-  Reins:
+  Rowel:
     type: application
     platform: iOS
     sources:
-      - path: Reins
+      - path: Rowel
     settings:
       base:
         # Reverse of a domain that is actually owned, so it cannot collide with
         # someone else's App Store record.
-        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.rowel
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: Reins/Reins.entitlements
+        CODE_SIGN_ENTITLEMENTS: Rowel/Rowel.entitlements
         # iPhone only. The layout is one portrait column and has never been
         # anything else, and claiming the iPad idiom costs three things for no
         # gain: App Store Connect starts demanding a set of 13" iPad
@@ -48,9 +48,9 @@ targets:
     # Six of them were, including three purpose strings the app cannot run
     # without.
     info:
-      path: Reins/Info.plist
+      path: Rowel/Info.plist
       properties:
-        CFBundleDisplayName: Reins
+        CFBundleDisplayName: Rowel
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
@@ -64,21 +64,21 @@ targets:
         #
         # Camera — scanning the Mac's pairing QR is the fast path onto a
         # machine, and ScannerView calls AVCaptureDevice.requestAccess.
-        NSCameraUsageDescription: Reins uses the camera to scan the pairing code your Mac shows.
+        NSCameraUsageDescription: Rowel uses the camera to scan the pairing code your Mac shows.
         # Face ID — AppLock calls LAContext.canEvaluatePolicy, which since
         # iOS 17 is itself enough to trip the check, before any prompt appears.
-        NSFaceIDUsageDescription: Reins can ask for Face ID before showing your conversations, so a found phone does not open them.
+        NSFaceIDUsageDescription: Rowel can ask for Face ID before showing your conversations, so a found phone does not open them.
         # Photos — the composer's PhotosPicker runs out of process and would
         # work without this, but the app does put library images into a
         # message, and the honest declaration costs nothing.
-        NSPhotoLibraryUsageDescription: Reins attaches photos you pick to a message.
+        NSPhotoLibraryUsageDescription: Rowel attaches photos you pick to a message.
         # Local network — direct LAN connections skip the relay entirely.
         # Apple's TN3179 lists "making an outgoing TCP connection" as
         # requiring this, Bonjour or not, and since iOS 18 the consent prompt
         # does not even appear without the string: the connection just fails
         # as NSURLErrorNotConnectedToInternet (-1009) with an underlying
         # "Local network prohibited". That is the whole fast path, silently.
-        NSLocalNetworkUsageDescription: Reins connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
+        NSLocalNetworkUsageDescription: Rowel connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
         # Declared true because it is true. The app implements Noise over
         # CryptoKit — Curve25519 and ChaCha20-Poly1305 — to encrypt what a
         # person types to their own machine, which is not any of the exemptions
@@ -111,9 +111,9 @@ targets:
         # of the cryptography and still make the export answer worse.
         ITSAppUsesNonExemptEncryption: true
         CFBundleURLTypes:
-          - CFBundleURLName: ai.novabox.reins.pair
+          - CFBundleURLName: ai.novabox.rowel.pair
             CFBundleURLSchemes:
-              - reins
+              - rowel
         NSAppTransportSecurity:
           # Direct connections are plain WebSocket over the local network,
           # carrying nothing but Noise ciphertext — TLS underneath would
@@ -121,57 +121,57 @@ targets:
           # exception is scoped to local addresses; the relay stays wss.
           NSAllowsLocalNetworking: true
 
-  ReinsTests:
+  RowelTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: ReinsTests
+      - path: RowelTests
     dependencies:
-      - target: Reins
+      - target: Rowel
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins.tests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.rowel.tests
         GENERATE_INFOPLIST_FILE: YES
         # Tests run on the simulator, which needs no team and no profile.
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO
 
-  ReinsUITests:
+  RowelUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - path: ReinsUITests
+      - path: RowelUITests
     dependencies:
-      - target: Reins
+      - target: Rowel
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.reins.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.novabox.rowel.uitests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Reins
+        TEST_TARGET_NAME: Rowel
 
 schemes:
-  Reins:
+  Rowel:
     build:
       targets:
-        Reins: all
-        ReinsTests: [test]
-        ReinsUITests: [test]
+        Rowel: all
+        RowelTests: [test]
+        RowelUITests: [test]
     test:
       targets:
-        - ReinsTests
+        - RowelTests
       gatherCoverageData: false
 
   # Separate scheme: the unit tests run anywhere in seconds, the UI tests need a
   # paired Bridle and take minutes. Keeping them in one scheme would mean every
   # `npm run test:ios` waits on a machine that may not be running.
-  ReinsUI:
+  RowelUI:
     build:
       targets:
-        Reins: all
-        ReinsUITests: [test]
+        Rowel: all
+        RowelUITests: [test]
     test:
       targets:
-        - ReinsUITests
+        - RowelUITests
       gatherCoverageData: false
     run:
       config: Debug

@@ -5,7 +5,7 @@ holder (this is a personal developer account, so that is you — but they
 cannot be delegated to an API key or a future team member). Everything else
 needs Admin or App Manager.
 
-Facts assumed (verified in repo): bundle id `ai.novabox.reins`, team
+Facts assumed (verified in repo): bundle id `ai.novabox.rowel`, team
 `AVKUVD4FPN`, version 1.0 (`ios/project.yml: MARKETING_VERSION`), iPhone-only,
 iOS 17+, upload path `ios/release.sh` (archive → export → altool with ASC API
 key), `ios/ExportOptions.plist` method `app-store-connect`.
@@ -21,10 +21,10 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
 2. Local toolchain: Xcode 26+ with iOS 26 SDK (26.4 verified on this
    machine — meets the "built with Xcode 26" upload requirement),
    `brew install xcodegen`.
-3. Site URLs live — verified 2026-09-01: `https://reins.novabox.ai/` ,
+3. Site URLs live — verified 2026-09-01: `https://rowel.novabox.ai/` ,
    `/help`, `/privacy` all HTTP 200. (**Use extensionless paths everywhere;
    `.html` variants 404.**)
-4. Repo public at `github.com/0x5446/reins` (the description and review
+4. Repo public at `github.com/0x5446/rowel` (the description and review
    notes point reviewers at it).
 
 ## Phase 1 — App Store Connect API key (one-time, ~10 min)
@@ -33,7 +33,7 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
    App Store Connect API → **Request Access** (first time only) → agree →
    Submit. Usually instant.
 2. Team Keys tab → **Generate API Key**:
-   - Name: `reins-release` (reference only)
+   - Name: `rowel-release` (reference only)
    - Access: **App Manager** (enough for upload + submit; don't mint Admin)
 3. Record three things:
    - **Issuer ID** (UUID at the top of the Keys page)
@@ -46,7 +46,7 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
 ## Phase 2 — create the app record (~15 min)
 
 1. Confirm the App ID exists: developer.apple.com → Identifiers →
-   `ai.novabox.reins` with **Push Notifications** capability. (It exists if
+   `ai.novabox.rowel` with **Push Notifications** capability. (It exists if
    the app has ever been signed for a device on this team; `release.sh`'s
    `-allowProvisioningUpdates` maintains it. If missing, register it there
    first — the ASC dropdown only lists registered IDs.)
@@ -54,10 +54,10 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
    | Field | Value |
    |---|---|
    | Platforms | iOS |
-   | Name | `Reins` (fallbacks in `metadata.md` if taken) |
+   | Name | `Rowel` (fallbacks in `metadata.md` if taken) |
    | Primary Language | English (U.S.) |
-   | Bundle ID | `ai.novabox.reins` (from dropdown — not a wildcard) |
-   | SKU | `reins-ios` (internal, immutable, never shown) |
+   | Bundle ID | `ai.novabox.rowel` (from dropdown — not a wildcard) |
+   | SKU | `rowel-ios` (internal, immutable, never shown) |
    | User Access | Full Access |
 
 ## Phase 3 — app-level settings (~30 min, all from the prepared files)
@@ -66,7 +66,7 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
    **Utilities** (secondary); Content Rights: does not contain third-party
    content; Age Rating questionnaire → answers table in `metadata.md`
    (expect 4+).
-2. **App Privacy**: privacy policy URL `https://reins.novabox.ai/privacy`;
+2. **App Privacy**: privacy policy URL `https://rowel.novabox.ai/privacy`;
    questionnaire → **Data Not Collected** per `privacy-questionnaire.md`;
    publish the responses.
 3. **Pricing and Availability**:
@@ -83,7 +83,7 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
 ## Phase 4 — build and upload (~20 min machine time)
 
 ```sh
-export REINS_TEAM_ID=AVKUVD4FPN
+export ROWEL_TEAM_ID=AVKUVD4FPN
 export ASC_KEY_ID=<Key ID>
 export ASC_ISSUER_ID=<Issuer ID>
 export ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<Key ID>.p8
@@ -97,7 +97,7 @@ export ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<Key ID>.p8
 ./ios/release.sh
 ```
 
-- Build number defaults to the git commit count (`REINS_BUILD` overrides) —
+- Build number defaults to the git commit count (`ROWEL_BUILD` overrides) —
   monotonic, no bookkeeping.
 - The script validates before uploading (server-parity checks, ~20 s,
   reported inline instead of by queue email).
@@ -123,8 +123,8 @@ itself on-device):
 ## Phase 6 — version page + submit (~30 min)
 
 1. App Store tab → iOS App 1.0 → paste from `metadata.md`: Description,
-   Keywords, Promotional Text, Support URL (`https://reins.novabox.ai/help`),
-   Marketing URL (`https://reins.novabox.ai`), Copyright `2026 <name>`,
+   Keywords, Promotional Text, Support URL (`https://rowel.novabox.ai/help`),
+   Marketing URL (`https://rowel.novabox.ai`), Copyright `2026 <name>`,
    What's New (`First release.`).
 2. Upload the six 6.9" screenshots (`screenshots-spec.md`).
 3. **App Review Information**: paste notes from `review-notes.md` §2 (with

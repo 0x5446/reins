@@ -4,7 +4,7 @@
 #
 # Picks a simulator rather than taking one as an argument: the destination has to
 # name a device that exists on this machine, and that list differs between Xcode
-# versions and between a laptop and CI. REINS_SIM overrides when a specific
+# versions and between a laptop and CI. ROWEL_SIM overrides when a specific
 # device matters.
 
 set -euo pipefail
@@ -20,7 +20,7 @@ fi
 # before xcodebuild has anything to open.
 xcodegen generate --quiet
 
-sim="${REINS_SIM:-}"
+sim="${ROWEL_SIM:-}"
 if [ -z "$sim" ]; then
   # Newest available iPhone. `xcrun simctl` lists in model order within a runtime,
   # so the last available iPhone is the newest one installed.
@@ -35,19 +35,19 @@ echo "Testing on $sim"
 
 # xcodebuild refuses to start if the result bundle already exists, which turns
 # every second run into a failure that looks like a test failure and is not.
-rm -rf build/Reins.xcresult
+rm -rf build/Rowel.xcresult
 
 # xcbeautify is nice to have and not worth a hard dependency; without it the raw
 # log is still readable, just long.
 if command -v xcbeautify >/dev/null 2>&1; then
   set -o pipefail
-  xcodebuild -project Reins.xcodeproj -scheme Reins \
+  xcodebuild -project Rowel.xcodeproj -scheme Rowel \
     -destination "platform=iOS Simulator,name=$sim" \
-    -resultBundlePath build/Reins.xcresult \
+    -resultBundlePath build/Rowel.xcresult \
     test | xcbeautify
 else
-  xcodebuild -project Reins.xcodeproj -scheme Reins \
+  xcodebuild -project Rowel.xcodeproj -scheme Rowel \
     -destination "platform=iOS Simulator,name=$sim" \
-    -resultBundlePath build/Reins.xcresult \
+    -resultBundlePath build/Rowel.xcresult \
     test
 fi

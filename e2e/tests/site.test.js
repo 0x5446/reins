@@ -12,7 +12,7 @@
  * relay, a harness, or a phone.
  *
  *   node --test e2e/tests/site.test.js
- *   REINS_E2E_SITE_URL=http://127.0.0.1:8788 node --test e2e/tests/site.test.js
+ *   ROWEL_E2E_SITE_URL=http://127.0.0.1:8788 node --test e2e/tests/site.test.js
  */
 
 import assert from 'node:assert/strict'
@@ -23,7 +23,7 @@ import test from 'node:test'
  * there is nothing to stand up first — the pages either answer or the
  * deployment is broken, and that is worth knowing without being asked.
  */
-const SITE = process.env.REINS_E2E_SITE_URL ?? 'https://reins.novabox.ai'
+const SITE = process.env.ROWEL_E2E_SITE_URL ?? 'https://rowel.novabox.ai'
 
 const TIMEOUT_MS = 30_000
 
@@ -38,7 +38,7 @@ test('every page the app links to is served', { timeout: TIMEOUT_MS }, async () 
 
 test('the installer comes from the repository, not from a relay', { timeout: TIMEOUT_MS }, async () => {
   // A relay that also hands out the installer turns one compromise into a
-  // supply-chain event, so the edge redirects and REINS_INSTALL_SCRIPT stays
+  // supply-chain event, so the edge redirects and ROWEL_INSTALL_SCRIPT stays
   // empty. `redirect: 'manual'` matters: following the hop would land on
   // GitHub and pass even if something local had started serving the script.
   const response = await fetch(new URL('/install', SITE), {

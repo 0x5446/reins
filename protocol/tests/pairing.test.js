@@ -17,7 +17,7 @@ import {
 function bundle() {
   return {
     v: 1,
-    relay: 'wss://relay.reins.app',
+    relay: 'wss://relay.rowel.app',
     direct: ['ws://192.168.1.24:51820'],
     device: 'zH8pQ1nR2sT3uV4w',
     key: generateKeyPair().publicKey.toString('base64url'),
@@ -34,13 +34,13 @@ test('a pairing link round trips, including the machine name', () => {
 
 test('the payload lives in the fragment so it never reaches a web server', () => {
   const link = encodePairingLink(bundle())
-  assert.ok(link.startsWith('reins://pair#'))
+  assert.ok(link.startsWith('rowel://pair#'))
   assert.equal(link.indexOf('?'), -1)
 })
 
 test('a link that is not ours is refused', () => {
-  assert.throws(() => decodePairingLink('https://example.com/#abc'), /not a Reins pairing link/)
-  assert.throws(() => decodePairingLink('reins://pair'), /not a Reins pairing link/)
+  assert.throws(() => decodePairingLink('https://example.com/#abc'), /not a Rowel pairing link/)
+  assert.throws(() => decodePairingLink('rowel://pair'), /not a Rowel pairing link/)
 })
 
 test('a link missing a required field is refused', () => {
