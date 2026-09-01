@@ -93,11 +93,15 @@ struct UserBubble: View {
 struct AttachmentThumb: View {
     let image: ImageAttachment
 
+    /// Absent in the composer, where the photo is in hand and has no id yet.
+    @Environment(AttachmentLoader.self) private var loader: AttachmentLoader?
+
+    /// The side of the square, in points. Also what the loader downsamples to.
+    private static let side: CGFloat = 56
+
     var body: some View {
         Group {
-            if let base64 = image.base64,
-               let data = Data(base64Encoded: base64),
-               let uiImage = UIImage(data: data) {
+            if let uiImage = inline ?? loader?.thumbnail(image.id) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
@@ -107,9 +111,21 @@ struct AttachmentThumb: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 56, height: 56)
+        .frame(width: Self.side, height: Self.side)
         .background(Palette.well)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous))
+        .task(id: image.id) {
+            // Only a message read back from the log needs fetching; one the
+            // person just attached is already here.
+            guard image.base64 == nil else { return }
+            await loader?.load(image.id, side: Self.side)
+        }
+    }
+
+    /// The photo the composer is holding, decoded from what it already has.
+    private var inline: UIImage? {
+        guard let base64 = image.base64, let data = Data(base64Encoded: base64) else { return nil }
+        return UIImage(data: data)
     }
 }
 

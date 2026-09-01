@@ -6,6 +6,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { createServer } from 'node:net'
 import test from 'node:test'
 import { DshClient, assertLoopback } from '../lib/index.js'
 
@@ -39,4 +40,26 @@ test('a failed call folds into the error branch rather than rejecting', async ()
   const result = await client.call('session.list', {})
   assert.equal(result.ok, false)
   assert.equal(typeof result.error.message, 'string')
+})
+
+test('a carrier failure names the method and its root cause', async () => {
+  // The phone is the only place this message is ever read. Node's own text for
+  // every connection-level failure is the three words "fetch failed", which
+  // name neither what was being called nor why it did not work — a report of
+  // one arrived from a real phone and could not be acted on at all.
+  //
+  // A port that was listening and is not any more, rather than a port that
+  // could never listen: this is a harness that quit, which is the case someone
+  // actually hits, and it refuses the connection instead of failing to parse.
+  const server = createServer()
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+  const { port } = server.address()
+  await new Promise((resolve) => { server.close(resolve) })
+
+  const client = new DshClient({ baseUrl: `http://127.0.0.1:${port}`, requestTimeoutMs: 1_000 })
+  const result = await client.call('session.history', { sessionId: 's1' })
+
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /^session\.history: /u, 'the method has to be in the message')
+  assert.match(result.error.message, /ECONNREFUSED/u, 'the cause is what identifies the failure')
 })

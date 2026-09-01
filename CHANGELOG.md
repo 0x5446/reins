@@ -7,6 +7,20 @@ Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
+## Unreleased
+
+- **Photos in a conversation are drawn instead of standing as grey squares.**
+  A history page names its images rather than carrying them, and the app had
+  the parser for the reference and the call for the bytes but nothing joining
+  them, so every image read back from the log showed the placeholder forever.
+  The bytes are now fetched when a thumb is about to draw, once per image, and
+  downsampled while decoding — a phone that kept full-size photos to fill
+  56-point squares would run out of memory on a conversation with a few.
+- **A failure talking to the harness says which call failed and why.** Node
+  reports every connection-level failure as the three words "fetch failed" and
+  puts the reason one level down; the phone was shown only the three words. It
+  now gets the method and the root cause.
+
 ## 0.1.2 — 2026-09-01
 
 - **Two Bridles claiming one identity now lose quickly instead of fighting all

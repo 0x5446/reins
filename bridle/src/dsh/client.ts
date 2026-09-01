@@ -105,7 +105,7 @@ export class DshClient implements AgentClient {
         signal: composite,
       })
     } catch (error) {
-      return carrierFailure(signal?.aborted === true ? 'cancelled' : 'internal', error)
+      return carrierFailure(signal?.aborted === true ? 'cancelled' : 'internal', method, error)
     }
     if (!response.ok) {
       const text = await response.text().catch(() => '')
@@ -122,7 +122,7 @@ export class DshClient implements AgentClient {
     try {
       body = await response.json()
     } catch (error) {
-      return carrierFailure('internal', error)
+      return carrierFailure('internal', method, error)
     }
     const envelope = body as { type?: unknown; result?: DshResult }
     if (envelope.type !== 'server-response' || envelope.result === undefined) {
@@ -157,7 +157,7 @@ export class DshClient implements AgentClient {
       if (result.ok) return { reachable: true, host: result.value }
       return { reachable: false, detail: result.error.message }
     } catch (error) {
-      return { reachable: false, detail: error instanceof Error ? error.message : String(error) }
+      return { reachable: false, detail: describe(error) }
     }
   }
 
@@ -234,11 +234,43 @@ export class DshClient implements AgentClient {
   }
 }
 
-function carrierFailure(code: string, error: unknown): DshResult {
-  return {
-    ok: false,
-    error: { code, message: error instanceof Error ? error.message : String(error), details: {} },
+/**
+ * Turn a thrown carrier error into a result the phone can read.
+ *
+ * Node reports every connection-level fetch failure as the same three words —
+ * `fetch failed` — and puts the reason that would actually identify it
+ * (`ECONNREFUSED`, a socket closed mid-body, a name that did not resolve) one
+ * level down in `cause`. Forwarding just the message hands the phone a string
+ * that names no method, no address and no cause, and someone then has to debug
+ * from that. This is the whole reason the chain is unwrapped: the phone is the
+ * only place the error is ever seen, so it has to arrive complete.
+ * @param code - the error code the app switches on.
+ * @param method - the dsh method being called, for the message.
+ * @param error - whatever was thrown.
+ * @returns the failure, described down to its root cause.
+ */
+function carrierFailure(code: string, method: string, error: unknown): DshResult {
+  return { ok: false, error: { code, message: `${method}: ${describe(error)}`, details: {} } }
+}
+
+/** How deep to follow `cause` before the message is doing more harm than good. */
+const MAX_CAUSE_DEPTH = 4
+
+/**
+ * Flatten an error and its causes into one line.
+ * @param error - the thrown value.
+ * @returns the messages, outermost first, joined by `: `.
+ */
+function describe(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const chain: string[] = []
+  let current: unknown = error
+  while (current instanceof Error && chain.length < MAX_CAUSE_DEPTH) {
+    // A cause that merely repeats its wrapper adds length and no information.
+    if (chain.at(-1) !== current.message) chain.push(current.message)
+    current = current.cause
   }
+  return chain.join(': ')
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

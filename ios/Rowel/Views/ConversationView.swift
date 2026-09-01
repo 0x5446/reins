@@ -32,6 +32,8 @@ struct ConversationView: View {
     /// Set when a branch succeeds, so the view can offer to follow it.
     @State private var forked: String?
     @State private var atBottom: Bool
+    /// Per-conversation, because attachment ids are only meaningful inside one.
+    @State private var attachments: AttachmentLoader
 
     /// The only explicit init, and it exists for one parameter: `atBottom` is
     /// private view state whose false branch is only reachable through a real
@@ -49,6 +51,7 @@ struct ConversationView: View {
         self.sessionId = sessionId
         self.onOpen = onOpen
         _atBottom = State(initialValue: initiallyAtBottom)
+        _attachments = State(initialValue: AttachmentLoader(harness: session.harness, sessionId: sessionId))
     }
 
     var body: some View {
@@ -64,6 +67,7 @@ struct ConversationView: View {
             }
         }
         .background(Palette.paper)
+        .environment(attachments)
         .navigationBarTitleDisplayMode(.inline)
         // Without this the bar is transparent and the transcript slides under
         // the title and the clock. A conversation is a wall of text; there is
