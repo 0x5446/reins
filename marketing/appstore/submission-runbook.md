@@ -205,6 +205,15 @@ section.** Submission fails with a `409` naming
 the privacy questionnaire does not set it. Use the extensionless
 `https://rowel.novabox.ai/privacy` — the `.html` path 404s.
 
+**A literal in the Info.plist beats the command line.** `project.yml` carried
+`CFBundleVersion: "1"`, so every archive was stamped `1` no matter what build
+number `release.sh` computed — and App Store Connect only says so on the
+*second* upload, twenty minutes in, as a duplicate-version 409 that never
+mentions a plist. Both version keys now defer to their build settings
+(`$(CURRENT_PROJECT_VERSION)`, `$(MARKETING_VERSION)`) and `release.sh` asserts
+the stamp before uploading. Had this not been caught, it would have blocked
+every update after 1.0, not just this one.
+
 **Submission is three calls, not one.** `ios/asc.mjs submit` does them:
 create a `reviewSubmissions` container, add the version as a
 `reviewSubmissionItems`, then `PATCH … submitted: true`. Apple models "Add for

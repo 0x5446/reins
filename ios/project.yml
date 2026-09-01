@@ -51,8 +51,14 @@ targets:
       path: Rowel/Info.plist
       properties:
         CFBundleDisplayName: Rowel
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        # Both of these defer to the build settings rather than restating the
+        # numbers. A literal here wins over anything `xcodebuild` is passed on
+        # the command line, which is how every build came out stamped `1` no
+        # matter what `release.sh` computed — App Store Connect then refuses
+        # the second upload, and the message is about a duplicate version
+        # rather than about the plist that produced it.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         # One column, one orientation. Stated rather than left to the default,
         # which is portrait *plus* both landscapes on iPhone.

@@ -99,6 +99,21 @@ IPA="$(find "$EXPORT" -name '*.ipa' -print -quit)"
 [ -n "$IPA" ] || { echo "release: export produced no .ipa" >&2; exit 1; }
 echo "release: exported $IPA"
 
+# Check that the archive is stamped with the number computed above.
+#
+# A literal `CFBundleVersion` in the Info.plist silently beats anything passed
+# to `xcodebuild`, and one did: every build came out `1` regardless, which App
+# Store Connect only reveals on the *second* upload, twenty minutes in, as a
+# duplicate-version 409 that says nothing about a plist. One line here turns
+# that into a failure before the upload starts.
+STAMPED="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  "$ARCHIVE/Products/Applications/Rowel.app/Info.plist" 2>/dev/null || true)"
+if [ "$STAMPED" != "$BUILD" ]; then
+  echo "release: archive is stamped build ${STAMPED:-<none>}, expected $BUILD" >&2
+  echo "release: check CFBundleVersion in ios/project.yml — a literal there wins" >&2
+  exit 1
+fi
+
 if [ "$UPLOAD" = 0 ]; then
   echo "release: --no-upload, stopping here"
   exit 0
