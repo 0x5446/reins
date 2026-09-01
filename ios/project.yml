@@ -79,37 +79,44 @@ targets:
         # as NSURLErrorNotConnectedToInternet (-1009) with an underlying
         # "Local network prohibited". That is the whole fast path, silently.
         NSLocalNetworkUsageDescription: Rowel connects straight to your Mac when both are on the same Wi-Fi, which is faster and never leaves your network.
-        # Declared true because it is true. The app implements Noise over
-        # CryptoKit — Curve25519 and ChaCha20-Poly1305 — to encrypt what a
-        # person types to their own machine, which is not any of the exemptions
-        # Apple lists: not medical, not authentication-only, not copy
-        # protection, not under 56-bit. Answering false here would be a false
-        # statement on an export declaration to save one question per upload.
+        # False, and the reason is a property of the binary rather than a
+        # reading of intent: this app contains no encryption algorithm.
         #
-        # What it costs: App Store Connect asks once per app whether the
-        # encryption is self-classified as mass market (ECCN 5D992.c), which
-        # this is. Nothing blocks a build.
+        # Apple states the test twice on the App Encryption Documentation page,
+        # and both halves turn on the word *algorithms*. Documentation is
+        # required for "encryption algorithms that are proprietary or not
+        # accepted as standard by international standard bodies", and for
+        # "standard encryption algorithms instead of, or in addition to, using
+        # or accessing the encryption within Apple's operating system".
         #
-        # It does *not* carry an annual self-classification report, which an
-        # earlier version of this comment claimed. BIS narrowed that in the
-        # rule effective 2021-03-29: mass market 5A992.c / 5D992.c items sit
-        # under License Exception ENC (b)(1) and no longer report annually.
-        # What still reports is the hardware side — chips, chipsets, electronic
-        # assemblies, field-programmable logic devices — and software
-        # classified 5D002. An end-user application is none of those.
+        # Every algorithm the app touches is inside iOS. X25519,
+        # ChaCha20-Poly1305, SHA-256 and HKDF are all reached through CryptoKit;
+        # `Noise.swift` implements none of them — even `hkdf2`, which looks like
+        # a key-derivation function, is a call to `HKDF<SHA256>.deriveKey` whose
+        # 64-byte output it splits in two, because that is what the Noise spec
+        # calls HKDF2. There is no third-party dependency of any kind: no SPM
+        # package, no CocoaPods, no vendored C. That is checkable in one grep
+        # and is the whole of the argument.
         #
-        # What it does cost is one form: every primitive here comes from
-        # CryptoKit, but the Noise state machine on top is ours, so the App
-        # Store Connect questionnaire lands on "standard algorithms in addition
-        # to the operating system's", and that asks for a French encryption
-        # declaration to ship in France. Apple wants the filled form, not
-        # ANSSI's reply. No CCATS: that is only for cryptography that is both
-        # unstandardised *and* unpublished, and Noise is published.
+        # An earlier version of this comment declared true, reasoning that the
+        # primitives are Apple's "but the Noise state machine on top is ours".
+        # A protocol is not an algorithm. The state machine decides which
+        # Diffie-Hellman happens next and what goes into the chaining key; it
+        # performs no cryptography. By that earlier logic an app that arranges
+        # its own sequence of URLSession calls would be implementing TLS.
         #
-        # Keeping every primitive on CryptoKit is therefore worth defending.
-        # Bundling libsodium or a Rust Noise implementation would change none
-        # of the cryptography and still make the export answer worse.
-        ITSAppUsesNonExemptEncryption: true
+        # Cost of getting this wrong in the conservative direction, which is
+        # what happened: declaring true obliges the export documentation to be
+        # filed before any build will even upload — altool refuses with
+        # "Invalid Export Compliance Code ... [] ... doesn't match" — and the
+        # document Apple wants is the French encryption declaration. That is a
+        # real form, filed for cryptography this app does not contain.
+        #
+        # Keeping every primitive on CryptoKit is therefore worth defending for
+        # a second reason: bundling libsodium or a Rust Noise implementation
+        # would change none of the cryptography and would put an algorithm in
+        # the binary, which is exactly what this answer turns on.
+        ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
           - CFBundleURLName: ai.novabox.rowel.pair
             CFBundleURLSchemes:
