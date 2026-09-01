@@ -10,37 +10,39 @@ Keywords 100).
 
 ## App Name (limit 30)
 
-**Primary choice:**
+**Registered:** `Rowel: DeepSeek Harness Remote` (30/30) — App ID 6807263060,
+SKU `rowel-ios`, bundle `ai.novabox.rowel`, created 2026-09-01.
 
-```
-Rowel
-```
-(5 characters)
+The product was called Reins until the day this record was made. An app named
+`Reins: for Ollama & LM Studio` has been live in Developer Tools since January
+2025, is still shipping, has 272 ratings, and opens its description with "Take
+the Reins of your AI" — the same name, the same category, an adjacent product,
+and the same metaphor, twenty months ahead of us. App Store name uniqueness is
+exact-string, so a differentiated `Reins: …` would have been accepted; what
+would not have survived is discovery. Every search for our own name would have
+returned theirs first, permanently, and every mention of "Reins" in a review or
+a thread would have split between two apps in one category. Renaming cost a day
+at zero users. See the commit `rename: Reins becomes Rowel`.
 
-Availability check (iTunes Search API, US store, 2026-09-01): no live app is
-named exactly `Rowel`. The closest are `Rowel: for Ollama & LM Studio`
-(Developer Tools — a local-LLM client, different product), `Reigns` (a game),
-and `Rowel: Claim Your Share` (Business). ASC name uniqueness is
-exact-string, so `Rowel` is very likely claimable — but a name can be
-*reserved* by an unpublished app, and only App Store Connect knows. Try
-`Rowel` first; if ASC refuses it, fall back in this order:
+A rowel is the wheel on a spur. It also fits the architecture better than reins
+did: the bridle is on the animal, the rowel is on the rider, and the relay
+belongs to neither — which is exactly why it can read nothing.
+
+The name leads with the positioning rather than the brand, because the brand is
+new and "DeepSeek Harness remote" is what the first users are actually looking
+for. It carries a known risk: guideline 2.3.7 / 5.2.1 discourage third-party
+product names in app names. The precedent above — a shipping app named for two
+third-party runtimes in this same category — is the reason to try it. If App
+Review objects, the name is editable before release; fall back in this order:
 
 | Fallback | Chars | Notes |
 |---|---|---|
-| `Rowel — Remote Coding Agent` | 27 | Recommended fallback. Adds three indexed search words. |
-| `Rowel: Coding Agent Remote` | 26 | Same words, colon form. |
-| `Rowel — Agent Remote Control` | 28 | If "coding" collides with something. |
+| `Rowel — Coding Agent Remote` | 27 | No third-party mark. Keeps three indexed search words. |
+| `Rowel: Mobile dsh Client` | 24 | Keeps dsh, drops the DeepSeek mark. |
+| `Rowel` | 5 | Brand only; positioning moves entirely to the subtitle. |
 
-**Do not use `Rowel — Remote for dsh`.** Two reasons: (1) Guideline 2.3.7 /
-5.2.1 — names and subtitles must not reference other apps or carry third-party
-marks, and "dsh" is DeepSeek's product name; the description is the only safe
-place for it (referential use). (2) It wastes the most valuable index slots on
-a term the App Store audience doesn't search yet, versus "remote coding agent"
-which is a real query.
-
-Note: the existing `Rowel: for Ollama & LM Studio` sits in the same category.
-Not a blocker (different product, different full name), but expect it adjacent
-in search results for "rowel".
+Availability at registration: no live US app is named `Rowel`, and
+`rowel.app` / `rowel.dev` were both unregistered.
 
 ## Subtitle (limit 30)
 

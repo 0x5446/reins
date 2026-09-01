@@ -158,3 +158,39 @@ itself on-device):
 | Export compliance answers | `metadata.md` (table) + `APPSTORE.md` §2.7 |
 | Review notes + video | `marketing/appstore/review-notes.md` |
 | Screenshots | `marketing/appstore/screenshots-spec.md` |
+
+
+## Where this actually stands — 2026-09-01
+
+Done, in App Store Connect and the developer portal:
+
+- App ID `ai.novabox.rowel` registered with Push Notifications and Time
+  Sensitive Notifications (the app sets `interruptionLevel = .timeSensitive`,
+  and the relay sends `interruption-level: time-sensitive`, so both are needed).
+- App record created: **6807263060**, `Rowel: DeepSeek Harness Remote`,
+  English (U.S.), SKU `rowel-ios`, Full Access, iOS only.
+- Version 1.0 page filled: promotional text, description, keywords, support and
+  marketing URLs, copyright, review notes, contact name and email, and
+  "sign-in required" cleared — the product has no accounts.
+
+Blocked on one field: **Phone number** under App Review Information. Apple
+requires it, with a `+` and a country code, and it is how they reach a human
+during review. Nobody but the account holder can supply it. Until it is filled
+the page will not save, so everything above is typed but not yet persisted.
+
+Then, in order:
+
+1. Save the version page.
+2. Upload screenshots — the 6.9" set (1320×2868) from `marketing/shots` via
+   Media Manager. The default panel offers the legacy 6.5" size; the shots are
+   6.9" and belong in that slot.
+3. App Privacy questionnaire — answers and their source-code evidence are in
+   `privacy-questionnaire.md`.
+4. Pricing and Availability — free, all territories.
+5. EU trader status in the Business section. Without it the app cannot be
+   submitted for the European Union, and the account is showing the banner.
+6. Build: `ios/release.sh` (needs `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`
+   — the key is at `~/.rowel/secrets/AuthKey_3M4859Q6U7.p8`; the issuer id is
+   not on this machine and comes from App Store Connect → Users and Access →
+   Integrations).
+7. Attach the build, then Add for Review.
