@@ -30,6 +30,12 @@ final class Screenshots: XCTestCase {
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-rowel.lock.enabled.v1", "NO",
         ]
+        // Pair from the environment when a link is supplied, the same way
+        // FlowTests does. A deep link opened with `simctl openurl` stops on a
+        // system "Open in Rowel?" alert that nothing in this process can reach.
+        if let link = ProcessInfo.processInfo.environment["ROWEL_PAIR_LINK"], !link.isEmpty {
+            app.launchEnvironment["ROWEL_UITEST_PAIR_LINK"] = link
+        }
         try connect()
     }
 

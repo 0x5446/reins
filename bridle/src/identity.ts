@@ -92,10 +92,17 @@ export const DEFAULT_RELAY_URL = 'wss://rowel-relay.novabox.ai'
 /**
  * Addresses this project used to ship as the default, and no longer serves.
  *
- * The relay moved off `rowel.novabox.ai` so that the public site and the
- * infrastructure stop sharing a hostname — one cache rule, one WAF rule, or one
- * "under attack" toggle aimed at the marketing pages would otherwise take the
- * relay with it, and the relay is the half that must not go down.
+ * These are deliberately the *old* spellings, including the ones from before
+ * the project was called Rowel. A list whose whole job is to remember names
+ * that no longer work is the one place a rename must not reach — rewriting
+ * these to the current hostname would turn the migration into a no-op and
+ * leave every older install dialling a name with no record behind it.
+ *
+ * Two moves are recorded here. The relay left `reins.novabox.ai` so that the
+ * public site and the infrastructure would stop sharing a hostname — one cache
+ * rule, one WAF rule, or one "under attack" toggle aimed at the marketing pages
+ * would otherwise take the relay with it, and the relay is the half that must
+ * not go down. Then the project itself was renamed, and the relay moved again.
  *
  * Migrated on load rather than left to break, because the address lives in a
  * file written months ago and nobody would connect a silent connection failure
@@ -103,7 +110,11 @@ export const DEFAULT_RELAY_URL = 'wss://rowel-relay.novabox.ai'
  * an address someone set themselves, or pointed at their own relay, is theirs
  * and is left alone.
  */
-const RETIRED_RELAY_URLS: readonly string[] = ['wss://rowel.novabox.ai', 'wss://relay.novabox.ai']
+const RETIRED_RELAY_URLS: readonly string[] = [
+  'wss://reins.novabox.ai',
+  'wss://relay.novabox.ai',
+  'wss://reins-relay.novabox.ai',
+]
 
 /** Default dsh loopback address, matching the web profile's own default port. */
 export const DEFAULT_DSH_URL = 'http://127.0.0.1:3080'
