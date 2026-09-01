@@ -179,6 +179,16 @@ developer-portal web sessions):
   marketing URLs, copyright, review notes, contact first/last name and email,
   and "sign-in required" cleared — there are no accounts to give a reviewer.
 
+**Since resolved.** The phone number is in and the version page saved. The EU
+trader declaration is submitted and Apple has it *In Review* for 27 countries —
+declared as a trader, with a Beijing address, `+86 135 8177 2780` and
+`hi@novabox.ai`, backed by a property deed as the address document. Those three
+details will appear publicly on the product page once Apple verifies them. The
+address was entered in Chinese so it matches the deed character for character;
+an English rendering was tried first and abandoned for exactly that reason.
+
+Previously blocked, kept for the record:
+
 **Blocked on the account holder — one field.** App Review Information wants a
 **phone number**, with a `+` and a country code. Apple uses it to reach a human
 during review, so nobody else can supply it, and the version page will not save
