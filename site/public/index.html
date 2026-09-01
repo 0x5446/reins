@@ -119,6 +119,24 @@
        alt="The session list in Rowel, grouped by workspace, with full-text search.">
 </section>
 
+<section class="feature">
+  <div class="feature-copy">
+    <h3>One minute, one QR code, no account</h3>
+    <p>
+      There is nothing to sign up for and no server address to type. The Mac
+      prints a QR code; the phone reads it. That exchange hands over a key, not
+      a password — so there is no credential to leak, reuse, or reset.
+    </p>
+    <p>
+      Both ends then show the same fingerprint, and you check they match. That
+      is the whole of the trust decision, and it is made once: from then on the
+      app reconnects by itself.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/pairing-sheet.png" width="1320" height="2868" loading="lazy"
+       alt="Rowel's pairing screen, showing the one command to run on the Mac and a button to scan the QR code it prints.">
+</section>
+
 <h3>Also in the app</h3>
 
 <table>
@@ -210,6 +228,21 @@
     </p>
   </li>
 </ol>
+
+<section class="feature">
+  <div class="feature-copy">
+    <h3>What you get when it is done</h3>
+    <p>
+      The Mac appears in the app with the fingerprint of its key, the device id
+      the relay uses to address it, and the port the harness answers on. The
+      fingerprint is the one to compare: <code>bridle status</code> prints the
+      same four groups on the Mac, and matching them is what rules out an
+      impostor in the middle.
+    </p>
+  </div>
+  <img class="shot" src="/_/shots/machine.png" width="1320" height="2868" loading="lazy"
+       alt="A paired Mac in Rowel's settings, showing its key fingerprint, device id, and harness port.">
+</section>
 
 <h2>Where it is</h2>
 
