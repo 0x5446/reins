@@ -38,10 +38,30 @@ command -v dsh >/dev/null 2>&1 || fail "dsh is not on the PATH."
 command -v xcodegen >/dev/null 2>&1 || fail "xcodegen is not installed. brew install xcodegen"
 [ -f "$root/bridle/lib/cli.js" ] || fail "The Bridle is not built. Run: npm run build"
 
+# One dsh call. The body goes in on stdin, not as an argument: one of these
+# payloads carries a base64 PNG, and an image is comfortably larger than the
+# command line will hold — `Argument list too long` from curl, which reads like
+# a broken script rather than a large picture.
 rpc() {
-  curl -s -m 90 -X POST "http://127.0.0.1:$port/api/$1" \
-    -H 'content-type: application/json' \
-    -d "{\"type\":\"client-request\",\"rpcId\":\"s$RANDOM\",\"method\":\"$1\",\"payload\":$2}"
+  printf '{"type":"client-request","rpcId":"s%s","method":"%s","payload":%s}' \
+    "$RANDOM" "$1" "$2" \
+    | curl -s -m 90 -X POST "http://127.0.0.1:$port/api/$1" \
+        -H 'content-type: application/json' --data-binary @-
+}
+
+# The zone name dsh will accept.
+#
+# `date +%Z` gives the abbreviation, and on this machine that is `+08` — which
+# dsh rejects, because it wants UTC or an IANA Area/Location. The refusal is
+# per prompt, so the cost of getting it wrong was four conversations that
+# existed, had titles, and contained nothing.
+zone() {
+  local link
+  link=$(readlink /etc/localtime 2>/dev/null)
+  case "$link" in
+    */zoneinfo/*) printf '%s' "${link#*/zoneinfo/}" ;;
+    *) printf 'UTC' ;;
+  esac
 }
 value() { python3 -c 'import json,sys;print(json.load(sys.stdin)["result"]["value"]'"$1"')'; }
 
@@ -112,6 +132,17 @@ start_bridle() {
 
 seed_repo() {
   mkdir -p "$sample"
+  # An identity for the fixture, before anything can run `git` in here.
+  #
+  # One of these conversations is asked to commit and push, and the agent
+  # reports what it found — so whatever identity this directory resolves to is
+  # read out in a transcript and photographed for the store. Left to inherit,
+  # that is whoever owns the Mac, and it was: an earlier set of shots carried a
+  # real name and a work email in a terminal card. `example.com` matches the
+  # remote the push is aimed at and reads as what it is.
+  git -C "$sample" init --quiet 2>/dev/null || true
+  git -C "$sample" config user.name "dev"
+  git -C "$sample" config user.email "dev@example.com"
   cat > "$sample/README.md" <<'EOF'
 # checkout-api
 
@@ -159,10 +190,71 @@ EOF
 
 # --- Conversations the shots are of -----------------------------------------
 
-converse() { # title, prompt
+# Send one prompt and make sure it was taken.
+#
+# The refusal used to go to /dev/null. Seeding therefore "succeeded" while
+# every prompt was rejected, leaving four conversations that had titles and
+# nothing else — and those are what the store screenshots were taken of. The
+# rejection was a bad `clientTimeZone`, which the message said plainly and
+# which nobody could read, because nobody was reading.
+#
+# Retried as well as reported: the answer is not always instant, and a prompt
+# is cheap to send twice.
+# $1 session id, $2 content array as JSON
+prompt_now() {
+  local attempt reply
+  for attempt in 1 2 3 4 5 6 7 8; do
+    reply=$(rpc session.prompt \
+      "{\"sessionId\":\"$1\",\"mode\":\"queue\",\"content\":$2,\"clientTimeZone\":\"$(zone)\"}")
+    case "$reply" in *'"accepted":true'*) return 0 ;; esac
+    sleep 5
+  done
+  fail "the harness would not accept a prompt: $reply"
+}
+
+# $1 title, $2 prompt text
+converse() {
   local sid
   sid=$(rpc session.create "{\"cwd\":\"$sample\"}" | value '["sessionId"]')
-  rpc session.prompt "{\"sessionId\":\"$sid\",\"mode\":\"queue\",\"content\":[{\"type\":\"text\",\"text\":\"$2\"}],\"clientTimeZone\":\"$(date +%Z)\"}" >/dev/null
+  [ -n "$sid" ] || fail "session.create returned no sessionId"
+  prompt_now "$sid" "[{\"type\":\"text\",\"text\":\"$2\"}]"
+  sleep 1
+  rpc session.rename "{\"sessionId\":\"$sid\",\"title\":\"$1\"}" >/dev/null
+  say "  $1"
+}
+
+# The conversation the photo shot is of: a layout sketched on paper, sent as an
+# image the way the app sends one. Driven from here rather than through the
+# system photo picker, which runs out of process and does not take synthetic
+# taps — and what the shot is of is the sketch sitting in the transcript, not
+# the moment of choosing it.
+# $1 title, $2 prompt text
+converse_with_sketch() {
+  local sid content vision
+  [ -f /tmp/rowel-sketch.png ] || swift Tools/Sketch.swift /tmp/rowel-sketch.png
+  sid=$(rpc session.create "{\"cwd\":\"$sample\"}" | value '["sessionId"]')
+  [ -n "$sid" ] || fail "session.create returned no sessionId"
+  # The default model refuses an image outright — "does not support image
+  # input" — so ask the harness which of its models can take one rather than
+  # naming a model here that a different machine may not have.
+  vision=$(rpc session.models "{\"sessionId\":\"$sid\"}" | python3 -c '
+import json, re, sys
+ids = [m["id"] for g in json.load(sys.stdin)["result"]["value"].get("groups", [])
+       for m in g.get("models", []) if re.search("vision", m["id"], re.I)]
+print(ids[0] if ids else "")
+')
+  [ -n "$vision" ] || fail "this harness has no model that accepts an image; the sketch shot needs one"
+  rpc session.selectModel "{\"sessionId\":\"$sid\",\"provider\":\"commandcode\",\"model\":\"$vision\"}" >/dev/null
+  content=$(python3 - "$2" <<'PY'
+import base64, json, sys
+data = base64.b64encode(open('/tmp/rowel-sketch.png', 'rb').read()).decode()
+print(json.dumps([
+    {"type": "text", "text": sys.argv[1]},
+    {"type": "image", "mediaType": "image/png", "data": data, "name": "sketch.png"},
+]))
+PY
+)
+  prompt_now "$sid" "$content"
   sleep 1
   rpc session.rename "{\"sessionId\":\"$sid\",\"title\":\"$1\"}" >/dev/null
   say "  $1"
@@ -179,10 +271,48 @@ seed_conversations() {
     "Read README.md and explain in two sentences what this service is for."
   converse "Build the checkout health dashboard" \
     "Plan this out with a todo list first, then do it. Read metrics.json, work out the trends that matter, and build dashboard.html: a single self-contained dark-mode page with inline SVG charts and a verdict banner. No external assets. Check it renders, then tell me what the data says."
-  # The one that has to stop and ask. The remote does not exist, on purpose.
+  converse_with_sketch "Match the dashboard to this sketch" \
+    "I sketched the layout I want on paper. Rework dashboard.html to match it: header up top, three metric cards in a row, one wide chart underneath. Keep the data and the dark theme."
+  # The one that has to stop and ask.
+  #
+  # It asks *before* pushing rather than after failing to. Letting the push run
+  # was the original idea, and it produced a screenshot of the machine instead
+  # of the app: the remote authenticated with whatever SSH key was on the Mac
+  # and GitHub answered "Hi <owner>", and when that failed the agent went
+  # looking — `git config --list`, `~/.ssh/config` — and put the operator's
+  # work hosts in a terminal card. This harness runs on somebody's real
+  # computer with real read access, so the fix is not to sanitise what it finds
+  # but to give it nothing to investigate.
   converse "Ship the currency fix" \
-    "Initialise a git repo here, commit everything with the message 'Add CAD and AUD support', then push it to the remote at git@github.com:example/checkout-api.git"
-  say "give them a few minutes to finish before taking the shots"
+    "Initialise a git repo here and commit everything with the message 'Add CAD and AUD support'. Then stop and ask me before pushing anything — I want to confirm the remote with you first. Do not inspect any git or SSH configuration."
+  say "conversations queued"
+}
+
+# Wait until the conversations have stopped working.
+#
+# This used to be `sleep 120`, which is either too long or too short and has no
+# way of being right: one of these jobs plans, reads, writes a page and checks
+# it renders. Ask instead. The one exception is deliberate — the conversation
+# that has to stop and ask a question stays "running" while it waits, and
+# waiting for it would be waiting forever — so this stops when everything else
+# has settled.
+settle() {
+  local waited=0 busy
+  printf 'waiting for the conversations to finish '
+  while [ "$waited" -lt 900 ]; do
+    busy=$(rpc session.list '{}' | python3 -c '
+import json, sys
+items = json.load(sys.stdin)["result"]["value"]["items"]
+# The approval one is meant to sit there waiting; it is not unfinished work.
+print(sum(1 for s in items
+          if s.get("running") and s.get("projections", {}).get("values", {}).get("title") != "Ship the currency fix"))
+' 2>/dev/null || echo 1)
+    [ "$busy" = "0" ] && { echo ' done'; return; }
+    printf '.'
+    sleep 10
+    waited=$((waited + 10))
+  done
+  echo ' giving up on the wait'
 }
 
 # --- The shots --------------------------------------------------------------
@@ -271,5 +401,5 @@ take() {
 case "${1:-}" in
   --seed) start_harness; start_bridle; seed_repo; seed_conversations ;;
   --shots) take ;;
-  *) start_harness; start_bridle; seed_repo; seed_conversations; sleep 120; take ;;
+  *) start_harness; start_bridle; seed_repo; seed_conversations; settle; take ;;
 esac
