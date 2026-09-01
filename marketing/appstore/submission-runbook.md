@@ -162,35 +162,53 @@ itself on-device):
 
 ## Where this actually stands — 2026-09-01
 
-Done, in App Store Connect and the developer portal:
+**Done without the account holder** (driven through the App Store Connect and
+developer-portal web sessions):
 
-- App ID `ai.novabox.rowel` registered with Push Notifications and Time
-  Sensitive Notifications (the app sets `interruptionLevel = .timeSensitive`,
-  and the relay sends `interruption-level: time-sensitive`, so both are needed).
-- App record created: **6807263060**, `Rowel: DeepSeek Harness Remote`,
-  English (U.S.), SKU `rowel-ios`, Full Access, iOS only.
-- Version 1.0 page filled: promotional text, description, keywords, support and
-  marketing URLs, copyright, review notes, contact name and email, and
-  "sign-in required" cleared — the product has no accounts.
+- App ID `ai.novabox.rowel`, with Push Notifications and Time Sensitive
+  Notifications. Both are needed: the app sets
+  `interruptionLevel = .timeSensitive` and the relay sends
+  `interruption-level: time-sensitive`.
+- App record **6807263060** — `Rowel: DeepSeek Harness Remote`, English (U.S.),
+  SKU `rowel-ios`, Full Access, iOS only.
+- Screenshots: the six 6.9" shots (1320×2868) from `marketing/shots` uploaded to
+  the 1.0 page. Apple reuses them for 6.5" automatically.
+- Pricing: free, in all 175 countries and regions, confirmed.
+- Availability: all 175 countries and regions.
+- Version 1.0 fields typed: promotional text, description, keywords, support and
+  marketing URLs, copyright, review notes, contact first/last name and email,
+  and "sign-in required" cleared — there are no accounts to give a reviewer.
 
-Blocked on one field: **Phone number** under App Review Information. Apple
-requires it, with a `+` and a country code, and it is how they reach a human
-during review. Nobody but the account holder can supply it. Until it is filled
-the page will not save, so everything above is typed but not yet persisted.
+**Blocked on the account holder — one field.** App Review Information wants a
+**phone number**, with a `+` and a country code. Apple uses it to reach a human
+during review, so nobody else can supply it, and the version page will not save
+without it. Everything in the list above that says "typed" is typed but not yet
+persisted for that reason; the copy all lives in `metadata.md` and
+`review-notes.md`, so refilling it is mechanical.
 
-Then, in order:
+**Also needs the account holder, but not yet blocking:**
+
+- **EU trader status**, in the Business section. Without it the app cannot be
+  submitted for the European Union at all, and the account has been showing the
+  banner. It asks for a legal identity — individual or company — which is a
+  disclosure only the holder can make.
+- **An App Store Connect API key.** The account currently has none (the `.p8`
+  at `~/.rowel/secrets/AuthKey_3M4859Q6U7.p8` does not correspond to any live
+  key), so `ios/release.sh` has nothing to authenticate with. Generate one under
+  Users and Access → Integrations; the issuer id is shown once, above the key
+  list, and the `.p8` downloads exactly once.
+
+**Then, in order:**
 
 1. Save the version page.
-2. Upload screenshots — the 6.9" set (1320×2868) from `marketing/shots` via
-   Media Manager. The default panel offers the legacy 6.5" size; the shots are
-   6.9" and belong in that slot.
-3. App Privacy questionnaire — answers and their source-code evidence are in
+2. App Privacy questionnaire — answers and their source-code evidence are in
    `privacy-questionnaire.md`.
-4. Pricing and Availability — free, all territories.
-5. EU trader status in the Business section. Without it the app cannot be
-   submitted for the European Union, and the account is showing the banner.
-6. Build: `ios/release.sh` (needs `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`
-   — the key is at `~/.rowel/secrets/AuthKey_3M4859Q6U7.p8`; the issuer id is
-   not on this machine and comes from App Store Connect → Users and Access →
-   Integrations).
-7. Attach the build, then Add for Review.
+3. Build and upload with `ios/release.sh` (`ASC_KEY_ID`, `ASC_ISSUER_ID`,
+   `ASC_KEY_PATH`, `ROWEL_TEAM_ID=AVKUVD4FPN`).
+4. Attach the build to 1.0, then Add for Review.
+
+**Left at Apple's defaults, worth a glance before submitting:** the app is set
+to appear on Apple silicon Macs and on Apple Vision Pro. Both are Apple's
+default for an iOS app. Vision Pro is inert — 1.0 is marked not compatible —
+but the Mac one puts an iPhone client for a Mac-side agent on the Mac App
+Store, which may be more confusing than useful.
