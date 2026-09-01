@@ -448,6 +448,12 @@ public final class MachineSession {
         if let held = conversations[sessionId] { return held }
         let summary = sessions.first { $0.id == sessionId }
         let fresh = Conversation(sessionId: sessionId, title: summary?.title, cwd: summary?.cwd)
+        // Set here rather than left to `loadHistory`, which sets it too — but
+        // from inside a Task, and until that Task gets a turn the view holds a
+        // conversation with no items and no reason given, which is the empty
+        // state. Every conversation opened by flashing "Nothing here yet" at
+        // the person before its contents arrived.
+        fresh.loading = true
         conversations[sessionId] = fresh
         Task { await loadHistory(fresh, reset: false) }
         // Independently of the history: the machine knows which model this

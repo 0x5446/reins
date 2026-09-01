@@ -190,8 +190,21 @@ take() {
   xcrun simctl addmedia "$udid" /tmp/rowel-sketch.png 2>/dev/null || true
 
   xcodegen generate --spec project.yml >/dev/null
-  say "pair the simulator if it is not paired yet:"
-  say "  ROWEL_HOME=$home/rowel-home node $root/bridle/lib/cli.js pair"
+
+  # Hand the run a fresh invitation rather than telling the operator to pair by
+  # hand and carrying on either way. A stale pairing does not announce itself —
+  # the app simply never reaches the machine — and the shots that come out of a
+  # run like that are of an app with nothing in it, which is exactly the failure
+  # this whole file exists to avoid.
+  #
+  # `TEST_RUNNER_` is not decoration: xcodebuild passes the test process only
+  # variables with that prefix, and strips it on the way through.
+  local link
+  link=$(ROWEL_HOME="$home/rowel-home" node "$root/bridle/lib/cli.js" pair --link 2>/dev/null \
+    | sed -n 's/^link: *//p')
+  [ -n "$link" ] || fail "could not mint a pairing invitation for $home/rowel-home"
+  export TEST_RUNNER_ROWEL_PAIR_LINK="$link"
+
   xcodebuild test -project Rowel.xcodeproj -scheme RowelUI \
     -destination "id=$udid" -only-testing:RowelUITests/Screenshots \
     | grep -E "Test Case|error:" || true
@@ -202,20 +215,47 @@ take() {
     "$chrome" --headless --disable-gpu --hide-scrollbars --window-size=1600,1200 \
       --screenshot="$root/marketing/shots/dashboard.png" \
       "file://$sample/dashboard.html" >/dev/null 2>&1
-    sips -c 620 1600 "$root/marketing/shots/dashboard.png" \
-      --out "$root/marketing/shots/dashboard.png" >/dev/null
+    # Crop from the top, not the middle. `sips -c` centres, which sliced the
+    # headings off the three summary cards and left their explanatory text
+    # floating above the chart — the one image on the page that is supposed to
+    # show what the agent produced, looking like a layout that had gone wrong.
+    # 860 is where the page's own content ends.
+    magick "$root/marketing/shots/dashboard.png" -crop 1600x860+0+0 +repage \
+      "$root/marketing/shots/dashboard.png"
   fi
 
   # Web copies, small enough for a page to carry.
+  #
+  # `--resampleWidth`, not `-Z`. `-Z` caps the *longest* edge, and these are
+  # portrait, so it set the height to 660 and left the width at 303 — under
+  # half of what the page needs. The slot is 13.5rem (216 CSS px) and a phone
+  # renders it at 3×, so 660 wide is the number; 303 was visibly soft on every
+  # retina screen while the README claimed 660 the whole time.
+  #
+  # WebP, because the page is nothing but screenshots and one of them is a
+  # notification over a photograph, which PNG cannot compress: the set was
+  # 2.1 MB as PNG and is 400 KB as WebP at the same pixels. The page references
+  # `.webp` directly rather than through a `<picture>` fallback — every browser
+  # that can run the app's own marketing has supported it for years, and a
+  # second copy of every image is a second thing to keep in step.
+  command -v cwebp >/dev/null \
+    || fail "cwebp is not installed, and the site references .webp — brew install webp"
   mkdir -p "$root/site/public/_/shots"
-  for n in sessions conversation approval photo models push; do
-    cp "$root/marketing/shots/$n.png" "$root/site/public/_/shots/$n.png"
-    sips -Z 660 "$root/site/public/_/shots/$n.png" >/dev/null
+  local tmp="${TMPDIR:-/tmp}/rowel-web-shot.png"
+  for n in sessions conversation approval photo models push pairing-sheet machine tools artifact; do
+    cp "$root/marketing/shots/$n.png" "$tmp"
+    sips --resampleWidth 660 "$tmp" >/dev/null
+    cwebp -q 88 -quiet "$tmp" -o "$root/site/public/_/shots/$n.webp"
   done
   if [ -f "$root/marketing/shots/dashboard.png" ]; then
-    cp "$root/marketing/shots/dashboard.png" "$root/site/public/_/shots/dashboard.png"
-    sips -Z 1200 "$root/site/public/_/shots/dashboard.png" >/dev/null
+    cp "$root/marketing/shots/dashboard.png" "$tmp"
+    # Landscape, so the longest edge is the width and `-Z` would be right here
+    # too; spelled the same way as the others so the next reader does not have
+    # to work out why one line differs.
+    sips --resampleWidth 1200 "$tmp" >/dev/null
+    cwebp -q 88 -quiet "$tmp" -o "$root/site/public/_/shots/dashboard.webp"
   fi
+  rm -f "$tmp"
   say "shots in marketing/shots, web copies in site/public/_/shots"
 }
 

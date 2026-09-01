@@ -71,16 +71,92 @@ final class Screenshots: XCTestCase {
         try? shot.pngRepresentation.write(to: url)
     }
 
-    /// Open a conversation from the list.
+    /// Open a conversation with this title that actually has something in it.
+    ///
+    /// Two faults used to meet here, and they produced the same picture: a
+    /// store screenshot of an empty app, saved without complaint.
+    ///
+    /// The seed leaves more than one conversation per title and the spares are
+    /// empty. Being newest, they sort to the top of the list, so `firstMatch`
+    /// landed on exactly the wrong row every time. And the check that followed
+    /// — that a static text carrying the title exists — is satisfied the
+    /// instant the screen appears, because the navigation bar shows that same
+    /// title. It could not fail, so it never did.
+    ///
+    /// Both are fixed by asking the only question that matters: is there a
+    /// transcript on screen. Rows are tried in order until one answers yes.
     ///
     /// The card is the button and its label carries the title, the folder and
     /// the age, so match a prefix rather than the whole string.
-    private func openSession(_ title: String) throws {
-        let card = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-        XCTAssertTrue(card.waitForExistence(timeout: patience), "no row for \(title)")
-        card.tap()
-        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 20))
+    private func openSession(
+        _ title: String, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title))
+        // The list is lazy, so a row below the fold does not exist as far as
+        // this process is concerned. Waiting longer never conjures it — only
+        // scrolling does, which is why a run could report "no row for" a
+        // conversation that was plainly in the list.
+        var scrolls = 0
+        while !rows.firstMatch.waitForExistence(timeout: scrolls == 0 ? 20 : 2) {
+            XCTAssertLessThan(scrolls, 8, "no row for \(title)", file: file, line: line)
+            app.swipeUp()
+            scrolls += 1
+        }
+        // Rows carrying the same title are not interchangeable — some of them
+        // are conversations that never ran — and the list is lazy, so they are
+        // not all reachable at once either. Try what is on screen, scroll, try
+        // again; a title that appears three times may have its only real copy
+        // below the fold.
+        for pass in 0..<4 {
+            if pass > 0 {
+                app.swipeUp()
+                sleep(1)
+            }
+            for index in 0..<rows.count {
+                rows.element(boundBy: index).tap()
+                if transcriptLoaded() { return }
+                // Wrong one: back out and try the next row with this title.
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+                XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 20),
+                              "did not get back to the list", file: file, line: line)
+            }
+        }
+        // Keep the evidence. "Was empty" is what this code can conclude, not
+        // necessarily what happened — a history call that failed leaves the
+        // same blank transcript as one that succeeded with nothing in it — and
+        // without the screen it produced, the next person debugging this is
+        // back to guessing from a timing difference.
+        save("failed-\(title.prefix(20).replacingOccurrences(of: " ", with: "-"))")
+        try? app.debugDescription.write(
+            toFile: "\(out)/tree-failure.txt", atomically: true, encoding: .utf8)
+        XCTFail("no conversation called \(title) showed a transcript", file: file, line: line)
+    }
+
+    /// Wait until the conversation on screen is showing its transcript.
+    ///
+    /// The view has exactly three states that are not a transcript, and it
+    /// names all three, so this asks about those rather than trying to
+    /// recognise content: "Opening…" before the conversation object exists,
+    /// "Loading this conversation…" while history is in flight, and "Nothing
+    /// here yet" once history has arrived and held nothing.
+    ///
+    /// The third is decisive — an empty conversation will not fill in later —
+    /// so it returns immediately instead of waiting out the timeout. Polling
+    /// rather than sleeping a fixed number: history crosses a tunnel, and how
+    /// long that takes is not something a constant can be right about.
+    /// - Parameter timeout: how long to allow before calling it empty.
+    /// - Returns: true once a transcript is on screen.
+    private func transcriptLoaded(timeout: TimeInterval = 30) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if app.staticTexts["Nothing here yet"].exists { return false }
+            if !app.staticTexts["Opening…"].exists
+                && !app.staticTexts["Loading this conversation…"].exists {
+                return true
+            }
+            usleep(400_000)
+        }
+        return false
     }
 
     /// The machine's name, and the identity the pairing is anchored to.
@@ -131,7 +207,9 @@ final class Screenshots: XCTestCase {
     /// A finished answer, and the model picker over it.
     func test3Conversation() throws {
         try openSession("Add CAD and AUD to the currency table")
-        sleep(5)
+        // `openSession` returns with a transcript already on screen, so this is
+        // only the scroll settling, not a guess at how long history takes.
+        sleep(2)
         save("conversation")
 
         app.navigationBars.buttons.element(boundBy: 1).tap()
@@ -143,7 +221,7 @@ final class Screenshots: XCTestCase {
     /// The card that stops a command until a person answers it.
     func test4Approval() throws {
         try openSession("Ship the currency fix")
-        sleep(6)
+        sleep(2)
         save("approval")
     }
 
@@ -151,7 +229,7 @@ final class Screenshots: XCTestCase {
     /// for itself. Scrolling back is scrolling through the work.
     func test5Working() throws {
         try openSession("Build the checkout health dashboard")
-        sleep(6)
+        sleep(2)
         save("artifact")
         app.swipeDown()
         app.swipeDown()
@@ -172,7 +250,7 @@ final class Screenshots: XCTestCase {
     /// the moment of choosing it.
     func test6Photo() throws {
         try openSession("Match the dashboard to this sketch")
-        sleep(6)
+        sleep(2)
         // Back up to the message itself — the sketch is the point of the shot.
         app.swipeDown()
         app.swipeDown()

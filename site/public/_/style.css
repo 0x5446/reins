@@ -249,3 +249,27 @@ footer a { margin-right: 1.1rem; }
   .feature:nth-of-type(even) { grid-template-columns: 12.5rem minmax(0, 1fr); }
   .feature:nth-of-type(even) .shot { order: -1; }
 }
+
+/* The thing the agent built, rather than the app that watched it being built.
+ * Landscape and full width — it is a page, not a phone, and shrinking it into
+ * the 13.5rem phone slot would make the one image here that is evidence look
+ * like another screenshot of a screenshot. */
+
+.artifact {
+  margin: 2.75rem 0;
+}
+
+.artifact img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 1.25rem 0 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--code-bg);
+}
+
+.artifact figcaption {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}

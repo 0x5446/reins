@@ -50,3 +50,4 @@ AuthKey_*.p8
 
 # Screen recordings: regenerate with ios/RowelUITests/Recording.swift rather than store them.
 marketing/shots/*.mp4
+marketing/shots/tree-failure.txt

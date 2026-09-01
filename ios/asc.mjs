@@ -13,6 +13,7 @@
  *   node ios/asc.mjs attach <buildId>            put that build on the version
  *   node ios/asc.mjs ratings                     current age-rating answers
  *   node ios/asc.mjs submit                      send the version to review
+ *   node ios/asc.mjs shots <file>...             replace the screenshot set
  *   node ios/asc.mjs get <path>                  any GET, path after /v1
  *   node ios/asc.mjs patch <path> <json>         any PATCH
  *   node ios/asc.mjs post <path> <json>          any POST
@@ -20,7 +21,7 @@
  * Environment: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, and ROWEL_APP_ID.
  */
 
-import { createSign } from 'node:crypto'
+import { createHash, createSign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
 const KEY_ID = process.env['ASC_KEY_ID']
@@ -165,6 +166,61 @@ switch (command) {
     process.stdout.write(`${version.attributes.versionString} -> ${sent.data.attributes.state}\n`)
     break
   }
+  case 'shots': {
+    // Replace the whole screenshot set, in order.
+    //
+    // Three calls per image, because Apple hands out the storage rather than
+    // taking the bytes: reserve a slot and get back a list of upload
+    // operations, PUT each one at its own URL with its own headers, then say
+    // it is done and prove it with an MD5 the other end can check. Skip the
+    // last step and the screenshot exists, is empty, and blocks submission
+    // while looking present in the API.
+    //
+    // Order on the store page is `position`, not upload order.
+    if (rest.length === 0) { process.stderr.write('asc: shots <file>...\n'); process.exit(1) }
+    const version = await inflight()
+    const [localization] = (await call('GET',
+      `/v1/appStoreVersions/${version.id}/appStoreVersionLocalizations`)).data
+    const [set] = (await call('GET',
+      `/v1/appStoreVersionLocalizations/${localization.id}/appScreenshotSets`)).data
+    const existing = await call('GET', `/v1/appScreenshotSets/${set.id}/appScreenshots`)
+    for (const shot of existing.data) {
+      await call('DELETE', `/v1/appScreenshots/${shot.id}`)
+      process.stdout.write(`removed ${shot.attributes.fileName}\n`)
+    }
+    for (const [index, path] of rest.entries()) {
+      const bytes = readFileSync(path)
+      const fileName = path.split('/').pop()
+      const reserved = await call('POST', '/v1/appScreenshots', {
+        data: {
+          type: 'appScreenshots',
+          attributes: { fileName, fileSize: bytes.length },
+          relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: set.id } } },
+        },
+      })
+      for (const operation of reserved.data.attributes.uploadOperations) {
+        const headers = Object.fromEntries(
+          operation.requestHeaders.map(h => [h.name, h.value]))
+        const put = await fetch(operation.url, {
+          method: operation.method,
+          headers,
+          body: bytes.subarray(operation.offset, operation.offset + operation.length),
+        })
+        if (!put.ok) {
+          process.stderr.write(`asc: uploading ${fileName} -> ${String(put.status)}\n`)
+          process.exit(1)
+        }
+      }
+      await call('PATCH', `/v1/appScreenshots/${reserved.data.id}`, {
+        data: {
+          type: 'appScreenshots', id: reserved.data.id,
+          attributes: { uploaded: true, sourceFileChecksum: createHash('md5').update(bytes).digest('hex') },
+        },
+      })
+      process.stdout.write(`uploaded ${String(index + 1)}. ${fileName}\n`)
+    }
+    break
+  }
   case 'get':
     process.stdout.write(`${JSON.stringify(await call('GET', rest[0]), null, 2)}\n`)
     break
@@ -175,6 +231,6 @@ switch (command) {
     process.stdout.write(`${JSON.stringify(await call('PATCH', rest[0], JSON.parse(rest[1])), null, 2)}\n`)
     break
   default:
-    process.stderr.write('asc: builds | version | attach <id> | ratings | submit | get <path> | patch <path> <json> | post <path> <json>\n')
+    process.stderr.write('asc: builds | version | attach <id> | ratings | submit | shots <file>... | get <path> | patch <path> <json> | post <path> <json>\n')
     process.exit(1)
 }
