@@ -12,8 +12,10 @@
  *   node ios/asc.mjs version                     the in-flight version
  *   node ios/asc.mjs attach <buildId>            put that build on the version
  *   node ios/asc.mjs ratings                     current age-rating answers
+ *   node ios/asc.mjs submit                      send the version to review
  *   node ios/asc.mjs get <path>                  any GET, path after /v1
  *   node ios/asc.mjs patch <path> <json>         any PATCH
+ *   node ios/asc.mjs post <path> <json>          any POST
  *
  * Environment: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, and ROWEL_APP_ID.
  */
@@ -131,13 +133,48 @@ switch (command) {
     process.stdout.write(`${declaration.data.id}\n${JSON.stringify(declaration.data.attributes, null, 2)}\n`)
     break
   }
+  case 'submit': {
+    // Three calls, not one. A submission is a container, the version is an
+    // item inside it, and `submitted` is the button — Apple models "Add for
+    // Review" and "Submit to App Review" as two separate acts, and so does
+    // this. Anything already open is reused: a second container for the same
+    // app is rejected, and the error names neither the existing one nor why.
+    const version = await inflight()
+    const open = await call('GET', `/v1/apps/${APP_ID}/reviewSubmissions?filter[state]=READY_FOR_REVIEW`)
+    const submission = open.data[0] ?? (await call('POST', '/v1/reviewSubmissions', {
+      data: {
+        type: 'reviewSubmissions', attributes: { platform: 'IOS' },
+        relationships: { app: { data: { type: 'apps', id: APP_ID } } },
+      },
+    })).data
+    const items = await call('GET', `/v1/reviewSubmissions/${submission.id}/items`)
+    if (items.data.length === 0) {
+      await call('POST', '/v1/reviewSubmissionItems', {
+        data: {
+          type: 'reviewSubmissionItems',
+          relationships: {
+            reviewSubmission: { data: { type: 'reviewSubmissions', id: submission.id } },
+            appStoreVersion: { data: { type: 'appStoreVersions', id: version.id } },
+          },
+        },
+      })
+    }
+    const sent = await call('PATCH', `/v1/reviewSubmissions/${submission.id}`, {
+      data: { type: 'reviewSubmissions', id: submission.id, attributes: { submitted: true } },
+    })
+    process.stdout.write(`${version.attributes.versionString} -> ${sent.data.attributes.state}\n`)
+    break
+  }
   case 'get':
     process.stdout.write(`${JSON.stringify(await call('GET', rest[0]), null, 2)}\n`)
+    break
+  case 'post':
+    process.stdout.write(`${JSON.stringify(await call('POST', rest[0], JSON.parse(rest[1])), null, 2)}\n`)
     break
   case 'patch':
     process.stdout.write(`${JSON.stringify(await call('PATCH', rest[0], JSON.parse(rest[1])), null, 2)}\n`)
     break
   default:
-    process.stderr.write('asc: builds | version | attach <id> | ratings | get <path> | patch <path> <json>\n')
+    process.stderr.write('asc: builds | version | attach <id> | ratings | submit | get <path> | patch <path> <json> | post <path> <json>\n')
     process.exit(1)
 }

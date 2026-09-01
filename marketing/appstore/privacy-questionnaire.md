@@ -56,7 +56,7 @@ manifest in the same release.
 |---|---|---|---|
 | Prompts, replies, code, diffs, photos | Phone ↔ Mac inside the Noise channel; relay forwards ciphertext only, no key material | Never readable by us; nothing stored | Not collected |
 | **APNs push token** | iOS → app → sealed channel → **the user's own Mac** (stored there, on the user's device); the Mac hands it to the relay **one wake at a time, at the moment a push is sent**, and the relay does not store it (`Push.swift` doc comment; `privacy.html` "Notifications": "handed over one wake at a time … is not stored") | No — transits the relay only to service that single push, then gone | **Not collected.** Servicing the request in real time is Apple's own carve-out. |
-| Machine ID / display name / Bridle version | Held by the relay **only while that Mac is online**; the row is deleted on disconnect (`privacy.html`, `relay/src/registry.ts`) | Session-scoped, machine-scoped (random ID, not derived from hardware, not linked to a person — there are no accounts to link to) | Not collected |
+| Machine ID / display name / Bridle version | Held by the relay **only while that Mac is online**; the row is written at `relay-worker/src/exchange.ts:179` and deleted on disconnect at `:191` (also `privacy.html`) | Session-scoped, machine-scoped (random ID, not derived from hardware, not linked to a person — there are no accounts to link to) | Not collected |
 | Pairing bundle | Held by relay only while a pairing code is outstanding (≤ 10–15 min), deleted on claim or expiry | Transient by design | Not collected |
 | IP address, traffic timing/volume | Seen by the relay/Cloudflare as by any server; no log file, no analytics pipeline (`privacy.html`) | Not retained by us | Not collected |
 
@@ -103,6 +103,17 @@ from it.
 
 Tracking section: **No** — nothing is used for tracking, no data broker
 contact, `NSPrivacyTracking = false`, no tracking domains.
+
+## Filed 2026-09-01
+
+Published as **Data Not Collected** via the dashboard's `iris` API — the
+public App Store Connect API has no data-usage endpoints at all. Two calls:
+`POST /iris/v1/appDataUsages` relating app `6807263060` to the
+`DATA_NOT_COLLECTED` protection, then `PATCH
+/iris/v1/appDataUsagesPublishState/6807263060` with `published: true`. Both
+need a live web session and the `X-Cross-Site-Security: dash` header. The
+publish call is the one that counts; without it the answers exist but the
+submission is still blocked.
 
 ## Consistency checklist before submitting
 

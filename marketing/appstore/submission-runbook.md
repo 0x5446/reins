@@ -77,8 +77,11 @@ key), `ios/ExportOptions.plist` method `app-store-connect`.
    - **Untick** "iPhone and iPad Apps on Apple Silicon Macs".
    - **Untick** Apple Vision Pro availability.
 4. **[Account Holder]** Business/Compliance → **EU Digital Services Act
-   trader status: declare non-trader** (free, non-commercial). Apps without
-   a declaration get removed from EU storefronts.
+   trader status**. Apps without a declaration get removed from EU
+   storefronts. We declared **trader** — the app is a commercial product,
+   and "non-trader" is a claim about intent that would not survive a paid
+   tier later. The cost is that the declared address, phone and email are
+   published on the product page.
 
 ## Phase 4 — build and upload (~20 min machine time)
 
@@ -102,11 +105,12 @@ export ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<Key ID>.p8
 - The script validates before uploading (server-parity checks, ~20 s,
   reported inline instead of by queue email).
 - After upload: ASC → TestFlight shows the build "Processing" for a few
-  minutes to an hour. First build triggers the **export compliance
-  question** if the Info.plist answer needs supplementing — ours ships
-  `ITSAppUsesNonExemptEncryption = true`, so answer the questionnaire once
-  in ASC (answers in `metadata.md`; France declaration consequence in
-  `APPSTORE.md` §2.5).
+  minutes to an hour. There is no export-compliance question to answer:
+  `project.yml` ships `ITSAppUsesNonExemptEncryption = false`, because both
+  of Apple's criteria turn on *algorithms* and this binary contains none —
+  every primitive comes from CryptoKit and `Noise.swift` implements a
+  protocol, not a cipher. The rationale is written out in `project.yml`
+  next to the key; keep it archived five years.
 
 ## Phase 5 — TestFlight internal smoke test (strongly recommended, zero review)
 
@@ -162,63 +166,52 @@ itself on-device):
 
 ## Where this actually stands — 2026-09-01
 
-**Done without the account holder** (driven through the App Store Connect and
-developer-portal web sessions):
+**Submitted. Version 1.0 is `WAITING_FOR_REVIEW`.**
 
-- App ID `ai.novabox.rowel`, with Push Notifications and Time Sensitive
-  Notifications. Both are needed: the app sets
-  `interruptionLevel = .timeSensitive` and the relay sends
-  `interruption-level: time-sensitive`.
-- App record **6807263060** — `Rowel: DeepSeek Harness Remote`, English (U.S.),
-  SKU `rowel-ios`, Full Access, iOS only.
-- Screenshots: the six 6.9" shots (1320×2868) from `marketing/shots` uploaded to
-  the 1.0 page. Apple reuses them for 6.5" automatically.
-- Pricing: free, in all 175 countries and regions, confirmed.
-- Availability: all 175 countries and regions.
-- Version 1.0 fields typed: promotional text, description, keywords, support and
-  marketing URLs, copyright, review notes, contact first/last name and email,
-  and "sign-in required" cleared — there are no accounts to give a reviewer.
+App record **6807263060** (`Rowel: DeepSeek Harness Remote`, SKU `rowel-ios`,
+Developer Tools, iOS only), App ID `ai.novabox.rowel` with Push Notifications
+and Time Sensitive Notifications — the app sets
+`interruptionLevel = .timeSensitive` and the relay sends the matching header,
+so both are required. Build 1 uploaded and VALID, attached to 1.0. Six 6.9"
+screenshots (1320×2868) from `marketing/shots`; Apple reuses them for 6.5".
+Free in all 175 territories. Age ratings answered, content rights declared,
+App Privacy published as **Data Not Collected**.
 
-**Since resolved.** The phone number is in and the version page saved. The EU
-trader declaration is submitted and Apple has it *In Review* for 27 countries —
-declared as a trader, with a Beijing address, `+86 135 8177 2780` and
-`hi@novabox.ai`, backed by a property deed as the address document. Those three
-details will appear publicly on the product page once Apple verifies them. The
-address was entered in Chinese so it matches the deed character for character;
-an English rendering was tried first and abandoned for exactly that reason.
+The EU trader declaration is *In Review* for 27 countries: declared as a
+trader with a Beijing address, `+86 135 8177 2780` and `hi@novabox.ai`, backed
+by a property deed. Those three details become public on the product page once
+Apple verifies them. The address was entered in Chinese so it matches the deed
+character for character — an English rendering was tried first and abandoned
+for exactly that reason.
 
-Previously blocked, kept for the record:
+### Three things that cost time, so they are written down
 
-**Blocked on the account holder — one field.** App Review Information wants a
-**phone number**, with a `+` and a country code. Apple uses it to reach a human
-during review, so nobody else can supply it, and the version page will not save
-without it. Everything in the list above that says "typed" is typed but not yet
-persisted for that reason; the copy all lives in `metadata.md` and
-`review-notes.md`, so refilling it is mechanical.
+**App Privacy is not in the public API.** `appDataUsages`,
+`appDataUsageCategories`, `appDataUsageDataProtections`, `appPrivacyDetails`
+and `appDataUsagesPublishState` all return `404 PATH_ERROR` on
+`api.appstoreconnect.apple.com`, and `GET /v1/apps/<id>` exposes no data-usage
+relationship. The same resources *do* exist on the dashboard's own
+`appstoreconnect.apple.com/iris/v1` API, reachable with a live web session and
+an `X-Cross-Site-Security: dash` header. Declaring "Data Not Collected" is two
+calls: `POST /iris/v1/appDataUsages` relating the app to the
+`DATA_NOT_COLLECTED` protection, then `PATCH
+/iris/v1/appDataUsagesPublishState/<app id>` with `published: true`. Nothing
+is saved until that second call — an unpublished questionnaire blocks
+submission silently.
 
-**Also needs the account holder, but not yet blocking:**
+**`privacyPolicyUrl` lives on the app info localization, not the privacy
+section.** Submission fails with a `409` naming
+`/v1/appInfoLocalizations/<id>` and `ENTITY_ERROR.ATTRIBUTE.REQUIRED`. Setting
+the privacy questionnaire does not set it. Use the extensionless
+`https://rowel.novabox.ai/privacy` — the `.html` path 404s.
 
-- **EU trader status**, in the Business section. Without it the app cannot be
-  submitted for the European Union at all, and the account has been showing the
-  banner. It asks for a legal identity — individual or company — which is a
-  disclosure only the holder can make.
-- **An App Store Connect API key.** The account currently has none (the `.p8`
-  at `~/.rowel/secrets/AuthKey_3M4859Q6U7.p8` does not correspond to any live
-  key), so `ios/release.sh` has nothing to authenticate with. Generate one under
-  Users and Access → Integrations; the issuer id is shown once, above the key
-  list, and the `.p8` downloads exactly once.
+**Submission is three calls, not one.** `ios/asc.mjs submit` does them:
+create a `reviewSubmissions` container, add the version as a
+`reviewSubmissionItems`, then `PATCH … submitted: true`. Apple models "Add for
+Review" and "Submit to App Review" as separate acts and the API mirrors that.
 
-**Then, in order:**
+### Left at Apple's defaults, worth revisiting after 1.0
 
-1. Save the version page.
-2. App Privacy questionnaire — answers and their source-code evidence are in
-   `privacy-questionnaire.md`.
-3. Build and upload with `ios/release.sh` (`ASC_KEY_ID`, `ASC_ISSUER_ID`,
-   `ASC_KEY_PATH`, `ROWEL_TEAM_ID=AVKUVD4FPN`).
-4. Attach the build to 1.0, then Add for Review.
-
-**Left at Apple's defaults, worth a glance before submitting:** the app is set
-to appear on Apple silicon Macs and on Apple Vision Pro. Both are Apple's
-default for an iOS app. Vision Pro is inert — 1.0 is marked not compatible —
-but the Mac one puts an iPhone client for a Mac-side agent on the Mac App
-Store, which may be more confusing than useful.
+The app appears on Apple silicon Macs and on Apple Vision Pro. Vision Pro is
+inert (1.0 is marked incompatible), but the Mac one puts an iPhone client for
+a Mac-side agent on the Mac App Store, which may confuse more than it helps.
