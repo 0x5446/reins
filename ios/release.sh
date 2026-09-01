@@ -57,6 +57,21 @@ ROWEL_TEAM_ID="$ROWEL_TEAM_ID" xcodegen generate --spec ios/project.yml --quiet
 
 rm -rf "$ARCHIVE" "$EXPORT"
 
+# The same App Store Connect key that authorises the upload also authorises
+# provisioning. Without it, `-allowProvisioningUpdates` needs an Apple ID
+# signed into Xcode and fails with "No Accounts: Add a new account in Accounts
+# settings" followed by "No profiles for <bundle id> were found" — which reads
+# like a missing profile and is really a missing login. Passing the key here
+# means a machine that has never opened Xcode can still archive.
+AUTH=()
+if [ "$UPLOAD" = 1 ]; then
+  AUTH=(
+    -authenticationKeyPath "$ASC_KEY_PATH"
+    -authenticationKeyID "$ASC_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+fi
+
 xcodebuild archive \
   -project ios/Rowel.xcodeproj \
   -scheme Rowel \
@@ -64,6 +79,7 @@ xcodebuild archive \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
+  "${AUTH[@]}" \
   DEVELOPMENT_TEAM="$ROWEL_TEAM_ID" \
   CURRENT_PROJECT_VERSION="$BUILD"
 
@@ -72,21 +88,12 @@ xcodebuild archive \
 OPTIONS="${TMPDIR:-/tmp}/RowelExportOptions.plist"
 sed "s|<string>AVKUVD4FPN</string>|<string>$ROWEL_TEAM_ID</string>|" ios/ExportOptions.plist > "$OPTIONS"
 
-EXPORT_AUTH=()
-if [ "$UPLOAD" = 1 ]; then
-  EXPORT_AUTH=(
-    -authenticationKeyPath "$ASC_KEY_PATH"
-    -authenticationKeyID "$ASC_KEY_ID"
-    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-  )
-fi
-
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportPath "$EXPORT" \
   -exportOptionsPlist "$OPTIONS" \
   -allowProvisioningUpdates \
-  "${EXPORT_AUTH[@]}"
+  "${AUTH[@]}"
 
 IPA="$(find "$EXPORT" -name '*.ipa' -print -quit)"
 [ -n "$IPA" ] || { echo "release: export produced no .ipa" >&2; exit 1; }
