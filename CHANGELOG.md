@@ -7,7 +7,7 @@ Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
-## Unreleased
+## 0.1.4 — 2026-09-01
 
 - **A machine that was plainly running could report itself offline to the
   phone, forever.** The machine id is a hash of the signing key, domain-separated
