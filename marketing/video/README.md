@@ -49,24 +49,36 @@ needs consent — then drives the tap and records:
 The phone is the simulator, recorded with `xcrun simctl io recordVideo` — no
 camera and no physical device, so a take is repeatable.
 
-## There is no Mac half, and why
+## The Mac half: safe now, still not useful
 
-The shot would be better with one: the same session on the machine that is
-blocked, resuming when the tap lands. It was built and then removed.
+`ios/demo.sh --mac` records the harness's window too, through
+`ios/Tools/RecordWindow.swift`.
 
-Capturing it meant recording a rectangle of the display, and a rectangle of the
-display holds whatever is in front of it. Two takes came back containing
-windows belonging to the person running it — the second was a private
-conversation — and the only reason neither reached a video is that both were
-looked at first. Targeting by window title or URL does not fix it: AppleScript
-will tell you a window exists and where it was moved to, not that it is the
-thing actually visible at those coordinates. Another app on top, and the
-recording is of that app.
+It is a *window* capture rather than a screen capture, and that distinction is
+the reason the tool exists. The first attempt cropped a rectangle of the
+display, and a rectangle holds whatever is in front of it: two takes came back
+containing windows belonging to the person running the script — the second a
+private conversation — and the only reason neither reached a video is that both
+were looked at first. Targeting by title does not fix a region capture, because
+AppleScript will tell you a window exists and where it was moved to, not that
+it is the thing visible at those coordinates. ScreenCaptureKit captures the
+window's own contents, so nothing drawn over it can get in.
 
-A Mac half needs a recorder that captures a *window* rather than a region —
-ScreenCaptureKit's window capture, or a browser recording its own page. Until
-there is one, the phone alone carries the shot: it shows the agent blocked, the
-card, the tap, and the work continuing, which is the whole claim.
+Three things it learned, all of them now guards rather than comments. A browser
+permission bubble carries the page's address in its title, so matching a URL
+found the dialog and recorded 170×94 of it — there is a minimum size now.
+Several windows matching is refused rather than resolved by picking one, and
+`demo.sh` closes stale harness windows first so the second run of the day does
+not trip over the first. And a window recording is finalised when its writer
+closes the file, so the process is waited on; killed instead, what is left is a
+megabyte with no index, which reads as a corrupt file rather than an
+interrupted one.
+
+**It is off by default because the footage is not worth much yet.** The
+harness's web UI has no per-session URL, so the window cannot be pointed at the
+conversation being approved without driving the browser, and a Mac half showing
+the new-session screen adds nothing the phone does not already say. The tool is
+here for when that is solved.
 
 Two smaller things that cost a take each, in case they come up again. The Xcode
 project is generated and not committed, so a driver added since the last

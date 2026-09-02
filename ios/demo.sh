@@ -8,16 +8,22 @@
 # approval is a real one, provoked by running the session under a `read-only`
 # sandbox so the agent's first write is refused and it has to ask.
 #
-# It records the simulator and nothing else. A Mac-side half was tried by
-# capturing a rectangle of the display, and a rectangle of the display holds
-# whatever is in front of it — two takes came back containing windows belonging
-# to whoever was running it, one of them a private conversation. No check fixes
-# that: AppleScript can say a window exists and where it was put, not that it
-# is the thing visible at those coordinates. A Mac half needs a recorder that
-# captures a window, not a region.
+# `--mac` also records the harness's own window, through
+# `Tools/RecordWindow.swift`. That is a window capture, not a screen capture,
+# and the distinction is the whole reason it exists: an earlier attempt cropped
+# a rectangle of the display, and a rectangle holds whatever is in front of it
+# — two takes came back containing windows belonging to whoever ran the script,
+# one of them a private conversation. ScreenCaptureKit captures the window's
+# own contents, so nothing that happens to be on top can get in.
+#
+# It is off by default because it is not yet worth much: the harness's web UI
+# has no per-session URL, so the window cannot be pointed at the conversation
+# being approved without driving the browser, and a Mac half showing the home
+# screen adds nothing the phone does not already say.
 #
 # Usage:
-#   ios/demo.sh              set up an approval, record both screens
+#   ios/demo.sh              set up an approval, record the phone
+#   ios/demo.sh --mac        record the harness window as well
 #   ios/demo.sh --arm        set up the approval and stop, to record by hand
 #
 # Output: marketing/video/raw/phone.mov, ready for the Remotion edit.
@@ -153,9 +159,26 @@ record() {
   # ends up in the shot.
   xcrun simctl uninstall "$udid" ai.novabox.reins.uitests.xctrunner 2>/dev/null || true
   mkdir -p "$out"
-  rm -f "$out/phone.mov"
+  rm -f "$out/phone.mov" "$out/mac.mov"
 
-  # No Mac-side capture. See the note at the top of this file.
+  # A window of its own for the harness, when the Mac half was asked for.
+  # Sized here because a window capture records the window at its own size, so
+  # a small window makes a small recording. Where it sits does not matter —
+  # that is the point of capturing a window rather than a rectangle.
+  if [ "$want_mac" = 1 ]; then
+    # Close any harness windows left by an earlier take first. The recorder
+    # refuses when more than one window matches — correctly, since picking one
+    # of several is how you film the wrong thing — so leaving them around makes
+    # the second run of the day fail on the first.
+    osascript -e "tell application \"Google Chrome\" to close (every window whose title contains \"DeepSeek Harness\")" \
+      >/dev/null 2>&1 || true
+    osascript -e "tell application \"Google Chrome\" to make new window" \
+      -e "tell application \"Google Chrome\" to set URL of active tab of front window to \"http://127.0.0.1:$port/\"" \
+      -e "tell application \"Google Chrome\" to set bounds of front window to {0, 60, 1200, 860}" \
+      >/dev/null 2>&1 || true
+    sleep 4
+  fi
+
   # Compile before the camera rolls. `xcodebuild test` builds first, and a
   # build after a source change takes minutes — all of it recorded, and all of
   # it a still simulator. Worse, the app then has to launch, pair and load a
@@ -171,6 +194,12 @@ record() {
   rm -f "$out/beats.json"
   xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/phone.mov" &
   local phone_pid=$!
+  local mac_pid=""
+  if [ "$want_mac" = 1 ]; then
+    swift Tools/RecordWindow.swift --app "Google Chrome" --title "DeepSeek Harness" \
+      --seconds 60 --out "$out/mac.mov" &
+    mac_pid=$!
+  fi
   # When the footage starts, so the driver's marks can be turned into offsets
   # into it. Without this the edit has to find the beats by eye, which means
   # re-timing every caption after every take — and the point of driving this
@@ -202,6 +231,15 @@ record() {
   # rather than short.
   kill -INT "$phone_pid" 2>/dev/null || true
   wait "$phone_pid" 2>/dev/null || true
+  # Waited on rather than killed. A window recording is finalised when the
+  # writer closes the file; end the process before that and what is left is a
+  # megabyte of frames with no index — `moov atom not found`, which reads like
+  # a corrupt file rather than an interrupted one. The extra seconds are tail
+  # the edit trims anyway.
+  if [ -n "$mac_pid" ]; then
+    say "waiting for the window recording to close its file"
+    wait "$mac_pid" 2>/dev/null || true
+  fi
 
   [ -s "$out/phone.mov" ] || fail "the simulator recording is empty"
   if [ -s "$out/beats.json" ]; then
@@ -218,7 +256,10 @@ record() {
   return $status
 }
 
+want_mac=0
 case "${1:-}" in
-  --arm) arm ;;
-  *) arm; record ;;
+  --arm) arm; exit 0 ;;
+  --mac) want_mac=1 ;;
 esac
+arm
+record
