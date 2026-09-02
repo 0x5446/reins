@@ -156,9 +156,27 @@ record() {
   rm -f "$out/phone.mov"
 
   # No Mac-side capture. See the note at the top of this file.
+  # Compile before the camera rolls. `xcodebuild test` builds first, and a
+  # build after a source change takes minutes — all of it recorded, and all of
+  # it a still simulator. Worse, the app then has to launch, pair and load a
+  # list inside a patience window that was spent waiting for the compiler: one
+  # take failed outright that way and produced 176 seconds of footage with 115
+  # seconds of nothing at the front.
+  say "building"
+  xcodebuild build-for-testing -project Rowel.xcodeproj -scheme RowelUI \
+    -destination "id=$udid" -derivedDataPath build/demo >/dev/null 2>&1 \
+    || fail "the test bundle would not build"
+
   say "recording"
+  rm -f "$out/beats.json"
   xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/phone.mov" &
   local phone_pid=$!
+  # When the footage starts, so the driver's marks can be turned into offsets
+  # into it. Without this the edit has to find the beats by eye, which means
+  # re-timing every caption after every take — and the point of driving this
+  # from a script is that a take is cheap.
+  local started
+  started=$(python3 -c 'import time; print(time.time())')
   sleep 2
 
   local link
@@ -171,8 +189,9 @@ record() {
   # eighteen seconds of a home screen and said nothing was wrong.
   set +e
   set -o pipefail
-  TEST_RUNNER_ROWEL_PAIR_LINK="$link" xcodebuild test \
+  TEST_RUNNER_ROWEL_PAIR_LINK="$link" xcodebuild test-without-building \
     -project Rowel.xcodeproj -scheme RowelUI -destination "id=$udid" \
+    -derivedDataPath build/demo \
     -only-testing:RowelUITests/Demo 2>&1 | grep -E "Test Case|error:"
   local status=$?
   set +o pipefail
@@ -185,6 +204,11 @@ record() {
   wait "$phone_pid" 2>/dev/null || true
 
   [ -s "$out/phone.mov" ] || fail "the simulator recording is empty"
+  if [ -s "$out/beats.json" ]; then
+    python3 "$root/marketing/video/beats.py" "$out/beats.json" "$started"
+    say "beats (seconds into phone.mov):"
+    sed 's/^/    /' "$out/beats.json"
+  fi
   say "raw footage in marketing/video/raw"
   for f in "$out"/*.mov; do
     [ -e "$f" ] || continue

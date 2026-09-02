@@ -20,9 +20,27 @@ stills, and the reason neither is kept as a hand-made artifact.
 ## Producing it
 
 ```sh
-ios/screenshots.sh --seed   # a harness with a sample repository, once
-ios/demo.sh                 # arm a real approval, record both screens
+ios/screenshots.sh --seed          # a harness with a sample repository, once
+ios/demo.sh                        # arm a real approval, record the tap
+cd marketing/video && npm install  # once
+node render.mjs                    # trim, then render all three shapes
 ```
+
+Out come `out/rowel-{vertical,square,wide}.mp4` — 9:16, 1:1 and 16:9 of the
+same cut. Three rather than one because a launch video that exists only in
+16:9 gives up the feed everywhere that is not YouTube.
+
+The captions are placed against `raw/beats.json`, which the recording writes:
+`Demo.swift` marks when it saw the card and when it answered, `demo.sh` knows
+when the camera started, `beats.py` subtracts. Re-record and the words move
+with the footage instead of describing a frame that has shifted. Each caption
+runs until the next one starts, so there is no per-line duration to keep in
+step — the first attempt had those, and put two captions on screen at once.
+
+In the landscape cut the phone is deliberately taller than the frame. Fitted
+whole into 1080 lines it is about 430 pixels wide, and the command the video is
+asking you to read is then unreadable; overscaled and anchored low, what is on
+screen is the card and the answer.
 
 `demo.sh` provokes a genuine permission request — the session runs under a
 `read-only` sandbox, so the agent's first write is refused and escalating
