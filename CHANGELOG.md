@@ -7,6 +7,13 @@ Versions are the tags `install.sh` can install. `ROWEL_REF` in that script names
 the one it installs by default, so a release here and a change to that line are
 the same decision.
 
+## Unreleased
+
+- **Opening a conversation no longer says it is empty first.** The view was
+  handed a conversation with no messages and no reason given, because the flag
+  that says "still loading" was set one Task later — so every conversation
+  opened by flashing "Nothing here yet" before its contents arrived.
+
 ## 0.1.4 — 2026-09-01
 
 - **A machine that was plainly running could report itself offline to the
