@@ -28,18 +28,35 @@ ios/demo.sh                 # arm a real approval, record both screens
 `read-only` sandbox, so the agent's first write is refused and escalating
 needs consent — then drives the tap and records:
 
-| | source | how |
-|---|---|---|
-| phone | the simulator | `xcrun simctl io recordVideo` |
-| Mac | the harness's own web UI | `ffmpeg -f avfoundation`, cropped to the window |
+The phone is the simulator, recorded with `xcrun simctl io recordVideo` — no
+camera and no physical device, so a take is repeatable.
 
-Neither is a camera and neither is a physical device, so a take is repeatable.
+## There is no Mac half, and why
 
-**The Mac half needs a permission.** Screen recording is granted per binary in
-System Settings › Privacy & Security › Screen Recording, and a process without
-it does not fail cleanly — `screencapture` hangs and ffmpeg reports no screen
-among its devices. `demo.sh` checks first and records the phone alone rather
-than spending four minutes to produce half a set.
+The shot would be better with one: the same session on the machine that is
+blocked, resuming when the tap lands. It was built and then removed.
+
+Capturing it meant recording a rectangle of the display, and a rectangle of the
+display holds whatever is in front of it. Two takes came back containing
+windows belonging to the person running it — the second was a private
+conversation — and the only reason neither reached a video is that both were
+looked at first. Targeting by window title or URL does not fix it: AppleScript
+will tell you a window exists and where it was moved to, not that it is the
+thing actually visible at those coordinates. Another app on top, and the
+recording is of that app.
+
+A Mac half needs a recorder that captures a *window* rather than a region —
+ScreenCaptureKit's window capture, or a browser recording its own page. Until
+there is one, the phone alone carries the shot: it shows the agent blocked, the
+card, the tap, and the work continuing, which is the whole claim.
+
+Two smaller things that cost a take each, in case they come up again. The Xcode
+project is generated and not committed, so a driver added since the last
+`xcodegen` is not in the scheme, and `-only-testing` against a test that does
+not exist still leaves a recording on disk — of a home screen. And while
+`simctl` is recording it holds the capture system, so anything asking "can I
+record the screen?" after that point is told no on a machine where the answer
+is yes.
 
 ## Raw footage
 

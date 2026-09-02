@@ -3,18 +3,24 @@
 # Record the launch demo: an agent stopped on a permission request, and a
 # person unblocking it from a phone.
 #
-# Two screens, both on this Mac, neither of them a camera. The "phone" is the
-# simulator, which `simctl` records directly; the Mac side is the harness's own
-# web UI showing the same session, which resumes when the tap lands. Nothing
-# here is staged — the approval is a real one, provoked by running the session
-# under a `read-only` sandbox so the agent's first write is refused and it has
-# to ask.
+# The "phone" is the simulator, which `simctl` records directly — no camera and
+# no physical device, so a take is repeatable. Nothing here is staged: the
+# approval is a real one, provoked by running the session under a `read-only`
+# sandbox so the agent's first write is refused and it has to ask.
+#
+# It records the simulator and nothing else. A Mac-side half was tried by
+# capturing a rectangle of the display, and a rectangle of the display holds
+# whatever is in front of it — two takes came back containing windows belonging
+# to whoever was running it, one of them a private conversation. No check fixes
+# that: AppleScript can say a window exists and where it was put, not that it
+# is the thing visible at those coordinates. A Mac half needs a recorder that
+# captures a window, not a region.
 #
 # Usage:
 #   ios/demo.sh              set up an approval, record both screens
 #   ios/demo.sh --arm        set up the approval and stop, to record by hand
 #
-# Output: marketing/video/raw/{phone,mac}.mov, ready for the Remotion edit.
+# Output: marketing/video/raw/phone.mov, ready for the Remotion edit.
 #
 # Requires the screenshot harness (ios/screenshots.sh) to be up: this borrows
 # its dsh, its Bridle and its sample repository rather than standing up a
@@ -30,17 +36,6 @@ device="${ROWEL_SHOTS_DEVICE:-iPhone 17 Pro Max}"
 sample="$HOME/code/checkout-api"
 out="$root/marketing/video/raw"
 
-# Where the Mac half lives, in points, and the same rectangle in the form
-# AppleScript wants (left, top, right, bottom). Fixed rather than measured:
-# the edit crops and scales against these numbers, so a window that moved
-# between takes would silently change the framing.
-MAC_RECT="${ROWEL_DEMO_RECT:-0,60,1000,820}"
-MAC_RECT_AS=$(printf '%s' "$MAC_RECT" | awk -F, '{print $1", "$2", "($1+$3)", "($2+$4)}')
-# The same rectangle in pixels, for the crop: the display is 2x.
-MAC_X=$(printf '%s' "$MAC_RECT" | cut -d, -f1 | awk '{print $1*2}')
-MAC_Y=$(printf '%s' "$MAC_RECT" | cut -d, -f2 | awk '{print $1*2}')
-MAC_W=$(printf '%s' "$MAC_RECT" | cut -d, -f3 | awk '{print $1*2}')
-MAC_H=$(printf '%s' "$MAC_RECT" | cut -d, -f4 | awk '{print $1*2}')
 
 if [ -t 1 ]; then bold=$(printf '\033[1m'); off=$(printf '\033[0m'); else bold=''; off=''; fi
 say() { printf '%s==>%s %s\n' "$bold" "$off" "$*"; }
@@ -54,21 +49,6 @@ rpc() {
     "$RANDOM" "$1" "$2" \
     | curl -s -m 90 -X POST "http://127.0.0.1:$port/api/$1" \
         -H 'content-type: application/json' --data-binary @-
-}
-
-# Can anything on this machine record the Mac half?
-#
-# Checked before the expensive part rather than after. Screen recording is a
-# permission macOS grants per binary through System Settings, and a process
-# without it does not fail — `screencapture` hangs, and ffmpeg simply reports
-# no screen among its capture devices. The first take of this ran the whole
-# four-minute sequence and produced one recording and one missing file.
-mac_recorder() {
-  if ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -qi "capture screen"; then
-    printf 'ffmpeg'
-  else
-    printf 'none'
-  fi
 }
 
 zone() {
@@ -173,42 +153,12 @@ record() {
   # ends up in the shot.
   xcrun simctl uninstall "$udid" ai.novabox.reins.uitests.xctrunner 2>/dev/null || true
   mkdir -p "$out"
-  rm -f "$out/phone.mov" "$out/mac.mov"
+  rm -f "$out/phone.mov"
 
-  # The Mac half is the harness's own web UI on the same session. It is the
-  # honest counterpart to the phone: the same conversation, seen from the
-  # machine that is blocked, resuming when the answer arrives.
-  open -a "Google Chrome" --args --new-window "http://127.0.0.1:$port/" >/dev/null 2>&1 || true
-  sleep 4
-  # Put it somewhere known and record that rectangle rather than the display.
-  # The simulator is on the same screen, and a full-display capture would put
-  # the phone inside the Mac half of the shot — the one thing the edit needs
-  # kept apart, since the whole point is that these are two machines.
-  osascript -e "tell application \"Google Chrome\" to set bounds of front window to {$MAC_RECT_AS}" \
-    >/dev/null 2>&1 || say "could not place the Chrome window; recording the rect anyway"
-  # And the simulator clear of it, or it sits on top of the rectangle being
-  # recorded and the Mac half of the shot contains a phone.
-  osascript -e 'tell application "System Events" to tell process "Simulator" to set position of front window to {1010, 60}' \
-    >/dev/null 2>&1 || true
-  sleep 1
-
+  # No Mac-side capture. See the note at the top of this file.
   say "recording"
   xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/phone.mov" &
   local phone_pid=$!
-  local mac_pid=""
-  if [ "$(mac_recorder)" = ffmpeg ]; then
-    local screen
-    screen=$(ffmpeg -f avfoundation -list_devices true -i "" 2>&1 \
-      | sed -n 's/.*\[\([0-9]*\)\] Capture screen 0.*/\1/p' | head -1)
-    ffmpeg -y -loglevel error -f avfoundation -capture_cursor 0 -framerate 30 \
-      -i "${screen}:none" -vf "crop=${MAC_W}:${MAC_H}:${MAC_X}:${MAC_Y}" \
-      -t 60 "$out/mac.mov" &
-    mac_pid=$!
-  else
-    say "no screen-recording permission — the Mac half is being skipped."
-    say "  grant it in System Settings › Privacy & Security › Screen Recording,"
-    say "  to whichever program runs this, then run ios/demo.sh again."
-  fi
   sleep 2
 
   local link
@@ -232,9 +182,7 @@ record() {
   # interrupt and truncate on terminate, and a truncated .mov is unplayable
   # rather than short.
   kill -INT "$phone_pid" 2>/dev/null || true
-  [ -n "$mac_pid" ] && kill -INT "$mac_pid" 2>/dev/null
   wait "$phone_pid" 2>/dev/null || true
-  [ -n "$mac_pid" ] && { wait "$mac_pid" 2>/dev/null || true; }
 
   [ -s "$out/phone.mov" ] || fail "the simulator recording is empty"
   say "raw footage in marketing/video/raw"
