@@ -22,6 +22,8 @@ final class Screenshots: XCTestCase {
     private var app: XCUIApplication!
     private let out = "/Users/alpha/.walkcode/workspace/rowel/marketing/shots"
     private let patience: TimeInterval = 60
+    /// Counts failed attempts so their screenshots do not overwrite each other.
+    private var attempts = 0
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -149,14 +151,28 @@ final class Screenshots: XCTestCase {
     private func transcriptLoaded(timeout: TimeInterval = 30) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if app.staticTexts["Nothing here yet"].exists { return false }
+            if app.staticTexts["Nothing here yet"].exists {
+                note("empty")
+                return false
+            }
             if !app.staticTexts["Opening…"].exists
                 && !app.staticTexts["Loading this conversation…"].exists {
                 return true
             }
             usleep(400_000)
         }
+        note("stuck")
         return false
+    }
+
+    /// Photograph a screen that did not do what was expected, before leaving it.
+    ///
+    /// The failure screenshot used to be taken at the end, by which point the
+    /// driver had already backed out to the list — so what it recorded was the
+    /// list, and the screen that actually went wrong was gone.
+    private func note(_ why: String) {
+        attempts += 1
+        save("failure-\(why)-\(attempts)")
     }
 
     /// The machine's name, and the identity the pairing is anchored to.
