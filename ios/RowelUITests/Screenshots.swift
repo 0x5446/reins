@@ -143,9 +143,7 @@ final class Screenshots: XCTestCase {
         // same blank transcript as one that succeeded with nothing in it — and
         // without the screen it produced, the next person debugging this is
         // back to guessing from a timing difference.
-        save("failed-\(title.prefix(20).replacingOccurrences(of: " ", with: "-"))")
-        try? app.debugDescription.write(
-            toFile: "\(out)/tree-failure.txt", atomically: true, encoding: .utf8)
+        saveDiagnostic("failed-\(title.prefix(20).replacingOccurrences(of: " ", with: "-"))")
         XCTFail("no conversation called \(title) showed a transcript", file: file, line: line)
     }
 
@@ -187,7 +185,26 @@ final class Screenshots: XCTestCase {
     /// list, and the screen that actually went wrong was gone.
     private func note(_ why: String) {
         attempts += 1
-        save("failure-\(why)-\(attempts)")
+        saveDiagnostic("failure-\(why)-\(attempts)")
+    }
+
+    /// A picture of something that went wrong, kept away from the shots.
+    ///
+    /// These are photographs of screens that failed their own check: an
+    /// unexpected page, somebody else's session, an error. Writing them beside
+    /// the store assets puts exactly the wrong images one `git add -A` away
+    /// from a public repository, and leaves the publishing step a directory it
+    /// cannot tell good files from bad in.
+    private func saveDiagnostic(_ name: String) {
+        let directory = URL(fileURLWithPath: out)
+            .deletingLastPathComponent().appendingPathComponent("diagnostics")
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try? XCUIScreen.main.screenshot().pngRepresentation
+            .write(to: directory.appendingPathComponent("\(name).png"))
+        try? app.debugDescription.write(
+            to: directory.appendingPathComponent("\(name).tree.txt"),
+            atomically: true, encoding: .utf8)
     }
 
     /// The machine's name, and the identity the pairing is anchored to.

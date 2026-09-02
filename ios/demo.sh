@@ -50,6 +50,20 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 curl -s -o /dev/null -m 2 "http://127.0.0.1:$port/" \
   || fail "no harness on :$port — run ios/screenshots.sh first."
 
+# Recorders are started in the background, and `set -e` can end this script
+# between starting one and stopping it — a failed build, a simulator that will
+# not boot. What is left behind then is a process quietly filming an idle
+# screen until somebody notices, so the exit path collects them whatever the
+# reason for leaving.
+recorders=()
+cleanup() {
+  local pid
+  for pid in "${recorders[@]:-}"; do
+    [ -n "$pid" ] && kill -INT "$pid" 2>/dev/null
+  done
+}
+trap cleanup EXIT INT TERM
+
 rpc() {
   printf '{"type":"client-request","rpcId":"d%s","method":"%s","payload":%s}' \
     "$RANDOM" "$1" "$2" \
@@ -196,11 +210,13 @@ record() {
   xcrun simctl terminate "$udid" ai.novabox.rowel >/dev/null 2>&1 || true
   xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/phone.mov" &
   local phone_pid=$!
+  recorders+=("$phone_pid")
   local mac_pid=""
   if [ "$want_mac" = 1 ]; then
     swift Tools/RecordWindow.swift --app "Google Chrome" --title "DeepSeek Harness" \
       --seconds 60 --out "$out/mac.mov" &
     mac_pid=$!
+    recorders+=("$mac_pid")
   fi
   # When the footage starts, so the driver's marks can be turned into offsets
   # into it. Without this the edit has to find the beats by eye, which means

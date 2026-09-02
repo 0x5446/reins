@@ -182,7 +182,7 @@ export function loadState(): BridleState {
     const derived = deviceIdFor(signingPublicKeyOf(Buffer.from(parsed.signingKey, 'base64url')))
     if (parsed.deviceId !== derived) {
       parsed.deviceId = derived
-      saveState(parsed)
+      persistDeviceId(path, derived)
     }
     return applyEnvironment(parsed)
   }
@@ -200,6 +200,36 @@ export function loadState(): BridleState {
   }
   saveState(state)
   return applyEnvironment(state)
+}
+
+/**
+ * Write back only the corrected `deviceId`, on top of whatever is on disk now.
+ *
+ * Not `saveState(parsed)`. Two Bridles can share a home — `bridle pair` runs
+ * beside a daemon by design — and this correction happens during *load*, on a
+ * snapshot that may already be seconds old. Writing the whole snapshot back
+ * would undo a device the daemon paired, a push token it learned, or a
+ * last-seen stamp it recorded in that gap. The atomic rename protects against
+ * a half-written file; it does nothing about a lost update.
+ *
+ * So the file is re-read and one field replaced. That is not a transaction —
+ * a writer landing between this read and this write still wins — but the
+ * window shrinks from "however long loading took" to two adjacent syscalls,
+ * and what it can lose is a `deviceId` correction that the next load redoes
+ * anyway rather than somebody's pairing.
+ * @param path - the state file.
+ * @param deviceId - the derived value to store.
+ */
+function persistDeviceId(path: string, deviceId: string): void {
+  try {
+    const current = JSON.parse(readFileSync(path, 'utf8')) as BridleState
+    if (current.deviceId === deviceId) return
+    current.deviceId = deviceId
+    saveState(current)
+  } catch {
+    // A correction that cannot be written is not worth failing a load over:
+    // the value in memory is already right, and the next load tries again.
+  }
 }
 
 /**

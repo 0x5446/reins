@@ -33,6 +33,20 @@ public final class AttachmentLoader {
     private var thumbnails: [String: UIImage] = [:]
     /// Ids being fetched, so a redraw mid-flight does not ask twice.
     private var inflight: Set<String> = []
+    /// Fetches actually running, as opposed to awaiting a turn.
+    private var running = 0
+    /// Callers holding a place in the queue, oldest first.
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    /// How many images may be in the air at once.
+    ///
+    /// The set is what bounds memory, not the thumbnail cache. A fetch holds
+    /// the whole encoded photo while it decodes — several megabytes each — and
+    /// scrolling fast through a conversation full of them starts a task per
+    /// thumb that appears. The thumbnails that come out are tiny; the pile of
+    /// originals in flight on the way there is not, and on a phone that is how
+    /// an app gets killed rather than slowed.
+    private static let concurrent = 2
 
     /// - Parameters:
     ///   - harness: the machine holding the bytes.
@@ -61,12 +75,42 @@ public final class AttachmentLoader {
     public func load(_ id: String, side: CGFloat) async {
         if thumbnails[id] != nil || inflight.contains(id) { return }
         inflight.insert(id)
-        defer { inflight.remove(id) }
+        await acquire()
+        defer {
+            inflight.remove(id)
+            release()
+        }
         guard let (_, base64) = try? await harness.attachment(sessionId: sessionId, attachmentId: id),
               let data = Data(base64Encoded: base64) else { return }
         let pixels = side * (UITraitCollection.current.displayScale)
         guard let image = await downsample(data, to: pixels) else { return }
         thumbnails[id] = image
+    }
+
+    /// Wait for one of the two slots.
+    ///
+    /// The caller keeps waiting rather than being handed back — `load` is
+    /// awaited by the view's `.task`, so a thumb that scrolls away has its wait
+    /// cancelled with it, and one that stays gets its turn in the order it
+    /// asked. Suspending here is what keeps the encoded photos from piling up:
+    /// nothing is fetched until there is room to decode it.
+    private func acquire() async {
+        if running < Self.concurrent {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+        // Resumed means a finishing fetch handed its slot over directly, so
+        // `running` already counts this one.
+    }
+
+    /// Give the slot to whoever has waited longest, or give it up.
+    private func release() {
+        if waiting.isEmpty {
+            running -= 1
+        } else {
+            waiting.removeFirst().resume()
+        }
     }
 }
 

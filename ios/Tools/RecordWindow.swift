@@ -95,13 +95,18 @@ final class Writer: NSObject, SCStreamOutput {
         }
     }
 
-    /// - Parameter done: called once the file is closed, or immediately when
-    ///   no frame ever arrived.
-    func finish(_ done: @escaping () -> Void) {
+    /// - Parameter done: passed false when no frame ever arrived, which is a
+    ///   failure and not an empty success. A window that produced nothing is a
+    ///   recording that is not there, and saying "done" about it leaves the
+    ///   caller to find the missing half later — the half it went to the
+    ///   trouble of recording.
+    func finish(_ done: @escaping (Bool) -> Void) {
         queue.async {
-            guard self.started else { return done() }
+            guard self.started else { return done(false) }
             self.input.markAsFinished()
-            self.writer.finishWriting(completionHandler: done)
+            self.writer.finishWriting {
+                done(self.writer.status == .completed)
+            }
         }
     }
 }
@@ -175,10 +180,13 @@ Task {
         try await stream.startCapture()
         try await Task.sleep(nanoseconds: UInt64(options.seconds * 1_000_000_000))
         try? await stream.stopCapture()
-        writer.finish {
-            let size = (try? FileManager.default
-                .attributesOfItem(atPath: options.out)[.size] as? Int) ?? 0
-            print("recorded \(window.title ?? "window") — \(width)x\(height), \(size ?? 0) bytes")
+        writer.finish { wrote in
+            let size = ((try? FileManager.default
+                .attributesOfItem(atPath: options.out)[.size]) as? Int) ?? 0
+            guard wrote, size > 0 else {
+                fail("the window produced no frames — nothing was written to \(options.out)")
+            }
+            print("recorded \(window.title ?? "window") — \(width)x\(height), \(size) bytes")
             exit(0)
         }
     } catch {

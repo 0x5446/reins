@@ -86,16 +86,40 @@ async function call(method, path, body) {
 
 const [command, ...rest] = process.argv.slice(2)
 
-/** The version currently being prepared, which is the one a build attaches to. */
+/**
+ * The version currently being prepared, which is the one a build attaches to.
+ *
+ * Narrowed rather than "the first one that is not live". That reading picks a
+ * macOS or tvOS version off an app that has one, and it picks a version in a
+ * state nothing can be done to — and the caller then reports success about a
+ * version it never touched. iOS only, and only the states that accept work.
+ */
+const EDITABLE = new Set([
+  'PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED',
+  'METADATA_REJECTED', 'INVALID_BINARY', 'WAITING_FOR_REVIEW', 'IN_REVIEW',
+  'PENDING_DEVELOPER_RELEASE',
+])
+
 async function inflight() {
   const versions = await call('GET',
-    `/v1/apps/${APP_ID}/appStoreVersions?limit=5&fields[appStoreVersions]=versionString,appStoreState,platform`)
-  const version = versions.data.find(v => v.attributes.appStoreState !== 'READY_FOR_SALE') ?? versions.data[0]
-  if (version === undefined) {
-    process.stderr.write('asc: no app store version to work with\n')
+    `/v1/apps/${APP_ID}/appStoreVersions?limit=20&fields[appStoreVersions]=versionString,appStoreState,platform`)
+  const candidates = versions.data.filter(v =>
+    v.attributes.platform === 'IOS' && EDITABLE.has(v.attributes.appStoreState))
+  if (candidates.length === 0) {
+    process.stderr.write('asc: no iOS version in a state that can be worked on\n')
     process.exit(1)
   }
-  return version
+  // More than one is not something to resolve by picking: it means the account
+  // is in a shape this tool was not written for, and guessing would act on the
+  // wrong release.
+  if (candidates.length > 1) {
+    process.stderr.write(
+      `asc: ${String(candidates.length)} iOS versions are open — ${candidates
+        .map(v => `${v.attributes.versionString} (${v.attributes.appStoreState})`)
+        .join(', ')}. Say which one by hand.\n`)
+    process.exit(1)
+  }
+  return candidates[0]
 }
 
 switch (command) {
@@ -177,7 +201,35 @@ switch (command) {
     // while looking present in the API.
     //
     // Order on the store page is `position`, not upload order.
+    //
+    // Everything is read and checked before anything is deleted. The set has to
+    // be emptied first — Apple caps it at ten and six plus six is more than ten
+    // — so there is a window where the listing has no screenshots at all, and
+    // the way to keep that window from becoming permanent is to make sure the
+    // only work left when it opens is work that cannot fail on a typo. A
+    // missing file, an unreadable one, an empty one: all of those used to be
+    // discovered halfway through, with the old set already gone.
     if (rest.length === 0) { process.stderr.write('asc: shots <file>...\n'); process.exit(1) }
+    const loaded = rest.map((path) => {
+      let bytes
+      try {
+        bytes = readFileSync(path)
+      } catch (error) {
+        process.stderr.write(`asc: cannot read ${path} — nothing was changed\n${String(error)}\n`)
+        process.exit(1)
+      }
+      if (bytes.length === 0) {
+        process.stderr.write(`asc: ${path} is empty — nothing was changed\n`)
+        process.exit(1)
+      }
+      // A PNG and nothing else. The store rejects other formats after the
+      // upload rather than before, which is the expensive end to find out.
+      if (bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
+        process.stderr.write(`asc: ${path} is not a PNG — nothing was changed\n`)
+        process.exit(1)
+      }
+      return { path, bytes, fileName: path.split('/').pop() }
+    })
     const version = await inflight()
     const [localization] = (await call('GET',
       `/v1/appStoreVersions/${version.id}/appStoreVersionLocalizations`)).data
@@ -188,9 +240,7 @@ switch (command) {
       await call('DELETE', `/v1/appScreenshots/${shot.id}`)
       process.stdout.write(`removed ${shot.attributes.fileName}\n`)
     }
-    for (const [index, path] of rest.entries()) {
-      const bytes = readFileSync(path)
-      const fileName = path.split('/').pop()
+    for (const [index, { bytes, fileName }] of loaded.entries()) {
       const reserved = await call('POST', '/v1/appScreenshots', {
         data: {
           type: 'appScreenshots',
@@ -218,6 +268,16 @@ switch (command) {
         },
       })
       process.stdout.write(`uploaded ${String(index + 1)}. ${fileName}\n`)
+    }
+    // Say what is actually up there. Every failure above exits, so reaching
+    // here means the set is whole — but the one thing an operator needs after
+    // a command that empties a live listing is a count they did not have to
+    // infer.
+    const now = await call('GET', `/v1/appScreenshotSets/${set.id}/appScreenshots`)
+    process.stdout.write(`the set now holds ${String(now.data.length)} screenshots\n`)
+    if (now.data.length !== loaded.length) {
+      process.stderr.write('asc: that is not the number just uploaded — check the listing\n')
+      process.exit(1)
     }
     break
   }

@@ -14,16 +14,25 @@ import UIKit
 #endif
 @testable import Rowel
 
-/// A transport that answers `session.attachment` and counts the asking.
+/// A transport that answers `session.attachment`, counts the asking, and can
+/// be made slow enough that concurrent callers actually overlap.
 private actor CountingTransport: HarnessTransport {
     private(set) var calls = 0
+    private(set) var peak = 0
+    private var active = 0
     private let data: String
+    private let delay: Duration
 
-    init(base64 data: String) {
+    init(base64 data: String, delay: Duration = .zero) {
         self.data = data
+        self.delay = delay
     }
 
     func call(_ method: String, _ payload: JSONValue) async throws -> JSONValue {
+        active += 1
+        peak = max(peak, active)
+        defer { active -= 1 }
+        if delay != .zero { try? await Task.sleep(for: delay) }
         guard method == "session.attachment" else {
             throw CallError(code: "not-found", message: "no script for \(method)", details: .null)
         }
@@ -135,5 +144,46 @@ final class AttachmentTests: XCTestCase {
         }
         XCTAssertEqual(turn.images.map(\.id), ["sha256:abc"])
         XCTAssertNil(turn.images.first?.base64, "the bytes stay on the Mac until asked for")
+    }
+
+    @MainActor
+    func testOverlappingRequestsForOneImageStillFetchOnce() async throws {
+        // The sequential version above proves less than its name suggests: by
+        // the time the second call runs the first has finished, so the cache
+        // answers and the in-flight guard is never exercised. Slow the
+        // transport down and start them together.
+        let transport = CountingTransport(base64: AttachmentTests.png(), delay: .milliseconds(120))
+        let loader = AttachmentLoader(harness: Harness(transport: transport), sessionId: "session-1")
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<6 {
+                group.addTask { @MainActor in await loader.load("sha256:a", side: 56) }
+            }
+        }
+
+        let calls = await transport.calls
+        XCTAssertEqual(calls, 1, "six thumbs of the same photo is still one photo")
+        XCTAssertNotNil(loader.thumbnail("sha256:a"))
+    }
+
+    @MainActor
+    func testOnlyTwoImagesAreInTheAirAtOnce() async throws {
+        // This number is what bounds memory, not the thumbnail cache: each
+        // fetch holds a whole encoded photo while it decodes, and a fast scroll
+        // through a conversation full of them would otherwise start one per
+        // thumb that appears.
+        let transport = CountingTransport(base64: AttachmentTests.png(), delay: .milliseconds(120))
+        let loader = AttachmentLoader(harness: Harness(transport: transport), sessionId: "session-1")
+
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<8 {
+                group.addTask { @MainActor in await loader.load("sha256:\(index)", side: 56) }
+            }
+        }
+
+        let peak = await transport.peak
+        let calls = await transport.calls
+        XCTAssertEqual(calls, 8, "eight distinct photos are eight fetches")
+        XCTAssertLessThanOrEqual(peak, 2, "but never more than two of them at a time")
     }
 }
