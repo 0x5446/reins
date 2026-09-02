@@ -192,6 +192,8 @@ record() {
 
   say "recording"
   rm -f "$out/beats.json"
+  # The phone on the home screen, so the notification has somewhere to land.
+  xcrun simctl terminate "$udid" ai.novabox.rowel >/dev/null 2>&1 || true
   xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/phone.mov" &
   local phone_pid=$!
   local mac_pid=""
@@ -207,6 +209,30 @@ record() {
   local started
   started=$(python3 -c 'import time; print(time.time())')
   sleep 2
+
+  # The first beat: how a person finds out at all.
+  #
+  # The payload is the one `relay-worker/src/apns.ts` sends, word for word —
+  # the relay's push is content-free by design, so there is nothing here that a
+  # real one would say differently. Delivered locally because a simulator has
+  # no APNs token; the notification itself is iOS drawing a real notification.
+  local notified=""
+  cat > "$out/wake.json" <<JSON
+{
+  "aps": {
+    "alert": { "title": "Rowel", "body": "Your agent is waiting on you. · MacBook Pro" },
+    "sound": "default",
+    "interruption-level": "time-sensitive"
+  }
+}
+JSON
+  if xcrun simctl push "$udid" ai.novabox.rowel "$out/wake.json" >/dev/null 2>&1; then
+    notified=$(python3 -c 'import time; print(time.time())')
+    say "notification delivered"
+    sleep 4
+  else
+    say "the simulator would not take the notification — the shot starts at the list"
+  fi
 
   local link
   link=$(ROWEL_HOME="$home/rowel-home" node "$root/bridle/lib/cli.js" pair --link 2>/dev/null \
@@ -243,7 +269,7 @@ record() {
 
   [ -s "$out/phone.mov" ] || fail "the simulator recording is empty"
   if [ -s "$out/beats.json" ]; then
-    python3 "$root/marketing/video/beats.py" "$out/beats.json" "$started"
+    python3 "$root/marketing/video/beats.py" "$out/beats.json" "$started" "$notified"
     say "beats (seconds into phone.mov):"
     sed 's/^/    /' "$out/beats.json"
   fi

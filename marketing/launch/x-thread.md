@@ -13,8 +13,16 @@ LAN racing (`RelayDirectory`/`LocalNetwork`), photo attach up to 4 images
 
 ---
 
-**1/** *(attach 20–30 s video: phone lights up with an approval → tap → full
-command + diff → Approve → Mac terminal visibly resumes)*
+**1/** *(attach `marketing/video/out/rowel-vertical.mp4` — 23 s, and every
+frame of it is a recording of the real app answering a real permission
+request, produced by `ios/demo.sh`)*
+
+*What it shows, in order: the lock-screen alert arriving on a phone that is
+not in use; the conversation, with the write the agent was refused and the
+reason it gives for asking; Allow; the card gone and the work continuing.
+There is no Mac half — the harness's web UI has no per-session URL, so the
+window cannot be aimed at the conversation being approved. The claim survives
+without it: the phone shows the agent stopped and then not stopped.*
 
 ```
 Your coding agent hit a permission prompt 40 minutes ago.
@@ -68,13 +76,22 @@ Free. MIT. No accounts — pairing is a QR code your terminal prints. Don't trus
 github.com/0x5446/rowel
 ```
 
+*(App Store review is pending at time of writing. If it has not cleared,
+reply to this tweet with the TestFlight link — `testflight.apple.com/join/HHCQBu38`
+— rather than putting a second link in the tweet itself.)*
+
 ---
 
 ## Posting notes
 
-- After tweet 7, reply to your own thread with the full 60-second demo video
-  (raw, uncut) — threads with a follow-up video in replies get a second
-  algorithmic wave.
+- After tweet 7, reply to your own thread with the uncut recording —
+  `marketing/video/raw/phone.mov`, 35 seconds, no captions and no cut. Threads
+  with a follow-up video in replies get a second algorithmic wave, and an
+  uncut take is also the answer to "is this edited". It is not committed;
+  regenerate it with `ios/demo.sh`.
+- The other two shapes are rendered at the same time:
+  `rowel-square.mp4` for feeds that crop, `rowel-wide.mp4` for YouTube and the
+  site. Posting only 16:9 gives up the feed everywhere that is not YouTube.
 - If the App Store link is live at posting time, reply once more with it;
   don't put two links in tweet 7.
 - Do not schedule this the same hour as the Show HN — one channel at a time,

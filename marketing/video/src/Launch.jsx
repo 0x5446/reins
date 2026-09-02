@@ -17,7 +17,7 @@ import {
   AbsoluteFill, OffthreadVideo, interpolate, staticFile,
   useCurrentFrame, useVideoConfig,
 } from 'remotion'
-import { at, start } from './beats.js'
+import { at, has } from './beats.js'
 
 const INK = '#101114'
 const PAPER = '#f7f7f5'
@@ -32,6 +32,7 @@ const ACCENT = '#2f6bff'
  * captions on screen at once.
  */
 const LINES = [
+  { beat: 'notified', offset: 0.7, text: 'It found you.' },
   { beat: 'opened', offset: 0.2, text: 'Your agent stopped to ask.' },
   { beat: 'asked', offset: 1.2, text: 'The whole command. Not a summary.' },
   { beat: 'allowed', offset: 0.1, text: 'One tap, from wherever you are.' },
@@ -69,7 +70,7 @@ function Phone({ height }) {
           is whatever the simulator felt like, and trimming by frame against an
           unknown rate is how an edit drifts a few frames every take. */}
       <OffthreadVideo
-        src={staticFile('phone.mov')}
+        src={staticFile('phone.mp4')}
         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
     </div>
@@ -166,11 +167,11 @@ export function Launch({ wide = false }) {
           minHeight: wide ? undefined : height * 0.12,
           alignSelf: wide ? 'center' : undefined,
         }}>
-          {LINES.map((line, index) => (
+          {LINES.filter(line => has(line.beat)).map((line, index, shown) => (
             <Caption
               key={index}
               line={line}
-              next={LINES[index + 1]}
+              next={shown[index + 1]}
               total={durationInFrames}
               fps={fps}
               width={width}
@@ -183,5 +184,3 @@ export function Launch({ wide = false }) {
     </AbsoluteFill>
   )
 }
-
-export { start }

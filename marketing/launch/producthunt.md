@@ -40,8 +40,14 @@ Developer Tools, Artificial Intelligence, Open Source, iOS, Privacy
 ## Gallery
 
 Reuse the six App Store screenshots (they're full-bleed UI, they work here),
-plus the 60-second demo video as the first slot. First image = the approval
-card — it is the one screen that explains the product without words.
+with `marketing/video/out/rowel-wide.mp4` in the first slot — 23 seconds,
+recorded from the real app answering a real permission request. First image =
+the approval card, `marketing/shots/approval.png`; it is the one screen that
+explains the product without words.
+
+Worth adding after the six: `marketing/shots/dashboard.png`, the page an agent
+built from a metrics file while being driven from a phone. The screenshots
+show the app working; that one shows what came out of it.
 
 ## First comment (maker comment — post immediately after launch goes live)
 
