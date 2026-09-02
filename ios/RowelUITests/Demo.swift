@@ -24,7 +24,21 @@ final class Demo: XCTestCase {
     private let after: UInt32 = 12
 
     /// Where the recording is written, so the beats can be written beside it.
-    private let out = "/Users/alpha/.walkcode/workspace/rowel/marketing/video/raw"
+    ///
+    /// From the environment, not a constant. The simulator sees the host file
+    /// system, so this has to be an absolute path — and an absolute path
+    /// written into the source is one machine's path: it carries whoever owns
+    /// that machine into a public repository, and on anybody else's it silently
+    /// writes somewhere that does not exist. Missing is a failure, not a
+    /// default; a default would put the shots where nobody looks.
+    private var out: String {
+        guard let path = ProcessInfo.processInfo.environment["ROWEL_SHOTS_OUT"],
+              !path.isEmpty else {
+            XCTFail("ROWEL_SHOTS_OUT is not set — run this through the script that sets it")
+            return NSTemporaryDirectory()
+        }
+        return path
+    }
     private var beats: [String: Double] = [:]
 
     /// Mark the moment something happened, in epoch seconds.

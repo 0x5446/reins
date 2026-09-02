@@ -244,7 +244,8 @@ JSON
   # eighteen seconds of a home screen and said nothing was wrong.
   set +e
   set -o pipefail
-  TEST_RUNNER_ROWEL_PAIR_LINK="$link" xcodebuild test-without-building \
+  TEST_RUNNER_ROWEL_PAIR_LINK="$link" TEST_RUNNER_ROWEL_SHOTS_OUT="$out" \
+    xcodebuild test-without-building \
     -project Rowel.xcodeproj -scheme RowelUI -destination "id=$udid" \
     -derivedDataPath build/demo \
     -only-testing:RowelUITests/Demo 2>&1 | grep -E "Test Case|error:"

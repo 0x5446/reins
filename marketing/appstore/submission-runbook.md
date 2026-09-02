@@ -190,9 +190,12 @@ Free in all 175 territories. Age ratings answered, content rights declared,
 App Privacy published as **Data Not Collected**.
 
 The EU trader declaration is *In Review* for 27 countries: declared as a
-trader with a Beijing address, `+86 135 8177 2780` and `hi@novabox.ai`, backed
-by a property deed. Those three details become public on the product page once
-Apple verifies them. The address was entered in Chinese so it matches the deed
+trader, with the address, phone number and support address that App Store
+Connect holds. Those three become public on the product page once Apple
+verifies them, which is Apple's disclosure to make on the account holder's
+behalf — this file is in a public repository and is not the place to repeat
+them. Read them back with `node ios/asc.mjs get /v1/apps/6807263060` if you
+need to check what was submitted. The address was entered in Chinese so it matches the deed
 character for character — an English rendering was tried first and abandoned
 for exactly that reason.
 

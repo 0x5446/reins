@@ -344,9 +344,20 @@ take() {
   [ -n "$link" ] || fail "could not mint a pairing invitation for $home/rowel-home"
   export TEST_RUNNER_ROWEL_PAIR_LINK="$link"
 
+  # `pipefail`, and no `|| true`. The pipe ends in a grep, so without both a
+  # build that never ran and a suite that failed every case are indistinguishable
+  # from success — which is how a set of screenshots of an empty app got as far
+  # as the App Store.
+  set +e
+  set -o pipefail
+  TEST_RUNNER_ROWEL_SHOTS_OUT="$root/marketing/shots" \
   xcodebuild test -project Rowel.xcodeproj -scheme RowelUI \
     -destination "id=$udid" -only-testing:RowelUITests/Screenshots \
-    | grep -E "Test Case|error:" || true
+    | grep -E "Test Case|error:"
+  local shot_status=$?
+  set +o pipefail
+  set -e
+  [ "$shot_status" -eq 0 ] || fail "the screenshot run failed; the files on disk are from an earlier take"
 
   # The artifact the dashboard conversation built, rendered.
   chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

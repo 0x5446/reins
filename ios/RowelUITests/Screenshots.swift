@@ -20,7 +20,22 @@ import XCTest
 
 final class Screenshots: XCTestCase {
     private var app: XCUIApplication!
-    private let out = "/Users/alpha/.walkcode/workspace/rowel/marketing/shots"
+    /// Where the shots are written, on the host.
+    ///
+    /// From the environment, not a constant. The simulator sees the host file
+    /// system, so this has to be an absolute path — and an absolute path
+    /// written into the source is one machine's path: it carries whoever owns
+    /// that machine into a public repository, and on anybody else's it silently
+    /// writes somewhere that does not exist. Missing is a failure, not a
+    /// default; a default would put the shots where nobody looks.
+    private var out: String {
+        guard let path = ProcessInfo.processInfo.environment["ROWEL_SHOTS_OUT"],
+              !path.isEmpty else {
+            XCTFail("ROWEL_SHOTS_OUT is not set — run this through the script that sets it")
+            return NSTemporaryDirectory()
+        }
+        return path
+    }
     private let patience: TimeInterval = 60
     /// Counts failed attempts so their screenshots do not overwrite each other.
     private var attempts = 0
