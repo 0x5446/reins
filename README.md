@@ -102,6 +102,33 @@ Useful flags on `bridle` itself:
 State lives in `~/.rowel/bridle.json`, mode `0600`, and it holds this machine's
 private key. `ROWEL_HOME` moves it.
 
+## Two harnesses on one Mac
+
+One Bridle serves one dsh. Left to itself it probes the usual ports (3080–3083,
+8080, 8791) and stays with whichever dsh answered last time — fine with one
+harness, a coin toss with two. `--dsh` ends the guessing:
+
+```sh
+bridle --dsh http://127.0.0.1:3081
+```
+
+If nothing answers there, Bridle starts a harness on that exact port — the
+startup line says `(started by bridle)` when it did. `--no-auto-start` makes it
+refuse instead.
+
+Only one Bridle may run per identity; a second start stops and names the first.
+So to move your existing pairing to a different port, stop the running Bridle
+and start it again with `--dsh`. To serve a second harness *alongside* the
+first, give it an identity of its own:
+
+```sh
+ROWEL_HOME=~/.rowel-3081 bridle --dsh http://127.0.0.1:3081
+```
+
+Its first run prints its own QR code, and the app shows a second machine —
+same name, told apart by a fingerprint suffix. `bridle pair` needs none of
+this: it starts nothing, so it runs happily beside a Bridle that is already up.
+
 ## What it is protecting, and what it is not
 
 The relay switches sealed frames between two sockets by circuit number. It has no

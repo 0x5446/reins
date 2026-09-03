@@ -71,6 +71,37 @@ exec zsh</code></pre>
   exactly the phone whose word should not be taken for it.
 </p>
 
+<h2>Two harnesses on one Mac</h2>
+
+<p>
+  Bridle serves one dsh. It probes the usual ports and stays with the one that
+  answered last time — fine with one harness, a coin toss with two. Name the
+  one you mean:
+</p>
+
+<code class="command">bridle --dsh http://127.0.0.1:3081</code>
+
+<p>
+  If nothing is listening there, Bridle starts a harness on that exact port —
+  add <code>--no-auto-start</code> if you would rather it refused instead.
+</p>
+
+<p>
+  Only one Bridle runs per identity; a second start stops and says so. To point
+  your existing pairing at a different port, stop the running Bridle first,
+  then start it with <code>--dsh</code>. To run a second harness alongside the
+  first, give it an identity of its own:
+</p>
+
+<code class="command">ROWEL_HOME=~/.rowel-3081 bridle --dsh http://127.0.0.1:3081</code>
+
+<p>
+  Its first run prints its own QR code — scan it and the app shows a second
+  machine, told apart by a fingerprint suffix when the names collide.
+  <code>bridle pair</code> needs none of this: it starts nothing, so it runs
+  happily beside a Bridle that is already up.
+</p>
+
 <h2>When it will not connect</h2>
 
 <p>Run <code>bridle doctor</code> first. It checks the chain in order and names the broken link.</p>
