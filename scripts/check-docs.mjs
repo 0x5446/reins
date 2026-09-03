@@ -255,6 +255,24 @@ for (const key of projectionKeys('### 5.3 尚未折叠的键', 'prose')) {
   }
 }
 
+// --- The software says the version it actually is ------------------------------
+//
+// `bridle status` prints this, and the Relay records it against the machine, so
+// it is the number anybody debugging reads first — "is this the build with the
+// fix in it". Two releases shipped without it moving, including the rename, so
+// every install answered 0.1.2 about code that was two versions past it. Same
+// shape as the installer ref above: one decision, several files, and nothing
+// noticing when only some of them moved.
+{
+  const released = /^## (v?\d+\.\d+\.\d+)/mu.exec(read('CHANGELOG.md'))?.[1]
+  const want = released?.replace(/^v/u, '')
+  for (const name of ['protocol', 'bridle', 'dsh-plugin', 'relay', 'e2e']) {
+    const found = JSON.parse(read(`${name}/package.json`)).version
+    expect(found === want,
+      `${name}/package.json 是 ${found}，但 CHANGELOG 最新发布版本是 ${want} —— 发版时要一起改`)
+  }
+}
+
 // --- Report ------------------------------------------------------------------
 
 if (problems.length === 0) {

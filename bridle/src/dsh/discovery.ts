@@ -160,7 +160,12 @@ export async function ensureDsh(options: EnsureOptions): Promise<DiscoveredDsh> 
   const found = await probeDsh(options.preferred, options.pinned ?? false)
   if (found !== undefined) return { url: found, launched: false }
   if (!options.autoStart) {
-    throw new Error('no dsh web server is running; start one, or run bridle with --auto-start')
+    // Naming the flag they already passed, not an `--auto-start` that does not
+    // exist: launching is the default, `--no-auto-start` is the only switch,
+    // and advice to add a flag that nothing reads sends someone looking for a
+    // bug in their command line instead of starting a harness.
+    throw new Error(
+      'no dsh web server is running; start one, or drop --no-auto-start and let bridle launch it')
   }
   // A pinned URL is also where a launched dsh must live: starting the
   // default port when the person said 3081 would bind them to a harness they
