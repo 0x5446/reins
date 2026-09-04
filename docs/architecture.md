@@ -350,7 +350,22 @@ Bridle 有两种装法，共享同一个 `BridleCore`：
 | 形态 | 命令 | 适合 |
 |---|---|---|
 | 独立进程 | `bridle` | 需要独立托管，或以后指向别的 agent |
-| dsh 插件 | `dsh plugin --profile web add @rowel/bridle-plugin` | 常见场景：一条命令，跟着 dsh 起停 |
+| dsh 插件 | 见下方 | 常见场景：跟着 dsh 起停，不必单独托管 |
+
+`@rowel/bridle-plugin` **尚未发布到 npm**，所以 `dsh plugin add @rowel/bridle-plugin`
+今天会以 404 结束。在发布之前，插件按本地路径挂载——在 dsh profile 的
+`cordis.patch.yml` 里插一行，`name` 写 `dsh-plugin/lib/index.js` 的绝对路径：
+
+```yaml
+- insert:
+    - id: rowel-bridle
+      name: /absolute/path/to/rowel/dsh-plugin/lib/index.js
+      config:
+        directPort: 61000
+```
+
+`directPort` 钉死而不是交给系统分配：手机的配对包记着它收到的直连地址，端口每次重启
+都换的话，等于悄悄退掉每一台已配对手机的局域网快路，把它们全赶到 relay 上。
 
 **插件仍然走 loopback HTTP 连它自己所在的那个 dsh。**看起来浪费，实际不是：调用不出机器，与独立二进制同一条路径、同一套测试覆盖，**两者不会漂移**。插件文件因此是生命周期包装（约 100 行），不是第二份实现。
 
